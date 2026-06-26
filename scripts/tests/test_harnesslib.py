@@ -42,6 +42,13 @@ class HarnessValidationTests(unittest.TestCase):
         )
         return fixture
 
+    def init_git_baseline(self, fixture: Path) -> None:
+        subprocess.run(["git", "init", "-b", "main"], cwd=fixture, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "config", "user.name", "Harness Test"], cwd=fixture, check=True)
+        subprocess.run(["git", "config", "user.email", "harness@example.test"], cwd=fixture, check=True)
+        subprocess.run(["git", "add", "."], cwd=fixture, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "commit", "-m", "baseline"], cwd=fixture, check=True, capture_output=True, text=True)
+
     def test_framework_manifest_and_policy_are_valid(self) -> None:
         self.assertEqual([], validate_manifest(ROOT, "current"))
         self.assertEqual([], validate_agent_policy(ROOT))
@@ -55,6 +62,108 @@ class HarnessValidationTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+    def test_docs_check_rejects_stale_project_activation_wording(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            product_readme = fixture / "docs/product-spec/README.md"
+            product_readme.write_text(
+                product_readme.read_text(encoding="utf-8")
+                + "\n当前仓库处于 `adoption` 模式，等待用户 activation。\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [str(fixture / "scripts/docs-check.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("stale adoption/spec-review or activation-pending wording", result.stderr + result.stdout)
+
+    def test_docs_check_rejects_current_mode_restatement_outside_status(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            readme = fixture / "README.md"
+            readme.write_text(
+                readme.read_text(encoding="utf-8")
+                + "\n当前项目处于 `project` 模式，可以直接实现业务代码。\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [str(fixture / "scripts/docs-check.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("current project mode must only be declared", result.stderr + result.stdout)
+
+    def test_docs_check_rejects_stale_activation_boundary_wording(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            platform_readme = fixture / "platform/README.md"
+            platform_readme.write_text(
+                platform_readme.read_text(encoding="utf-8")
+                + "\n本目录只提供 activation 阶段的非业务 full-stack/E2E 替代计划。\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [str(fixture / "scripts/docs-check.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("stale activation-boundary wording", result.stderr + result.stdout)
+
+    def test_docs_check_rejects_capability_missing_acceptance_link(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            scope = fixture / "docs/product-spec/01-product-scope.md"
+            scope.write_text(
+                scope.read_text(encoding="utf-8").replace(
+                    "`AC-MA-001` | `PV-MA-001`",
+                    "`AC-MA-999` | `PV-MA-001`",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [str(fixture / "scripts/docs-check.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("references missing acceptance rows", result.stderr + result.stdout)
+
+    def test_docs_check_rejects_validation_row_without_capability_link(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            matrix = fixture / "docs/engineering/06-product-validation-matrix.md"
+            matrix.write_text(
+                matrix.read_text(encoding="utf-8").replace("`CAP-MA-001` ", "", 1),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [str(fixture / "scripts/docs-check.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("PV-MA-001 must reference at least one CAP-MA capability row", result.stderr + result.stdout)
 
     def test_readiness_parser_accepts_chinese_headers(self) -> None:
         adoption_runtime = load_adoption_runtime()
@@ -101,7 +210,112 @@ class HarnessValidationTests(unittest.TestCase):
             (app / "package.json").write_text('{"scripts": {}}', encoding="utf-8")
             (app / "package-lock.json").write_text("{}", encoding="utf-8")
             failures = validate_manifest(fixture, "development")
-            self.assertTrue(any("frontend/backend targets" in failure for failure in failures))
+            self.assertTrue(any("frontend/backend/platform component targets" in failure for failure in failures))
+
+    def test_project_mode_rejects_unregistered_platform_component(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            rogue = fixture / "platform/rogue-adapter"
+            rogue.mkdir(parents=True)
+            (rogue / "component.json").write_text(
+                json.dumps(
+                    {
+                        "id": "rogue-adapter",
+                        "kind": "project-component",
+                        "scope": "platform",
+                        "business_behavior": "none",
+                        "allowed_before_project_mode": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            failures = validate_manifest(fixture, "development")
+            self.assertTrue(any("frontend/backend/platform component targets" in failure for failure in failures))
+            self.assertTrue(any("platform/rogue-adapter" in failure for failure in failures))
+
+    def test_spec_sync_rejects_platform_source_without_validation_matrix(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            source = fixture / "platform/processing-cli/src/meeting_assistant_cli/dependency_check.py"
+            source.write_text(source.read_text(encoding="utf-8") + "\n# platform product behavior drift\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/spec-sync-check.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Product surface changes require docs/engineering/06-product-validation-matrix.md", combined)
+            self.assertIn("platform/processing-cli/src/meeting_assistant_cli/dependency_check.py", combined)
+
+    def test_agent_workflow_rejects_platform_implementation_without_test_change(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            source = fixture / "platform/processing-cli/src/meeting_assistant_cli/dependency_check.py"
+            source.write_text(source.read_text(encoding="utf-8") + "\n# implementation changed without test\n", encoding="utf-8")
+            matrix = fixture / "docs/engineering/06-product-validation-matrix.md"
+            matrix.write_text(matrix.read_text(encoding="utf-8") + "\n<!-- platform validation reviewed -->\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/agent-workflow-check.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            combined = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Implementation changes require corresponding backend, frontend, platform, E2E, or test script changes.", combined)
+
+    def test_agent_workflow_accepts_platform_implementation_with_test_and_matrix(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            source = fixture / "platform/processing-cli/src/meeting_assistant_cli/dependency_check.py"
+            source.write_text(source.read_text(encoding="utf-8") + "\n# implementation changed with test\n", encoding="utf-8")
+            test_file = fixture / "platform/processing-cli/tests/test_dependency_check.py"
+            test_file.write_text(test_file.read_text(encoding="utf-8") + "\n# platform test updated\n", encoding="utf-8")
+            matrix = fixture / "docs/engineering/06-product-validation-matrix.md"
+            matrix.write_text(matrix.read_text(encoding="utf-8") + "\n<!-- platform validation reviewed -->\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/agent-workflow-check.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+    def test_review_report_recommends_platform_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            source = fixture / "platform/processing-cli/src/meeting_assistant_cli/dependency_check.py"
+            source.write_text(source.read_text(encoding="utf-8") + "\n# review report platform surface\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/review-report.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("platform/processing-cli/src/meeting_assistant_cli/dependency_check.py", result.stdout)
+            self.assertIn("./scripts/test-e2e-full-stack.sh", result.stdout)
+            self.assertIn("./scripts/architecture-check.sh", result.stdout)
+            self.assertIn("./scripts/security-check.sh", result.stdout)
 
     def test_insecure_agent_network_policy_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -276,6 +490,11 @@ class HarnessValidationTests(unittest.TestCase):
                 "full_stack_e2e": {
                     "compose_files": ["docker-compose.yml"],
                     "services": ["api"],
+                    "pre_start_command": [
+                        sys.executable,
+                        "-c",
+                        f"from pathlib import Path; Path({str(marker)!r}).open('a').write('prestart\\n')",
+                    ],
                     "seed_command": [
                         sys.executable,
                         "-c",
@@ -319,6 +538,7 @@ class HarnessValidationTests(unittest.TestCase):
                 text=True,
             )
             output = marker.read_text(encoding="utf-8")
+            self.assertIn("prestart", output)
             self.assertIn("docker compose -f docker-compose.yml config --quiet", output)
             self.assertIn("docker compose -f docker-compose.yml up --detach --wait api", output)
             self.assertIn("seed", output)

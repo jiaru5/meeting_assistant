@@ -149,6 +149,155 @@ if [ "$project_mode" = "project" ]; then
     docs/product-spec docs/engineering/06-product-validation-matrix.md 2>/dev/null; then
     fail "project mode cannot contain starter example placeholders"
   fi
+
+  stale_project_state_pattern='当前仓库处于 `adoption` 模式|当前项目处于 adoption/spec-review|当前 adoption 阶段允许|用户尚未审查完整持久 spec|尚未提供 product-spec 审查|仍等待用户审查|仍需用户 spec-review|等待用户.*activation|用户 spec 审查[[:space:]]*\|[[:space:]]*等待用户操作|Project activation 批准[[:space:]]*\|[[:space:]]*等待用户显式批准|用户是否已审查 product-spec[[:space:]]*\|[[:space:]]*no|用户是否已显式批准 project activation[[:space:]]*\|[[:space:]]*no'
+  if grep -n -E "$stale_project_state_pattern" \
+    README.md \
+    docs/product-spec/README.md \
+    docs/product-spec/10-open-decisions.md \
+    docs/adoption/SPEC-READINESS.md \
+    docs/adoption/DISCOVERY-LEDGER.md \
+    platform/README.md 2>/dev/null; then
+    fail "project mode contains stale adoption/spec-review or activation-pending wording"
+  fi
+
+  current_mode_restatement_pattern='当前(仓库|项目)[^[:cntrl:]]*(framework|adoption|project)[^[:cntrl:]]*模式|当前 `project` 模式|当前 `adoption` 模式|当前 `framework` 模式|本仓库已经完成 project activation|当前 Activation 状态|当前 Discovery 轮次'
+  if grep -n -E "$current_mode_restatement_pattern" \
+    README.md \
+    docs/product-spec/README.md \
+    docs/product-spec/10-open-decisions.md \
+    docs/engineering/14-greenfield-project-start.md \
+    docs/adoption/README.md \
+    docs/adoption/SPEC-READINESS.md \
+    docs/adoption/DISCOVERY-LEDGER.md \
+    platform/README.md 2>/dev/null; then
+    fail "current project mode must only be declared in docs/product-spec/PROJECT-STATUS.md"
+  fi
+
+  stale_activation_boundary_pattern='activation 前允许|activation 前的组件骨架|activation 阶段允许存在|本目录只提供 activation 阶段|当前 `project` 模式下已经存在|在 MVP activation 前'
+  if grep -n -E "$stale_activation_boundary_pattern" \
+    docs/product-spec/04-user-journeys-and-ui.md \
+    docs/product-spec/09-acceptance-criteria.md \
+    docs/engineering/01-repo-structure.md \
+    docs/engineering/02-dev-commands.md \
+    docs/engineering/10-security-and-supply-chain.md \
+    platform/README.md \
+    platform/native-app/README.md \
+    platform/processing-cli/README.md \
+    platform/e2e/README.md 2>/dev/null; then
+    fail "project mode contains stale activation-boundary wording outside historical audit docs"
+  fi
+
+  manifest_command_table_pattern='^\|[[:space:]]*`?(native-app|processing-cli|full-stack-e2e)`?[[:space:]]*\|[[:space:]]*(lint|test|build|architecture|security|sbom|smoke)[[:space:]]*\|'
+  if grep -n -E "$manifest_command_table_pattern" \
+    docs/engineering/01-repo-structure.md \
+    docs/engineering/02-dev-commands.md \
+    platform/README.md 2>/dev/null; then
+    fail "component command rows must be read from harness/project-manifest.json"
+  fi
+
+  python3 - <<'PY'
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+
+def fail(message: str) -> None:
+    print(f"docs-check failed: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def table_rows(path: Path, prefix: str) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped.startswith(f"| {prefix}"):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if cells:
+            rows.append(cells)
+    return rows
+
+
+def ids(text: str, prefix: str) -> set[str]:
+    return set(re.findall(rf"\b{re.escape(prefix)}-\d{{3}}\b", text))
+
+
+scope = Path("docs/product-spec/01-product-scope.md")
+acceptance = Path("docs/product-spec/09-acceptance-criteria.md")
+validation = Path("docs/engineering/06-product-validation-matrix.md")
+
+cap_rows = table_rows(scope, "CAP-MA-")
+ac_rows = table_rows(acceptance, "AC-MA-")
+pv_rows = table_rows(validation, "PV-MA-")
+
+cap_list = [row[0] for row in cap_rows]
+ac_list = [row[0] for row in ac_rows]
+pv_list = [row[0] for row in pv_rows]
+cap_ids = set(cap_list)
+ac_ids = set(ac_list)
+pv_ids = set(pv_list)
+
+if not cap_ids:
+    fail("project mode requires CAP-MA product capability rows in docs/product-spec/01-product-scope.md")
+if not ac_ids:
+    fail("project mode requires AC-MA acceptance rows in docs/product-spec/09-acceptance-criteria.md")
+if not pv_ids:
+    fail("project mode requires PV-MA validation rows in docs/engineering/06-product-validation-matrix.md")
+
+for name, values in (("CAP-MA", cap_list), ("AC-MA", ac_list), ("PV-MA", pv_list)):
+    if len(values) != len(set(values)):
+        fail(f"duplicate {name} IDs are not allowed")
+
+cap_to_ac: dict[str, set[str]] = {}
+cap_to_pv: dict[str, set[str]] = {}
+for row in cap_rows:
+    cap_id = row[0]
+    text = " ".join(row)
+    ac_refs = ids(text, "AC-MA")
+    pv_refs = ids(text, "PV-MA")
+    if not ac_refs:
+        fail(f"{cap_id} must reference at least one AC-MA acceptance row")
+    if not pv_refs:
+        fail(f"{cap_id} must reference at least one PV-MA validation row")
+    missing_ac = sorted(ac_refs - ac_ids)
+    missing_pv = sorted(pv_refs - pv_ids)
+    if missing_ac:
+        fail(f"{cap_id} references missing acceptance rows: {', '.join(missing_ac)}")
+    if missing_pv:
+        fail(f"{cap_id} references missing validation rows: {', '.join(missing_pv)}")
+    cap_to_ac[cap_id] = ac_refs
+    cap_to_pv[cap_id] = pv_refs
+
+referenced_ac = set().union(*cap_to_ac.values())
+referenced_pv = set().union(*cap_to_pv.values())
+missing_cap_for_ac = sorted(ac_ids - referenced_ac)
+missing_cap_for_pv = sorted(pv_ids - referenced_pv)
+if missing_cap_for_ac:
+    fail(f"AC-MA rows must be reachable from CAP-MA capability matrix: {', '.join(missing_cap_for_ac)}")
+if missing_cap_for_pv:
+    fail(f"PV-MA rows must be reachable from CAP-MA capability matrix: {', '.join(missing_cap_for_pv)}")
+
+for row in ac_rows:
+    ac_id = row[0]
+    pv_refs = ids(" ".join(row), "PV-MA")
+    if not pv_refs:
+        fail(f"{ac_id} must reference at least one PV-MA validation row")
+    missing_pv = sorted(pv_refs - pv_ids)
+    if missing_pv:
+        fail(f"{ac_id} references missing validation rows: {', '.join(missing_pv)}")
+
+for row in pv_rows:
+    pv_id = row[0]
+    cap_refs = ids(" ".join(row), "CAP-MA")
+    if not cap_refs:
+        fail(f"{pv_id} must reference at least one CAP-MA capability row")
+    missing_cap = sorted(cap_refs - cap_ids)
+    if missing_cap:
+        fail(f"{pv_id} references missing capability rows: {', '.join(missing_cap)}")
+PY
 fi
 
 python3 scripts/action-pin-check.py

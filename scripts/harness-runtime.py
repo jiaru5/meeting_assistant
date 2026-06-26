@@ -101,6 +101,9 @@ def full_stack_e2e() -> None:
         compose.extend(["-f", compose_file])
     env = os.environ.copy()
     try:
+        pre_start_command = config.get("pre_start_command", [])
+        if pre_start_command:
+            run_argv(pre_start_command, ROOT, "prepare full-stack runtime")
         run_argv(compose + ["config", "--quiet"], ROOT, "validate Compose configuration")
         run_argv(compose + ["up", "--detach", "--wait"] + services, ROOT, "start isolated full stack")
         seed_command = config.get("seed_command", [])

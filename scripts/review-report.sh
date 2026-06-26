@@ -51,7 +51,15 @@ product_surface_changed() {
     || has_match "backend/services/*/src/main/*" \
     || has_match "backend/contracts/*" \
     || has_match "frontend/apps/*/src/*" \
-    || has_match "frontend/apps/*/tests/e2e/*"
+    || has_match "frontend/apps/*/tests/e2e/*" \
+    || has_match "platform/native-app/component.json" \
+    || has_match "platform/processing-cli/component.json" \
+    || has_match "platform/native-app/Sources/*" \
+    || has_match "platform/native-app/Tests/*" \
+    || has_match "platform/native-app/UITests/*" \
+    || has_match "platform/processing-cli/src/*" \
+    || has_match "platform/processing-cli/tests/*" \
+    || has_match "platform/e2e/*"
 }
 
 project_mode() {
@@ -87,6 +95,7 @@ print_changed_subset() {
 
 recommended_validation() {
   echo '- `./scripts/docs-check.sh`'
+  echo '- `./scripts/spec-sync-check.sh`'
   if has_match "docs/adoption/*" \
     || has_match "harness/adoption-state.json" \
     || has_match "scripts/adoption-*" \
@@ -111,8 +120,22 @@ recommended_validation() {
 
   if has_match "backend/services/*/src/main/*" \
     || has_match "frontend/apps/*/src/*" \
+    || has_match "platform/native-app/Sources/*" \
+    || has_match "platform/native-app/Tests/*" \
+    || has_match "platform/native-app/UITests/*" \
+    || has_match "platform/processing-cli/src/*" \
+    || has_match "platform/processing-cli/tests/*" \
+    || has_match "platform/e2e/*" \
     || has_match "docker-compose*.yml"; then
     echo '- `./scripts/test-e2e-full-stack.sh`'
+  fi
+
+  if has_match "platform/native-app/*" \
+    || has_match "platform/processing-cli/*" \
+    || has_match "platform/e2e/*"; then
+    echo '- `./scripts/architecture-check.sh`'
+    echo '- `./scripts/security-check.sh`'
+    echo '- `./scripts/supply-chain-check.sh current`'
   fi
 }
 
@@ -199,8 +222,13 @@ REPORT
     || has_match "docs/product-spec/06-api-contracts.md" \
     || has_match "backend/services/*/src/main/java/*/api/*" \
     || has_match "backend/services/*/src/main/java/*/application/*" \
-    || has_match "backend/services/*/src/main/java/*/security/*"; then
-    echo "- Potentially impacted. Review tenant scope, current identity, service-side permission checks, service-to-service identity and audit."
+    || has_match "backend/services/*/src/main/java/*/security/*" \
+    || has_match "platform/native-app/Sources/*" \
+    || has_match "platform/native-app/Tests/*" \
+    || has_match "platform/native-app/UITests/*" \
+    || has_match "platform/processing-cli/src/*" \
+    || has_match "platform/processing-cli/tests/*"; then
+    echo "- Potentially impacted. Review tenant/workspace scope, current identity, service-side or local permission checks, service-to-service identity and audit."
   else
     echo "- No direct permission or data isolation surface detected in changed files."
   fi

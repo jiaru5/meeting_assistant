@@ -85,6 +85,13 @@ for file in "${CHANGED_FILES[@]+"${CHANGED_FILES[@]}"}"; do
     backend/services/*/src/main/*)
       product_surface_changed=true
       ;;
+    platform/processing-cli/src/*/contracts/*|platform/processing-cli/src/*/schemas/*)
+      product_surface_changed=true
+      mark_contract_level_change "$file"
+      ;;
+    platform/native-app/component.json|platform/processing-cli/component.json|platform/native-app/Sources/*|platform/native-app/Tests/*|platform/native-app/UITests/*|platform/processing-cli/src/*|platform/processing-cli/tests/*|platform/e2e/*)
+      product_surface_changed=true
+      ;;
     frontend/apps/*/src/routes.tsx|frontend/apps/*/src/shared/api/*|frontend/packages/api-client/*)
       product_surface_changed=true
       mark_contract_level_change "$file"

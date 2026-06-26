@@ -146,6 +146,8 @@ def discover_component_targets(root: Path) -> set[str]:
         targets.add(package.parent.relative_to(root).as_posix())
     for pom in (root / "backend/services").glob("*/pom.xml"):
         targets.add(pom.parent.relative_to(root).as_posix())
+    for component in (root / "platform").glob("*/component.json"):
+        targets.add(component.parent.relative_to(root).as_posix())
     return targets
 
 
@@ -164,7 +166,7 @@ def validate_manifest(root: Path, phase: str = "current") -> list[str]:
     _require(isinstance(release_policy, dict), "project manifest release_policy must be an object", failures)
 
     registered_paths: set[str] = set()
-    registered_code_paths: set[str] = set()
+    registered_component_paths: set[str] = set()
     component_ids: set[str] = set()
     production_components = 0
     if isinstance(components, list):
@@ -187,8 +189,8 @@ def validate_manifest(root: Path, phase: str = "current") -> list[str]:
                     component_path = _inside_root(root, relative_path)
                     _require(component_path.is_dir(), f"registered component path does not exist: {relative_path}", failures)
                     registered_paths.add(Path(relative_path).as_posix())
-                    if component_type in {"frontend", "backend", "worker"}:
-                        registered_code_paths.add(Path(relative_path).as_posix())
+                    if component_type in {"frontend", "backend", "worker", "platform"}:
+                        registered_component_paths.add(Path(relative_path).as_posix())
                 except HarnessValidationError as exc:
                     failures.append(str(exc))
 
@@ -273,14 +275,21 @@ def validate_manifest(root: Path, phase: str = "current") -> list[str]:
         _require(production_components > 0, "project mode requires at least one production component", failures)
         discovered = discover_component_targets(root)
         _require(
-            discovered == registered_code_paths,
-            "all frontend/backend targets must be registered exactly once in harness/project-manifest.json "
-            f"(discovered={sorted(discovered)}, registered={sorted(registered_code_paths)})",
+            discovered == registered_component_paths,
+            "all frontend/backend/platform component targets must be registered exactly once in harness/project-manifest.json "
+            f"(discovered={sorted(discovered)}, registered={sorted(registered_component_paths)})",
             failures,
         )
         if isinstance(project, dict):
             _require(project.get("name") not in {"", "HARNESS_STARTER"}, "project.name must be replaced before project mode", failures)
             _require(project.get("owner") not in {"", "UNASSIGNED"}, "project.owner must be assigned before project mode", failures)
+        full_stack = manifest.get("full_stack_e2e")
+        if isinstance(full_stack, dict) and "pre_start_command" in full_stack:
+            _require(
+                _is_argv(full_stack.get("pre_start_command")),
+                "full_stack_e2e.pre_start_command must be a non-empty argv array when set",
+                failures,
+            )
 
     if phase == "release":
         if isinstance(release_policy, dict):

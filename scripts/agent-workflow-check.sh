@@ -66,7 +66,7 @@ has_product_behavior_change() {
     case "$file" in
       example-smart_team-harness_engineering/*|docs/product-spec/PROJECT-STATUS.md)
         ;;
-      docs/product-spec/*|backend/services/*/src/main/*|backend/contracts/*|frontend/apps/*/src/*|frontend/apps/*/tests/e2e/*|frontend/packages/api-client/*|frontend/packages/ui/src/*)
+      docs/product-spec/*|backend/services/*/src/main/*|backend/contracts/*|frontend/apps/*/src/*|frontend/apps/*/tests/e2e/*|frontend/packages/api-client/*|frontend/packages/ui/src/*|platform/native-app/component.json|platform/processing-cli/component.json|platform/native-app/Sources/*|platform/native-app/Tests/*|platform/native-app/UITests/*|platform/processing-cli/src/*|platform/processing-cli/tests/*|platform/e2e/*)
         return 0
         ;;
     esac
@@ -129,6 +129,8 @@ implementation_changed=false
 if has_match "backend/services/*/src/main/*" \
   || has_match "frontend/apps/*/src/*" \
   || has_match "frontend/packages/*/src/*" \
+  || has_match "platform/native-app/Sources/*" \
+  || has_match "platform/processing-cli/src/*" \
   || has_match "backend/services/*/Dockerfile" \
   || has_match "frontend/apps/*/Dockerfile" \
   || has_match "docker-compose*.yml"; then
@@ -139,6 +141,11 @@ test_changed=false
 if has_match "backend/services/*/src/test/*" \
   || has_match "frontend/apps/*/src/*.test.*" \
   || has_match "frontend/apps/*/tests/e2e/*" \
+  || has_match "platform/native-app/Tests/*" \
+  || has_match "platform/native-app/UITests/*" \
+  || has_match "platform/native-app/tests/*" \
+  || has_match "platform/processing-cli/tests/*" \
+  || has_match "platform/e2e/*" \
   || has_match "scripts/test*.sh" \
   || has_match "scripts/db-migration-check.sh"; then
   test_changed=true
@@ -150,7 +157,7 @@ if has_engineering_workflow_change; then
 fi
 
 if [ "$implementation_changed" = true ] && [ "$test_changed" = false ]; then
-  add_failure "Implementation changes require corresponding backend, frontend, E2E, or test script changes."
+  add_failure "Implementation changes require corresponding backend, frontend, platform, E2E, or test script changes."
 fi
 
 if [ "$product_behavior_changed" = true ] && ! has_changed_file "docs/engineering/06-product-validation-matrix.md"; then
