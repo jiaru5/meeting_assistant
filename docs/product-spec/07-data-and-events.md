@@ -87,12 +87,14 @@ Phase 1 不要求消息队列。可以在元数据或日志中记录本地事件
 | EVT-MA-002 | `recording_artifact.changed.v1` | capture / processing | artifact 新增、降级或失败 | `event_id`, `session_id`, `artifact_id`, `status` | 更新元数据和回查视图 |
 | EVT-MA-003 | `transcript.generated.v1` | transcription | transcript 生成成功 | `event_id`, `session_id`, `transcript_id` | 更新会话状态 |
 | EVT-MA-004 | `processing.failed.v1` | processing | 转写或 speaker labeling 失败 | `event_id`, `session_id`, `code`, `summary` | 保留失败证据并允许重试 |
+| EVT-MA-005 | `meeting_session.deleted.v1` | export / session management | 用户确认删除会话 | `event_id`, `session_id`, `occurred_at`, `result` | 记录删除摘要；不删除 workspace 外导出文件 |
 
 事件规则：
 
 1. 事件名必须包含版本。
 2. 事件 payload 不携带完整 transcript 文本或不必要的媒体内容。
 3. 重放事件不得覆盖原始媒体文件。
+4. 删除事件只记录删除摘要，不携带被删除文件内容。
 
 ## 索引和搜索
 

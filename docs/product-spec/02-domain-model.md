@@ -133,12 +133,13 @@ MVP 应支持的 `artifact_type`：
 
 | ID | 不变量 | 影响对象 | 验证入口 |
 |---|---|---|---|
-| DM-MA-INV-001 | 每个 `MeetingSession` 必须有本地 `workspace_dir` 和元数据文件 | `MeetingSession` | `PV-MA-002` |
-| DM-MA-INV-002 | `system_audio`、`microphone_audio`、`mixed_audio` 是 MVP 目标产物；无法生成时必须登记 `capture_status` 和 `degradation_reason` | `RecordingArtifact` | `PV-MA-002` |
-| DM-MA-INV-006 | `normalized_audio` 是可重建派生产物，不能替代或覆盖原始视频和音频 | `RecordingArtifact` | `PV-MA-005` |
-| DM-MA-INV-003 | `TranscriptSegment.start_ms` 必须小于 `end_ms`，且同一 transcript 内分段按时间排序 | `TranscriptSegment` | `PV-MA-003` |
-| DM-MA-INV-004 | MVP speaker label 不得被标记为已验证真实身份 | `SpeakerLabel` | `PV-MA-004` |
-| DM-MA-INV-005 | 导出 transcript 不得改变原始 transcript 或媒体产物 | `ExportPackage`, `Transcript` | `PV-MA-005` |
+| DM-MA-INV-001 | 每个 `MeetingSession` 必须有本地 `workspace_dir` 和元数据文件 | `MeetingSession` | `PV-MA-002`, `PV-MA-003` |
+| DM-MA-INV-002 | `system_audio`、`microphone_audio`、`mixed_audio` 是 MVP 目标产物；无法生成时必须登记 `capture_status` 和 `degradation_reason` | `RecordingArtifact` | `PV-MA-003` |
+| DM-MA-INV-006 | `normalized_audio` 是可重建派生产物，不能替代或覆盖原始视频和音频 | `RecordingArtifact` | `PV-MA-006`, `PV-MA-009` |
+| DM-MA-INV-003 | `TranscriptSegment.start_ms` 必须小于 `end_ms`，且同一 transcript 内分段按时间排序 | `TranscriptSegment` | `PV-MA-007` |
+| DM-MA-INV-004 | MVP speaker label 不得被标记为已验证真实身份 | `SpeakerLabel` | `PV-MA-008` |
+| DM-MA-INV-005 | 导出 transcript 不得改变原始 transcript 或媒体产物 | `ExportPackage`, `Transcript` | `PV-MA-009`, `PV-MA-011` |
+| DM-MA-INV-007 | 删除会话只能作用于当前 workspace 内目标会话目录，不能删除 workspace 外导出文件或任意用户路径 | `MeetingSession`, `RecordingArtifact`, `ExportPackage` | `PV-MA-012` |
 
 ## 读取模型
 

@@ -20,31 +20,31 @@
 | RULE-MA-STATE-004 | `MeetingSession` | `recorded` | `processing` | 用户启动媒体处理或转写 | 锁定处理输入 artifact |
 | RULE-MA-STATE-005 | `MeetingSession` | `processing` | `transcribed` | transcript 生成成功 | 登记 transcript 和可选 speaker labels |
 | RULE-MA-STATE-006 | `MeetingSession` | `processing` | `recorded` | 处理失败但原始媒体仍可用 | 写入处理失败原因，允许重试 |
-| RULE-MA-STATE-007 | `MeetingSession` | any non-deleted | `deleted` | 用户删除会话 | 按 `07-data-and-events.md` 删除或隔离数据 |
+| RULE-MA-STATE-007 | `MeetingSession` | any non-deleted | `deleted` | 用户确认删除当前 workspace 内的会话 | 按 `07-data-and-events.md` 删除会话目录内应用管理文件；workspace 外导出文件不自动删除 |
 
 ## 产物完整性和降级
 
 | 规则 ID | 名称 | 输入 | 输出 | 口径 | 验证入口 |
 |---|---|---|---|---|---|
-| RULE-MA-ARTIFACT-001 | 三音轨目标产物 | 原生录制结果 | `system_audio`, `microphone_audio`, `mixed_audio` artifacts | 三类音频都是 MVP 目标；无法生成时对应 artifact 记录 `degraded`、`missing` 或 `failed` 及原因 | `PV-MA-002` |
-| RULE-MA-ARTIFACT-002 | 混合音频转写优先级 | 可用音频 artifacts | 转写输入 artifact | 默认使用 `mixed_audio`；若缺失，可由用户选择可用的系统音频或麦克风音频重试 | `PV-MA-003` |
-| RULE-MA-ARTIFACT-003 | 原始媒体保护 | 录制产物、处理任务 | 派生产物 | 转写、speaker labeling 和导出不得覆盖原始视频或音频文件 | `PV-MA-005` |
-| RULE-MA-ARTIFACT-004 | 标准化处理音频 | 可用音频 artifacts | `normalized_audio` | 转写和 speaker labeling 优先使用可重建的 `.wav` 标准化音频；该产物不得替代原始音轨 | `PV-MA-005` |
+| RULE-MA-ARTIFACT-001 | 三音轨目标产物 | 原生录制结果 | `system_audio`, `microphone_audio`, `mixed_audio` artifacts | 三类音频都是 MVP 目标；无法生成时对应 artifact 记录 `degraded`、`missing` 或 `failed` 及原因 | `PV-MA-003` |
+| RULE-MA-ARTIFACT-002 | 混合音频转写优先级 | 可用音频 artifacts | 转写输入 artifact | 默认使用 `mixed_audio`；若缺失，可由用户选择可用的系统音频或麦克风音频重试 | `PV-MA-006`, `PV-MA-007` |
+| RULE-MA-ARTIFACT-003 | 原始媒体保护 | 录制产物、处理任务 | 派生产物 | 转写、speaker labeling 和导出不得覆盖原始视频或音频文件 | `PV-MA-009` |
+| RULE-MA-ARTIFACT-004 | 标准化处理音频 | 可用音频 artifacts | `normalized_audio` | 转写和 speaker labeling 优先使用可重建的 `.wav` 标准化音频；该产物不得替代原始音轨 | `PV-MA-006`, `PV-MA-009` |
 
 ## 转写规则
 
 | Rule ID | 名称 | 输入 | 输出 | 口径 | 验证入口 |
 |---|---|---|---|---|---|
-| RULE-MA-TRANSCRIPT-001 | 时间戳 transcript | 音频 artifact | `Transcript` with ordered segments | 分段必须包含 `start_ms`、`end_ms` 和 text，且按时间升序 | `PV-MA-003` |
-| RULE-MA-TRANSCRIPT-002 | 失败可重试 | 音频 artifact、转写引擎 | 处理状态 | 模型缺失、依赖缺失、格式错误或运行失败不得删除原始媒体 | `PV-MA-005` |
+| RULE-MA-TRANSCRIPT-001 | 时间戳 transcript | 音频 artifact | `Transcript` with ordered segments | 分段必须包含 `start_ms`、`end_ms` 和 text，且按时间升序 | `PV-MA-007` |
+| RULE-MA-TRANSCRIPT-002 | 失败可重试 | 音频 artifact、转写引擎 | 处理状态 | 模型缺失、依赖缺失、格式错误或运行失败不得删除原始媒体 | `PV-MA-009` |
 
 ## 匿名 Speaker Label 规则
 
 | Rule ID | 名称 | 输入 | 输出 | 口径 | 验证入口 |
 |---|---|---|---|---|---|
-| RULE-MA-SPEAKER-001 | best-effort 匿名标签 | transcript segments、可用音频 | `speaker_label` | MVP 可输出 `SPEAKER_01` 这类匿名标签；不得声称真实姓名或身份 | `PV-MA-004` |
-| RULE-MA-SPEAKER-002 | 标签不覆盖文本 | transcript segments、speaker labels | transcript review | speaker label 是段落附加信息，不能修改原始转写文本 | `PV-MA-004` |
-| RULE-MA-SPEAKER-003 | 质量限制可见 | speaker labeling 结果 | 用户提示或元数据 | 如果引擎缺失、失败或无法稳定区分说话人，必须允许降级为 transcript-only，并记录原因 | `PV-MA-004` |
+| RULE-MA-SPEAKER-001 | best-effort 匿名标签 | transcript segments、可用音频 | `speaker_label` | MVP 可输出 `SPEAKER_01` 这类匿名标签；不得声称真实姓名或身份 | `PV-MA-008` |
+| RULE-MA-SPEAKER-002 | 标签不覆盖文本 | transcript segments、speaker labels | transcript review | speaker label 是段落附加信息，不能修改原始转写文本 | `PV-MA-008`, `PV-MA-009` |
+| RULE-MA-SPEAKER-003 | 质量限制可见 | speaker labeling 结果 | 用户提示或元数据 | 如果引擎缺失、失败或无法稳定区分说话人，必须允许降级为 transcript-only，并记录原因 | `PV-MA-008` |
 
 ## 时间口径
 

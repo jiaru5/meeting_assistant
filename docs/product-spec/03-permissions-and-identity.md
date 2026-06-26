@@ -39,6 +39,7 @@
 | PERM-MA-002 | `meeting_session.read` | `local_os_user` | 会话位于当前 workspace 且文件可读 | 读取会话元数据和产物 | 返回不可访问或文件缺失错误 |
 | PERM-MA-003 | `recording_artifact.write` | `local_process` | 目标路径位于当前会话目录 | 写入视频、音频、transcript 或 speaker labels | 拒绝写入并记录失败原因 |
 | PERM-MA-004 | `transcript.export` | `local_os_user` | 用户显式选择复制或导出 | 输出 transcript 文本、Markdown 或 JSON | 返回导出失败，不自动重试到外部服务 |
+| PERM-MA-005 | `meeting_session.delete` | `local_os_user` | 用户明确选择删除当前 workspace 内的目标会话 | 删除会话目录内应用管理的媒体、transcript、speaker labels、导出包和日志 | 返回删除失败或路径越界错误；不得删除 workspace 外导出文件 |
 
 ## macOS 权限
 
@@ -58,6 +59,7 @@ Phase 1 不做远程审计系统，但必须保留本地处理日志以便排错
 | 产物生成或降级 | artifact type、status、degradation reason、路径摘要 | 随会话元数据保存 |
 | 转写和 speaker labeling | 输入 artifact、模型或引擎摘要、状态、错误摘要 | 随会话元数据保存 |
 | transcript 导出 | export type、目标路径摘要或 copy action、时间 | 随会话元数据保存 |
+| 会话删除 | session id、删除时间、删除结果摘要 | 保留本地删除摘要；workspace 外导出文件由用户自行管理 |
 
 ## 前端或本地工具权限状态
 

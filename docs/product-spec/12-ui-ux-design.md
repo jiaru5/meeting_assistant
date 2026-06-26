@@ -16,14 +16,16 @@ Phase 1 控制面已确认为最小 Swift/SwiftUI app + local helper / processin
 
 ## 关键交互契约
 
-| UI ID | 场景 | 规则 | 验证入口 |
-|---|---|---|---|
-| UI-MA-RECORD-001 | 原生录制控制 | 开始、停止、录制中、失败和降级状态必须可区分 | `PV-MA-001` |
-| UI-MA-PERMISSION-001 | macOS 权限缺失 | 明确显示缺失权限和用户修复路径 | `PV-MA-001` |
-| UI-MA-DEPS-001 | 依赖检查 | 显示缺失依赖、版本、模型路径或不可用能力 | `PV-MA-006` |
-| UI-MA-TRANSCRIPT-001 | transcript 回查 | 显示时间戳、文本和匿名 speaker labels | `PV-MA-003`, `PV-MA-004` |
-| UI-MA-EXPORT-001 | transcript 复制/导出 | 明确由用户触发，不自动上传外部服务 | `PV-MA-007` |
-| UI-MA-FALLBACK-001 | speaker labeling 降级 | 无可用引擎时显示 transcript-only 状态和原因 | `PV-MA-004` |
+| UI ID | 场景 | 规则 | 覆盖能力 | 验证入口 |
+|---|---|---|---|---|
+| UI-MA-RECORD-001 | 原生录制控制 | 开始、停止、录制中、失败和降级状态必须可区分 | `CAP-MA-002`, `CAP-MA-003` | `PV-MA-002`, `PV-MA-003` |
+| UI-MA-PERMISSION-001 | macOS 权限缺失 | 明确显示缺失权限和用户修复路径，不开始对应录制 | `CAP-MA-001` | `PV-MA-001` |
+| UI-MA-DEPS-001 | 依赖检查 | 显示缺失依赖、版本、模型路径或不可用能力 | `CAP-MA-005` | `PV-MA-005` |
+| UI-MA-PROCESSING-001 | 处理状态 | 显示标准化音频、转写、speaker labeling 的处理中、失败、可重试或完成状态 | `CAP-MA-006`, `CAP-MA-007`, `CAP-MA-008`, `CAP-MA-009` | `PV-MA-006`, `PV-MA-007`, `PV-MA-008`, `PV-MA-009` |
+| UI-MA-TRANSCRIPT-001 | transcript 回查 | 显示时间戳、文本和匿名 speaker labels 或 transcript-only 降级原因 | `CAP-MA-010` | `PV-MA-010` |
+| UI-MA-EXPORT-001 | transcript 复制/导出 | 明确由用户触发，不自动上传外部服务 | `CAP-MA-011` | `PV-MA-011` |
+| UI-MA-FALLBACK-001 | speaker labeling 降级 | 无可用引擎时显示 transcript-only 状态和原因 | `CAP-MA-008` | `PV-MA-008` |
+| UI-MA-DELETE-001 | 删除会话 | 删除前显示目标会话和影响范围，要求用户明确确认；删除后显示结果摘要 | `CAP-MA-012` | `PV-MA-012` |
 
 ## 页面或本地工具状态要求
 
@@ -39,6 +41,7 @@ Phase 1 控制面已确认为最小 Swift/SwiftUI app + local helper / processin
 8. 失败并提供重试指引。
 9. transcript 可用。
 10. 导出成功/失败。
+11. 删除确认/成功/失败。
 
 ## 可访问性
 
@@ -60,3 +63,5 @@ Phase 1 控制面已确认为最小 Swift/SwiftUI app + local helper / processin
 4. `getByLabelText(name)`
 
 只有无法表达业务语义时，才使用 `data-testid`，并在测试中说明原因。
+
+对于 SwiftUI 原生界面，等价规则是使用可访问标题、button accessible name、label、状态文本和 XCUITest 可查询的 accessibility identifier。accessibility identifier 只能辅助稳定定位，不能替代用户可见或屏幕阅读器可理解的状态表达。

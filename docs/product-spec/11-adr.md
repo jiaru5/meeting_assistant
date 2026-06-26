@@ -241,3 +241,29 @@ ADR 记录决策背景、取舍和历史原因。当前可执行规则必须维�
 - 仅 CLI/helper：拒绝，因为 macOS 权限和录制状态需要可见的原生控制面。
 - 在骨架前锁定具体 transcription 和 diarization runtime：拒绝，因为这会在 command contract 稳定前让模型/runtime 选择成为 blocker。
 - 自动下载依赖：MVP 拒绝，因为会扩大网络、模型 provenance 和 agent-policy 范围。
+
+## ADR-20260626-07: Phase 2 使用本地组件纵切和原生 UI 测试
+
+状态：Accepted
+
+背景：
+- Project activation 后，`native-app` 和 `processing-cli` 已存在为非业务 skeleton，但产品行为验证矩阵仍为 `planned`。
+- Meeting Assistant Phase 1 是本地 macOS 工具，不是 Web/API/数据库系统；继续沿用通用 web/backend/db Phase 2 会制造错误的实现方向。
+- 原生 macOS capture 是主路径，但系统音频 capture 可能存在平台能力和权限限制，需要在不破坏 native-first 决策的前提下定义 fallback 治理。
+
+决策：
+- Phase 2 改为 `processing-cli` 命令契约优先，再接最小 `native-app` Swift/SwiftUI 控制面的本地纵切。
+- `processing-cli` 先落地 `check_dependencies`、稳定 JSON 响应、错误码、artifact contract、adapter fake、speaker-label transcript-only fallback 和导出契约。
+- 原生 UI 自动化使用 Swift Testing 覆盖状态和 view model，使用 XCUITest 覆盖 SwiftUI 关键用户状态；Playwright 只在未来引入 Web UI 时使用。
+- 原生 macOS 录制仍为主路径；辅助 capture adapter 只能在技术 spike 证明 native capture 不可行或不稳定后，经 spec-change、ADR 和验证矩阵更新纳入。
+
+影响：
+- `docs/engineering/07-development-plan.md` 不再把 Phase 2 定义为通用 Web/后端/数据库纵切。
+- `docs/engineering/03-test-strategy.md` 需要包含 Processing CLI、Swift Testing 和 XCUITest 的项目测试分层。
+- `docs/engineering/06-product-validation-matrix.md` 必须按真实本地组件证据推进 `PV-MA-*`，不能把 skeleton smoke 当作产品覆盖。
+- `docs/product-spec/06-api-contracts.md` 需要细化 `check_dependencies` 的稳定响应和缺失依赖失败语义。
+
+备选方案：
+- 先创建 Web 前端、远程后端服务和数据库：拒绝，因为 Phase 1 产品事实是本地 macOS 文件化工具。
+- 使用 Playwright 作为当前原生 UI 主测试工具：拒绝，因为当前没有 Web UI，SwiftUI 状态应通过 Swift/XCTest 体系验证。
+- 在代码中直接切换到 OBS/BlackHole/FFmpeg 主录制：拒绝，因为这会绕开已确认的 native-first 产品决策。

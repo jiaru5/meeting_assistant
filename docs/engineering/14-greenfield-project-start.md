@@ -117,8 +117,8 @@ Agent 每轮输出应包含：
 ## Project mode 后给 Agent 的 prompt
 
 ```text
-当前仓库已进入 project 模式。
-请读取 AGENTS.md、docs/product-spec/README.md、docs/engineering/README.md、与当前任务相关的主责分卷、docs/engineering/06-product-validation-matrix.md。
+请先读取 AGENTS.md、docs/product-spec/PROJECT-STATUS.md、docs/product-spec/README.md、docs/engineering/README.md、与当前任务相关的主责分卷、docs/engineering/06-product-validation-matrix.md。
+只有当 PROJECT-STATUS.md 声明 mode: project 时，才按 project 工作流开始实现。
 
 本次目标是实现第一条最小可验证纵切。
 必须先给出 spec sync 分类，确认对应 AC-* 和 PV-*，再实现。

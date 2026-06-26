@@ -20,6 +20,23 @@
 | Adoption 生命周期测试 | Python unittest、shell | 初始需求空缺、假设未确认、readiness blocker、无确认激活、project 切换回滚 |
 | 安全测试 | SAST、SCA、secret、IaC/container scan、DAST | 漏洞和供应链风险 |
 
+## Meeting Assistant 测试分层
+
+Phase 1 是本地 macOS 工具，不以 Web 前端、远程 HTTP API 或数据库作为默认纵切。当前项目的测试映射是：
+
+| 层级 | 工具 | 覆盖重点 |
+|---|---|---|
+| Processing CLI 单元测试 | Python unittest 或后续等价工具 | 本地命令响应、错误码、dependency-check、artifact contract、adapter fake |
+| 本地命令契约测试 | JSON schema/assertions | `CMD-MA-*` 输入、输出、错误 code 和 fail-fast 行为 |
+| Native app 状态测试 | Swift Testing | Swift/SwiftUI view model、权限/依赖状态、录制状态转换 |
+| Native UI smoke | XCUITest | 开始/停止、权限缺失、录制中、失败/降级、导出入口和 accessible locator |
+| 本地文件契约测试 | Python/Swift 测试 | `session.json`、artifact registry、原始媒体保护、派生产物重试 |
+| Smoke E2E | manifest 驱动脚本 | `native-app` + `processing-cli` + workspace fixture 的受控端到端路径 |
+
+Playwright 只在后续引入 Web UI 时作为 Web mocked/full-stack E2E 工具；当前 native macOS UI 自动化优先使用 Swift Testing 和 XCUITest。
+
+`platform/native-app/Sources/`、`platform/native-app/Tests/`、`platform/native-app/UITests/`、`platform/processing-cli/src/`、`platform/processing-cli/tests/` 和 `platform/e2e/` 是当前产品行为和产品验证的主要代码表面。修改这些路径时，工程门禁必须要求同步检查 `06-product-validation-matrix.md`，并运行对应组件测试、架构检查和 local full-stack smoke。Local full-stack smoke 必须优先使用已缓存或预加载的本地 smoke 镜像，不得在 E2E 执行阶段隐式依赖公网 registry 拉取。
+
 ## 验收标准映射
 
 | 规范来源 | 必须覆盖的测试 |
@@ -30,6 +47,7 @@
 | `06-api-contracts.md` | API 合约测试、前端 API client 测试 |
 | `07-data-and-events.md` | migration、repository、事件契约、消费者幂等测试 |
 | `12-ui-ux-design.md` | 前端组件测试、Playwright E2E、视觉和可访问性检查 |
+| `12-ui-ux-design.md` 的原生 macOS UI | Swift Testing、XCUITest、可访问性 locator 检查 |
 
 ## 高风险边界
 
@@ -68,3 +86,5 @@
 9. 修改 Harness 生命周期、安全策略或发布门禁时，必须补 `scripts/tests/` 的失败路径测试。
 10. 发布候选的 full-stack E2E 必须实际启动 Compose 服务并等待健康检查，不能只执行 `docker compose config`。
 11. 修改 adoption 流程、启动脚本、readiness 规则或 project activation 时，必须补 `scripts/tests/` 的失败路径测试，并运行 `./scripts/adoption-check.sh`。
+12. 修改 `processing-cli` 命令契约、dependency-check 或 artifact contract 时，必须补本地命令契约测试，并更新 `06-product-validation-matrix.md`。
+13. 修改 `native-app` SwiftUI 状态、权限提示或录制控制时，必须补 Swift Testing；关键用户状态补 XCUITest 或说明短期 manual-evidence。

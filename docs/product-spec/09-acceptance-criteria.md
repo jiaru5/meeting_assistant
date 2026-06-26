@@ -15,25 +15,32 @@
 
 ## MVP 验收标准
 
-| AC ID | 场景 | 前置条件 | 操作 | 期望结果 | 验证矩阵 |
+| AC ID | 能力 | 前置条件 | 操作 | 期望结果 | 验证矩阵 |
 |---|---|---|---|---|---|
-| AC-MA-001 | 原生录制创建会议会话 | Apple Silicon Mac，macOS 26.5.1，录屏/麦克风/文件权限满足或可检测 | 用户通过最小 Swift/SwiftUI app 启动原生录制并停止 | 生成 `MeetingSession`、`screen_video`、音频 artifact 登记和会话元数据；缺失权限时明确失败 | `PV-MA-001` |
-| AC-MA-002 | 三类音频产物和降级记录 | 原生录制完成 | 系统登记媒体产物 | `system_audio`、`microphone_audio`、`mixed_audio` 均成功登记；无法生成的产物必须有 `capture_status` 和 `degradation_reason`；处理输入可派生 `normalized_audio` | `PV-MA-002` |
-| AC-MA-003 | 生成带时间戳 transcript | 可用 `mixed_audio`、`normalized_audio` 或用户选择的音频 artifact，transcription adapter 可用 | 用户运行转写 | 生成按时间排序的 transcript segments，每段包含 `start_ms`、`end_ms` 和文本 | `PV-MA-003` |
-| AC-MA-004 | best-effort 匿名 speaker labels | transcript 已生成，speaker labeling 依赖可用或明确不可用 | 用户运行 speaker labeling | 可用时为 segments 添加匿名 labels；不可用或失败时降级 transcript-only 并记录原因；不得声称真实身份 | `PV-MA-004` |
-| AC-MA-005 | 文件化流水线可重试 | 已有会话和原始媒体 | 用户重新运行转写、speaker labeling 或导出 | 派生产物可重新生成，原始视频和音频不被覆盖 | `PV-MA-005` |
-| AC-MA-006 | bootstrap/check 依赖检查 | 新环境或依赖变化 | 用户运行依赖检查 | 输出 macOS/架构、工具链、媒体工具、transcription adapter/runtime、speaker labeling runtime、workspace、权限状态和允许来源提示；不自动下载依赖 | `PV-MA-006` |
-| AC-MA-007 | 用户手动导出 transcript | transcript 已生成 | 用户复制或导出 transcript | 产出 text/Markdown/JSON 中至少一种格式；应用不自动上传到 GPT 或外部 API | `PV-MA-007` |
+| AC-MA-001 | 录制前权限和环境预检 | Apple Silicon Mac，macOS 26.5.1，用户打开最小 Swift/SwiftUI app 或运行依赖检查 | 系统检查录屏、麦克风、文件写入、workspace、工具链和关键本地依赖状态 | 缺失必需权限或依赖时明确失败或阻断对应操作；UI 或命令输出指出缺失项和修复入口；不静默开始录制或处理 | `PV-MA-001` |
+| AC-MA-002 | 原生录制启动、持续状态和停止保存 | 录制前检查通过或缺失项已被用户修复 | 用户通过最小 Swift/SwiftUI app 启动原生录制并停止 | 创建 `MeetingSession`，状态从 `created` 进入 `recording` 再进入 `recorded` 或明确失败；录制中状态持续可见；停止后给出保存结果 | `PV-MA-002` |
+| AC-MA-003 | 会话和录制产物登记 | 原生录制结束，至少一个媒体产物可用或某类产物明确失败 | 系统登记录制结果 | 写入 `session.json` 和 artifact 列表；`screen_video`、`system_audio`、`microphone_audio`、`mixed_audio` 按可用性登记；无法生成的目标产物必须有 `capture_status` 和 `degradation_reason` | `PV-MA-003` |
+| AC-MA-004 | 导入已有媒体作为回退或测试路径 | 用户有本地媒体文件，且文件路径由用户显式选择 | 用户运行 `import_media` | 创建 `source_type=imported_media` 的 `MeetingSession`；登记可处理的媒体 artifact；不把导入路径当成系统默认录制路径；格式不支持时返回 `invalid_input` | `PV-MA-004` |
+| AC-MA-005 | 本地依赖检查 | 新环境、依赖变化或处理前检查 | 用户运行 `check_dependencies`，自动化验证使用 `format=json` | 输出 macOS/架构、Swift 工具链、媒体工具、transcription adapter/runtime、speaker labeling runtime、workspace、权限状态和允许来源提示；缺失必需依赖时 `ok=false`；不自动下载模型、二进制或驱动 | `PV-MA-005` |
+| AC-MA-006 | 标准化处理音频和输入选择 | 会话存在可用音频 artifact | 用户启动处理或选择音频源 | 默认优先使用 `mixed_audio`；缺失时允许用户选择可用音频；生成可重建的 `.wav` `normalized_audio`；不得覆盖 `system_audio`、`microphone_audio` 或 `mixed_audio` 原始/目标产物 | `PV-MA-006` |
+| AC-MA-007 | 生成带时间戳 transcript | 可用 `mixed_audio`、`normalized_audio` 或用户选择的音频 artifact，transcription adapter 可用 | 用户运行 `generate_transcript` | 生成当前有效 `Transcript`；segments 按时间排序，每段包含 `start_ms`、`end_ms` 和文本；转写失败保留原始媒体和失败原因 | `PV-MA-007` |
+| AC-MA-008 | best-effort 匿名 speaker labels 和 transcript-only 降级 | transcript 已生成，speaker labeling 依赖可用或明确不可用 | 用户运行 `generate_speaker_labels` | 可用时为 segments 添加 `SPEAKER_01` 这类匿名 labels；不可用或失败时降级 transcript-only 并记录原因；不得声称真实身份或把 `is_verified_identity` 置为 `true` | `PV-MA-008` |
+| AC-MA-009 | 文件化流水线重试和原始媒体保护 | 已有会话和原始媒体 | 用户重新运行标准化音频、转写、speaker labeling 或导出 | 派生产物可重新生成或失败后重试；原始视频和音频不被覆盖；同一会话的并发写入冲突必须返回可解释错误 | `PV-MA-009` |
+| AC-MA-010 | transcript 回查状态 | transcript 已生成，speaker labels 可用或处于 transcript-only 降级 | 用户打开 transcript 回查入口 | 显示会话标题或时间、时间戳 segments、文本和匿名 speaker labels 或降级原因；不把 speaker labels 表述为真实身份 | `PV-MA-010` |
+| AC-MA-011 | transcript 复制或导出，且不自动上传外部工具 | transcript 已生成 | 用户复制或运行 `export_transcript` | 产出 `plain_text`、`markdown`、`json` 中至少一种格式或返回可复制文本；外部 GPT 处理仅由用户主动发起；应用不保存外部 API key、不自动上传 transcript、音频或视频 | `PV-MA-011` |
+| AC-MA-012 | 删除本地会议会话 | 会话位于当前 workspace，用户明确选择删除该会话 | 用户运行 `delete_session` 或在本地 UI 中确认删除 | 删除该会话目录内的媒体、transcript、speaker labels、导出包和日志；返回删除摘要；workspace 外导出文件不被自动删除；路径不存在或越界时返回可解释错误 | `PV-MA-012` |
 
 ## 高风险验收维度
 
 1. macOS 权限：录屏、麦克风和文件访问缺失时必须 fail closed。
-2. 录制产物：视频和三类音频 artifact 必须可登记，缺失时必须可解释。
-3. 本地依赖：FFmpeg 或兼容媒体能力、转写 runtime、speaker labeling runtime 缺失时必须可检测。
-4. 数据保护：原始媒体不得被转写、speaker labeling 或导出覆盖。
-5. 外部工具边界：GPT 仅是用户手动复制后的外部行为，应用不自动上传会议内容。
-6. Apple Silicon + macOS 26.5.1：MVP 验收环境以当前确认平台为准。
-7. 组件边界：activation 前允许的骨架只能验证命令和契约，不实现真实业务行为。
+2. 录制状态：录制中、停止保存、失败和降级状态必须可区分。
+3. 录制产物：视频和三类音频 artifact 必须可登记，缺失时必须可解释。
+4. 本地依赖：FFmpeg 或兼容媒体能力、转写 runtime、speaker labeling runtime 缺失时必须可检测。
+5. 数据保护：原始媒体不得被标准化处理、转写、speaker labeling 或导出覆盖。
+6. 外部工具边界：GPT 仅是用户手动复制后的外部行为，应用不自动上传会议内容。
+7. 删除边界：删除会话只作用于当前 workspace 内的目标会话目录，不能删除 workspace 外导出文件或任意用户路径。
+8. Apple Silicon + macOS 26.5.1：MVP 验收环境以当前确认平台为准。
+9. 组件边界：非业务工程 skeleton 只能验证命令和契约，不实现或证明真实产品行为。
 
 ## 发布前验收
 

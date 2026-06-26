@@ -23,6 +23,22 @@
 | CMD-MA-005 | `generate_transcript` | `recording_artifact.write` | 通过 transcription adapter 从可用音频生成 transcript |
 | CMD-MA-006 | `generate_speaker_labels` | `recording_artifact.write` | 为 transcript 生成 best-effort 匿名 speaker labels |
 | CMD-MA-007 | `export_transcript` | `transcript.export` | 导出 transcript 到本地文件或复制缓冲区 |
+| CMD-MA-008 | `delete_session` | `meeting_session.delete` | 删除当前 workspace 内目标会话目录中的应用管理产物 |
+
+## 命令到能力映射
+
+本表只说明命令如何承接 `01-product-scope.md` 的能力 ID。命令字段、错误结构和外部集成边界仍以本文件其他章节为准。
+
+| 命令 | 主要能力 | 必须验证的产品结果 | 验证入口 |
+|---|---|---|---|
+| `start_native_recording` | `CAP-MA-001`, `CAP-MA-002` | 录制前权限和环境不足时 fail closed；检查通过后创建会话并进入录制中状态 | `PV-MA-001`, `PV-MA-002` |
+| `stop_recording` | `CAP-MA-002`, `CAP-MA-003` | 停止当前录制，写入会话状态、媒体产物登记和降级原因 | `PV-MA-002`, `PV-MA-003` |
+| `import_media` | `CAP-MA-004`, `CAP-MA-006` | 登记用户显式选择的媒体，作为处理回退或测试路径；不改变原生录制主路径 | `PV-MA-004`, `PV-MA-006` |
+| `check_dependencies` | `CAP-MA-001`, `CAP-MA-005` | 稳定输出本地依赖、workspace、权限和允许来源状态；必需依赖缺失时 `ok=false` | `PV-MA-001`, `PV-MA-005` |
+| `generate_transcript` | `CAP-MA-006`, `CAP-MA-007`, `CAP-MA-009` | 使用可用音频或 `normalized_audio` 生成按时间排序的 transcript；失败不覆盖原始媒体 | `PV-MA-006`, `PV-MA-007`, `PV-MA-009` |
+| `generate_speaker_labels` | `CAP-MA-008`, `CAP-MA-009` | 输出匿名 labels 或 transcript-only 降级原因；不声称真实身份、不覆盖 transcript 文本 | `PV-MA-008`, `PV-MA-009` |
+| `export_transcript` | `CAP-MA-010`, `CAP-MA-011` | 导出或返回可复制 transcript；不自动上传到 GPT 或外部模型 API | `PV-MA-010`, `PV-MA-011` |
+| `delete_session` | `CAP-MA-012` | 删除当前 workspace 内目标会话目录中的应用管理文件；不删除 workspace 外导出文件 | `PV-MA-012` |
 
 ## 命令输入
 
@@ -49,6 +65,13 @@
 | `path` | path | yes | 用户显式选择的本地媒体文件 |
 | `title` | string | no | 可选会话标题 |
 
+### `check_dependencies`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `workspace_dir` | path | no | 要检查的会议 workspace；缺省使用默认 workspace |
+| `format` | enum `json`, `pretty` | no | 输出格式；自动化验证使用 `json` |
+
 ### `generate_transcript`
 
 | 字段 | 类型 | 必填 | 说明 |
@@ -74,6 +97,14 @@
 | `export_type` | enum `plain_text`, `markdown`, `json` | yes | 导出格式 |
 | `target_path` | path | no | 如为空，则可复制到剪贴板或返回文本 |
 
+### `delete_session`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `session_id` | string | yes | 目标会话 |
+| `workspace_dir` | path | no | 要删除的会话所在 workspace；缺省使用默认 workspace 或当前配置 workspace |
+| `confirm` | boolean | yes | 必须为 `true`，表示用户明确确认删除该会话 |
+
 ## 命令响应
 
 所有命令返回稳定结构：
@@ -84,6 +115,26 @@
   "request_id": "local-...",
   "session_id": "session-...",
   "artifacts": [],
+  "warnings": []
+}
+```
+
+`check_dependencies` 成功或失败都必须返回稳定 `checks` 列表。缺失必需依赖时 `ok` 为 `false`，不能把缺失项当成成功。
+
+```json
+{
+  "ok": false,
+  "request_id": "local-...",
+  "command": "check_dependencies",
+  "code": "dependency_missing",
+  "checks": [
+    {
+      "id": "media_tool.ffmpeg",
+      "status": "missing",
+      "required": true,
+      "message": "FFmpeg executable was not found"
+    }
+  ],
   "warnings": []
 }
 ```
@@ -111,6 +162,7 @@
 | `capture_failed` | 原生录制启动或结束失败 |
 | `processing_failed` | 转写或 speaker labeling 失败 |
 | `path_conflict` | 会话目录、导出路径或 lock 冲突 |
+| `not_found` | 目标会话、产物或路径不存在 |
 | `internal_error` | 未预期错误 |
 
 ## 外部集成边界

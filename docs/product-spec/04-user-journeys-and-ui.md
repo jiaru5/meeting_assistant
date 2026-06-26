@@ -10,7 +10,7 @@
 | SURFACE-MA-002 | Local helper / processing CLI | `ROLE-MA-LOCAL-USER` | 执行依赖检查、媒体处理、转写、speaker labeling 和导出命令 | confirmed for MVP |
 | SURFACE-MA-003 | Transcript review/export surface | `ROLE-MA-LOCAL-USER` | 回查 transcript，复制或导出文本 | planned |
 
-Phase 1 采用最小 Swift/SwiftUI app + local helper / processing CLI 的组合。activation 前允许只创建非业务骨架来注册 manifest 和门禁；真实录制、转写和 speaker labeling 行为只能在 project 模式后实现。
+Phase 1 采用最小 Swift/SwiftUI app + local helper / processing CLI 的组合。非业务工程 skeleton 只用于注册 manifest 和门禁，不能替代本分卷定义的真实录制、转写和 speaker labeling 行为。
 
 ## 用户旅程
 
@@ -21,13 +21,25 @@ Phase 1 采用最小 Swift/SwiftUI app + local helper / processing CLI 的组合
 | JRN-MA-003 | 处理会议产物 | 用户选择一个已录制会话；运行依赖检查；选择音频源；启动转写和 best-effort speaker labeling | 生成带时间戳 transcript，分段可带匿名 speaker labels | 依赖缺失、模型缺失、音频不可处理、处理失败 |
 | JRN-MA-004 | 回查和导出 transcript | 用户打开 transcript；按时间戳回查；复制或导出 transcript 到本地文件；可手动粘贴到 GPT | transcript 可复制或导出，原始媒体和 transcript 不被修改 | transcript 不存在、导出路径不可写、外部 GPT 工具不可用 |
 | JRN-MA-005 | 导入已有媒体作为回退或测试路径 | 用户选择本地媒体文件；系统登记为 `imported_media` 会话；处理音频并生成 transcript | 可不依赖现场录制验证处理流水线 | 文件格式不支持、缺少音频轨、转写失败 |
+| JRN-MA-006 | 删除本地会议会话 | 用户选择当前 workspace 内的会话；确认删除；系统删除会话目录内应用管理文件并返回摘要 | 会话目录内媒体、transcript、speaker labels、导出包和日志被删除；workspace 外导出文件不被自动删除 | 会话不存在、路径越界、文件权限不足、删除部分失败 |
+
+## 旅程到能力映射
+
+| Journey ID | 覆盖能力 | 最小完成口径 | 验证入口 |
+|---|---|---|---|
+| JRN-MA-001 | `CAP-MA-001`, `CAP-MA-002`, `CAP-MA-003` | 原生录制线上会议必须覆盖权限预检、开始/停止、录制中状态、媒体 artifact 登记和降级提示 | `PV-MA-001`, `PV-MA-002`, `PV-MA-003` |
+| JRN-MA-002 | `CAP-MA-001`, `CAP-MA-002`, `CAP-MA-003` | 现场讨论必须至少覆盖麦克风权限、录制状态、音频产物登记和失败提示 | `PV-MA-001`, `PV-MA-002`, `PV-MA-003` |
+| JRN-MA-003 | `CAP-MA-005`, `CAP-MA-006`, `CAP-MA-007`, `CAP-MA-008`, `CAP-MA-009` | 处理路径必须先暴露依赖状态，再生成可重建处理输入、transcript、匿名 labels 或 transcript-only 降级，并保护原始媒体 | `PV-MA-005`, `PV-MA-006`, `PV-MA-007`, `PV-MA-008`, `PV-MA-009` |
+| JRN-MA-004 | `CAP-MA-010`, `CAP-MA-011` | 回查路径必须显示时间戳文本和匿名 labels 或降级原因；导出或复制必须由用户主动触发 | `PV-MA-010`, `PV-MA-011` |
+| JRN-MA-005 | `CAP-MA-004`, `CAP-MA-006`, `CAP-MA-007` | 导入媒体只作为回退或测试路径，不改变原生录制主路径；导入后可进入标准处理流水线 | `PV-MA-004`, `PV-MA-006`, `PV-MA-007` |
+| JRN-MA-006 | `CAP-MA-012` | 删除路径必须要求用户明确确认，只删除当前 workspace 内目标会话目录中的应用管理文件，并明确 workspace 外导出文件不受影响 | `PV-MA-012` |
 
 ## 组件交互契约
 
 1. Swift/SwiftUI app 负责用户可见的录制控制、权限提示和录制状态。
 2. Local helper / processing CLI 负责非交互任务，包括依赖检查、媒体处理、转写、speaker labeling 和导出。
 3. 两者只通过 `06-api-contracts.md` 的本地命令契约以及 `07-data-and-events.md` 的文件/元数据契约协作。
-4. activation 前的组件骨架不得实现真实录制、真实转写或真实 speaker labeling 行为。
+4. 非业务工程 skeleton 不得被当作真实录制、真实转写或真实 speaker labeling 行为。
 
 ## 关键状态要求
 
@@ -38,6 +50,7 @@ Phase 1 采用最小 Swift/SwiftUI app + local helper / processing CLI 的组合
 | UI-MA-STATE-003 | 产物降级 | 指出缺失或降级的 artifact type 和原因，保留已成功产物 |
 | UI-MA-STATE-004 | 处理失败 | 保留原始媒体和失败日志，允许重试 |
 | UI-MA-STATE-005 | transcript 可用 | 显示或导出带时间戳文本和匿名 speaker labels |
+| UI-MA-STATE-006 | 删除确认和结果 | 删除前显示目标会话和影响范围；删除后显示成功、部分失败或路径错误摘要 |
 
 ## 原生录制旅程契约
 

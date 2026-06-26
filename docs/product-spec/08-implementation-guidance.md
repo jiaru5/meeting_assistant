@@ -16,7 +16,7 @@
 
 | 领域 | MVP 方向 | 状态 |
 |---|---|---|
-| 录制 | 原生 macOS 录制优先 | confirmed |
+| 录制 | 原生 macOS 录制优先；辅助 capture adapter 只能在技术 spike 证明 native 不可行后经 spec-change/ADR 纳入 | confirmed |
 | 媒体处理 | 本地媒体处理工具，候选包括 FFmpeg 或兼容能力 | 已确认方向；具体依赖后续确定 |
 | 转写 | Adapter-first 本地转写；首个候选可复用现有本地 Whisper | confirmed |
 | Speaker labeling | 本地 best-effort 匿名 speaker labeling；无可用引擎时降级 transcript-only | confirmed |
@@ -83,6 +83,16 @@ flowchart LR
 3. 原生控制面采用最小 Swift/SwiftUI app + local helper / processing CLI 的组合。
 4. 具体 capture API、录制目标支持范围、视频编码、音频捕获方式和权限细节可以在组件骨架阶段以 adapter 方式细化，但不得改变 `07-data-and-events.md` 的 artifact contract。
 5. 录制层必须是可替换 adapter，不得和转写、speaker labeling 或导出强耦合。
+6. 如果系统音频或目标 capture 在 MVP 环境中被技术 spike 证明不可行或不稳定，只能先记录证据，并通过 `10-open-decisions.md`、ADR、主责分卷和验证矩阵更新后，才允许把 OBS/BlackHole/FFmpeg 等辅助路径纳入实现范围。
+
+## Phase 2 实现顺序
+
+Phase 2 按本地组件纵切推进，不先创建 Web 前端、远程后端服务或数据库：
+
+1. `processing-cli` 先实现 `check_dependencies`、稳定命令响应、错误码和契约测试。
+2. 再实现 artifact contract、导入媒体、normalized audio、transcript adapter fake、speaker-label transcript-only fallback 和导出。
+3. `native-app` 负责最小 Swift/SwiftUI 控制面，并通过 Swift Testing 与 XCUITest 验证关键状态。
+4. 每个真实产品行为进入实现时，必须同步更新对应 `PV-MA-*` 状态和证据。
 
 ## Bootstrap/Check 策略
 
@@ -106,13 +116,15 @@ Phase 1 采用 bootstrap/check 脚本，而不是一次性打包所有依赖。�
 3. 依赖路径、模型路径和 workspace 路径应可配置。
 4. 生产或团队内部分发前必须重新审查签名、公证、自动更新、许可证和数据策略。
 
-## Activation 骨架计划
+## Activation 骨架边界
 
-activation 前允许创建最小非业务组件骨架，用于注册 manifest、门禁和 E2E 计划：
+project activation 时已经创建最小非业务组件骨架，用于注册 manifest、门禁和 E2E 计划：
 
 1. `native-app` skeleton：最小 Swift/SwiftUI app 结构和空录制控制入口，不实现真实录制。
 2. `processing-cli` skeleton：依赖检查、处理命令和 adapter 接口骨架，不实现真实转写或 speaker labeling。
 3. full-stack/E2E 在本地应用语境下定义为“component skeleton + dependency-check + artifact contract smoke test”的受控组合；不要求远程服务或数据库。
+
+后续在这些组件内实现真实产品行为时，必须先对齐对应 `AC-MA-*` 和 `PV-MA-*`，补充自动化测试，并把验证矩阵状态从 `planned` 推进到真实覆盖状态。
 
 ## 可观测性
 

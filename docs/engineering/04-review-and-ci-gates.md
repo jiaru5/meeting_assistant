@@ -41,18 +41,21 @@ agent 完成非平凡改动后，必须生成可复制到 PR 或交付说明中�
 
 1. 产品表面改动是否通过 `./scripts/spec-sync-check.sh`。
 2. 产品行为变更是否检查验证矩阵。
-3. 实现变更是否有对应测试或测试脚本变更。
+3. 实现变更是否有对应 backend、frontend、platform、E2E 或测试脚本变更。
 4. 工程流程、Docker、CI 或脚本变更是否同步 `docs/engineering/`。
 5. shell 脚本是否通过语法检查。
 6. `scripts/review-report.sh --check` 是否可生成必要章节。
 7. 项目清单和 Agent 权限策略是否有效。
 8. Harness 自测试是否覆盖新增失败路径。
 9. Adoption 生命周期变更是否通过 `./scripts/adoption-check.sh`，且 activation 不能绕过用户确认。
-10. 仅由 `docs/product-spec/PROJECT-STATUS.md` 和 `harness/adoption-state.json` 组成的 activation lifecycle diff 不属于产品行为变更，不要求额外更新 validation matrix；仍必须通过 activation check、manifest check 和 workflow check。
+10. 当前 mode 值只能由 `docs/product-spec/PROJECT-STATUS.md` 声明；README、adoption 审计文档、platform README 和 open decisions 只能引用该文件或记录历史审计，不能复述当前 mode。
+11. 仅由 `docs/product-spec/PROJECT-STATUS.md` 和 `harness/adoption-state.json` 组成的 activation lifecycle diff 不属于产品行为变更，不要求额外更新 validation matrix；仍必须通过 activation check、manifest check 和 workflow check。
+12. 组件路径、组件命令和 full-stack E2E 入口只能以 `harness/project-manifest.json` 为可执行注册表；工程文档可以定义命令类型和边界，但不能复制一份可独立维护的当前命令表。
+13. `platform/native-app`、`platform/processing-cli` 和 `platform/e2e` 下的产品源码、产品测试、组件元数据和 local E2E 变更必须纳入产品表面、测试覆盖和 review report 推荐验证判断。
 
-## CI 必过项
+## 本地和 CI 必过项
 
-项目初始化后，CI 至少包含：
+项目初始化后，本地标准门禁和 CI 至少包含：
 
 ```text
 docs-check
@@ -83,11 +86,11 @@ docker-build
 release-preflight
 ```
 
-`.github/workflows/release.yml` 是 release preflight 入口。它在 starter/framework 阶段按预期失败；只有 project 模式、真实组件、生产工件和发布验证全部就绪后才能变绿。
+`./scripts/release-preflight.sh` 是 release preflight 的当前标准入口。若接入 GitHub Actions，`.github/workflows/release.yml` 应调用该脚本；只有 project 模式、真实组件、生产工件和发布验证全部就绪后才能变绿。
 
 ## 仓库保护
 
-adoption 阶段必须在代码托管平台配置：
+代码托管平台应配置：
 
 1. 保护默认分支，禁止 Agent 或普通开发者直接 push。
 2. 只允许通过 PR 合并，并要求至少一个独立人工 reviewer。

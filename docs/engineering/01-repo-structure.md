@@ -37,7 +37,7 @@
 ├── docker-compose.yml
 ├── docker-compose.test.yml
 ├── .env.example
-└── .github/workflows/ci.yml
+└── .env.prod.example
 ```
 
 ## 前端模块边界
@@ -117,16 +117,16 @@ backend/services/<service-name>/
 5. 宿主机 Node、Java、Maven 只能作为快速内循环工具，不能成为部署前提。
 6. 数据库、中间件、队列、缓存、对象存储、邮件服务等必须作为容器服务启动。
 
-## Platform activation 骨架
+## Platform skeleton 边界
 
-`platform/` 当前包含 `meeting_assistant` 进入 project 模式前允许存在的非业务 activation skeleton：
+`platform/` 中的组件注册、命令和 full-stack E2E 入口以 `harness/project-manifest.json` 为唯一工程事实源。本分卷只定义 platform skeleton 的目录职责和行为边界：
 
-1. `platform/native-app/`：注册为 `native-app` platform component，只提供结构、命令、architecture 和 SBOM 门禁；不得在 adoption 模式实现真实录制、屏幕/音频 capture、转写、speaker labeling、外部模型调用或自动下载。
-2. `platform/processing-cli/`：注册为 `processing-cli` platform component，只提供结构、命令、dependency-check/adapter 边界和 SBOM 门禁；不得在 adoption 模式实现真实媒体处理、转写、speaker labeling、外部模型调用或自动下载。
-3. `platform/e2e/`：存放 activation smoke E2E 的 compose 计划和清单接线检查；在 adoption 模式不启动真实 full-stack runtime。
-4. `platform/infra/`：保留给后续本地基础设施、部署清单和可观测性配置。
+1. `platform/native-app/`：原生 app/helper 边界；非业务 skeleton 只能提供结构、门禁、architecture 和 SBOM 检查。
+2. `platform/processing-cli/`：本地 processing/dependency-check/adapter 边界；非业务 skeleton 只能提供结构、门禁、architecture 和 SBOM 检查。
+3. `platform/e2e/`：full-stack E2E 或 smoke E2E 的 compose 计划和清单接线检查。
+4. `platform/infra/`：后续本地基础设施、部署清单和可观测性配置。
 
-这些骨架属于 activation 工程准备，不代表 `PV-MA-*` 产品行为已经覆盖。产品行为测试只能在 project 模式按 `docs/engineering/06-product-validation-matrix.md` 推进。
+非业务 skeleton 不代表 `PV-MA-*` 产品行为已经覆盖。产品行为测试必须按 `docs/engineering/06-product-validation-matrix.md` 推进；实现真实能力时同步更新组件测试、E2E 和 manifest 命令。
 
 ## 脚本归属
 
@@ -152,7 +152,7 @@ backend/services/<service-name>/
 
 1. `harness/project-manifest.json` 是组件、质量命令、全栈 E2E、供应链目标和生产就绪工件的注册表。
 2. `harness/agent-policy.json` 是 Agent 文件、网络、凭据、外部写入和人工审批的最小权限策略。
-3. `harness/adoption-state.json` 记录 adoption subphase 和显式 activation 确认。
+3. `harness/adoption-state.json` 记录 adoption subphase 和显式 activation 确认，不声明当前 mode。
 4. 这些文件都属于工程事实，不承载业务模型；产品安全事实仍归 `docs/product-spec/13-security-and-compliance.md`。
-5. project 模式不允许存在未注册的 `frontend/apps/*/package.json` 或 `backend/services/*/pom.xml`。
+5. project 模式不允许存在未注册的 `frontend/apps/*/package.json`、`backend/services/*/pom.xml` 或 `platform/*/component.json`。
 6. release 不允许通过目录自动发现后静默跳过；缺少注册目标必须失败。

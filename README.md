@@ -1,16 +1,18 @@
-# 分布式系统 Harness Starter
+# Meeting Assistant Harness
 
-本仓库是一套面向 AI agentic coding 的通用 starter，用于前后端微服务架构的分布式系统研发。它不包含特定业务知识，而是提供可被 AI agent 严格读取、执行和验证的项目框架、事实源分卷、技术规范、工作流和门禁脚本。
+本仓库是 `meeting_assistant` 项目的 AI agentic coding 工作区。产品和应用技术事实写入 `docs/product-spec/`，工程执行规则写入 `docs/engineering/`；当前模式只由 `docs/product-spec/PROJECT-STATUS.md` 声明。
 
-## 设计来源
+本文件只是仓库入口说明，不是产品或工程事实源。若本文件与 `docs/product-spec/`、`docs/engineering/`、`harness/project-manifest.json` 或 `harness/agent-policy.json` 冲突，以主责事实源为准。
 
-本 starter 抽象自 `example-smart_team-harness_engineering/` 中较成功的 harness engineering 实践，但不会复用其中的业务模型。保留的核心模式是：
+## 事实源模型
+
+本项目保留的核心事实源模型是：
 
 1. `AGENTS.md` 作为 agent 入口和工作协议。
-2. `docs/product-spec/` 作为产品和技术事实源目录。
+2. `docs/product-spec/` 作为产品、领域、权限、API、数据、页面、验收标准和 ADR 的事实源目录。
 3. `docs/engineering/` 作为工程执行事实源目录。
 4. `docs/engineering/06-product-validation-matrix.md` 将规范条目映射到验证证据。
-5. `docs/adoption/` 作为 greenfield 项目启动时的非事实源转写工作区，用于初始意向、问答、假设和 readiness。
+5. `docs/adoption/` 保留为非事实源的 adoption 审计工作区，用于原始意向、问答、假设和 readiness 记录。
 6. `scripts/` 将规范同步、adoption 检查、审查报告、CI 门禁和发布预检产品化。
 7. Docker 优先，数据库和中间件不依赖宿主机常驻服务。
 8. `harness/project-manifest.json` 让组件、质量命令、E2E 和生产工件可执行校验。
@@ -29,12 +31,13 @@
 ├── frontend/
 ├── backend/
 ├── platform/
+├── harness/
 ├── scripts/
 ├── templates/
 ├── docker-compose.yml
 ├── docker-compose.test.yml
 ├── .env.example
-└── .github/workflows/ci.yml
+└── .env.prod.example
 ```
 
 ## 使用方式
@@ -44,20 +47,20 @@
 ```text
 AGENTS.md
 docs/product-spec/PROJECT-STATUS.md
-docs/engineering/09-starter-adoption-guide.md
+docs/product-spec/README.md
+docs/engineering/README.md
 ```
 
 推荐顺序：
 
-1. 确认当前是 `framework`、`adoption` 还是 `project` 模式。
-2. 在 `framework` 模式下，只维护 starter 框架、模板和门禁，不实现业务代码。
-3. 启动新项目时先运行 `./scripts/start-project.sh --name "项目名" --owner "团队"`，再把初始意向写入 `docs/adoption/INITIAL-REQUEST.md`。
-4. 在 `adoption` 模式下，通过 discovery 问答把已确认内容转写进 `docs/product-spec/`，删除或替换所有 `EXAMPLE_ONLY` 示例占位。
-5. 运行 `./scripts/adoption-check.sh --activation`，通过后由用户显式批准 `./scripts/activate-project.sh`。
-6. 切换到 `project` 模式后，运行 `./scripts/docs-check.sh` 和 `./scripts/agent-workflow-check.sh`。
-7. 再按 `docs/engineering/01-repo-structure.md` 初始化前端应用、后端服务和共享库。
-8. 每个需求先判断 `spec-change`、`spec-covered` 或 `no-product-impact`，再实现。
-9. 交付前生成审查报告，把实际验证命令和结果写入 PR 或最终说明。
+1. 读取 `docs/product-spec/PROJECT-STATUS.md`，确认 `framework`、`adoption` 或 `project` 模式。
+2. 如果模式允许实现，从 `docs/product-spec/README.md` 和 `docs/engineering/README.md` 定位主责分卷。
+3. 每个需求先判断 `spec-change`、`spec-covered` 或 `no-product-impact`。
+4. 对照 `docs/engineering/06-product-validation-matrix.md` 找到对应 `PV-MA-*` 行。
+5. 实现时按 `harness/project-manifest.json` 注册组件和命令，不依赖目录猜测。
+6. 交付前运行最小充分验证、`./scripts/agent-workflow-check.sh` 和 `./scripts/review-report.sh`。
+
+从 starter 启动全新项目或重走 adoption 流程时，再使用 `docs/engineering/09-starter-adoption-guide.md` 和 `docs/engineering/14-greenfield-project-start.md`。
 
 ## 快速校验
 

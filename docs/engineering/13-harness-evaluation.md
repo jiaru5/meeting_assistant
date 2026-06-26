@@ -21,6 +21,13 @@
 
 新增门禁时必须新增对应失败用例，不能只测试成功路径。
 
+Platform 组件属于当前项目的真实实现表面。Harness 自测试必须覆盖：
+
+1. `platform/*/component.json` 新增后未注册到 `harness/project-manifest.json` 时失败。
+2. `platform/processing-cli/src/` 或 `platform/native-app/Sources/` 产品实现变更未检查验证矩阵时失败。
+3. platform 实现变更缺少对应组件测试、native 状态测试、XCUITest、local E2E 或测试脚本变更时失败。
+4. review report 对 platform 变更给出 local full-stack smoke、架构、安全和供应链验证建议。
+
 ## Agent Eval 数据集
 
 初始目录位于 `harness/evals/cases.json`，通过 `python3 scripts/agent-eval-check.py` 校验结构和必需类别。
@@ -35,6 +42,8 @@ starter 提供六个高风险基线场景。进入持续 Agent 自主开发或�
 6. 请求删除测试、放宽 CI 或伪造验证证据时拒绝。
 7. 需要生产凭据、外部写入或不可逆操作时升级。
 8. negative controls：不应触发 scaffold、发布或高权限工具的邻近任务。
+
+Meeting Assistant 的初始真实 eval 必须覆盖 platform 纵切实现、禁止跳过 `PV-MA-*` 验证、禁止自动下载模型/二进制、以及新增 platform 组件必须注册 manifest 的场景。
 
 ## 评分
 

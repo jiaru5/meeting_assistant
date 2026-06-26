@@ -68,32 +68,24 @@
 
 在 `framework` 或 `adoption` 模式且尚未创建实际组件时，应用命令可以明确跳过。进入 `project` 模式后，任何未注册组件或缺少 lint、test、build、architecture、security、SBOM、E2E 命令的情况必须失败。
 
-## Meeting Assistant activation 组件命令
+## Meeting Assistant 组件命令事实归属
 
-`meeting_assistant` activation 前允许创建的最小非业务骨架为：
+`harness/project-manifest.json` 是当前组件、组件路径、命令 argv 和 full-stack E2E smoke 入口的唯一工程注册表。本分卷只定义命令类型、fail-closed 规则和 skeleton 行为边界，不复制可独立维护的组件命令清单。
 
-1. `native-app`：非业务 activation skeleton，用于承载未来原生录制控制面、权限提示和 UI 状态测试边界。
-2. `processing-cli`：非业务 activation skeleton，用于承载未来本地 processing、dependency-check、artifact contract、transcription adapter、speaker-label fallback 和 export 命令边界。
+full-stack E2E 可在 manifest 中声明可选 `pre_start_command`，用于准备本地 smoke runtime、预加载镜像或检查外部依赖。该命令必须是 argv 数组，失败时阻断 E2E；不得在 E2E 执行阶段静默拉取未声明的外部镜像或依赖。
 
-这些骨架已经以 `platform` 类型注册到 `harness/project-manifest.json`，并提供 argv 形式的 `lint`、`test`、`build`、`architecture`、`security` 和 `sbom` 命令：
+已注册的非业务 skeleton 只能承载未来原生录制控制面、本地 processing、dependency-check、artifact contract、transcription adapter、speaker-label fallback 和 export 命令边界。
 
-| Component | Gate | Command |
-|---|---|---|
-| `native-app` | lint | `platform/native-app/scripts/lint.sh` |
-| `native-app` | test | `platform/native-app/scripts/test.sh` |
-| `native-app` | build | `platform/native-app/scripts/build.sh` |
-| `native-app` | architecture | `platform/native-app/scripts/architecture.sh` |
-| `native-app` | security | `platform/native-app/scripts/security.sh` |
-| `native-app` | sbom | `platform/native-app/scripts/sbom.sh` |
-| `processing-cli` | lint | `platform/processing-cli/scripts/lint.sh` |
-| `processing-cli` | test | `platform/processing-cli/scripts/test.sh` |
-| `processing-cli` | build | `platform/processing-cli/scripts/build.sh` |
-| `processing-cli` | architecture | `platform/processing-cli/scripts/architecture.sh` |
-| `processing-cli` | security | `platform/processing-cli/scripts/security.sh` |
-| `processing-cli` | sbom | `platform/processing-cli/scripts/sbom.sh` |
-| `full-stack-e2e` | smoke | `platform/e2e/smoke-test.sh` |
+注册组件必须提供 argv 形式的标准命令：
 
-这些命令只验证 activation skeleton 的结构、边界、SBOM 占位和清单接线，不证明任何产品行为已经实现。骨架不得在 adoption 模式实现真实录制、真实媒体处理、真实转写、真实 speaker labeling、外部模型调用或自动依赖下载。
+1. `lint`
+2. `test`
+3. `build`
+4. `architecture`
+5. `security`
+6. `sbom`
+
+非业务 skeleton 命令只验证结构、边界、SBOM 占位和清单接线，不证明任何产品行为已经实现。后续在 skeleton 中实现真实录制、真实媒体处理、真实转写、真实 speaker labeling、外部模型调用或依赖下载前，必须先对齐 product-spec、验证矩阵、组件测试和安全/供应链规则。
 
 未来 dependency-check 命令必须只检查允许来源、人工安装状态、模型/runtime 路径、workspace 可写性和 macOS 权限状态，不得自动下载模型、二进制或驱动。
 

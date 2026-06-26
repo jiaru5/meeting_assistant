@@ -2,15 +2,17 @@
 
 > Adoption 工作区文档。本文件记录 discovery 状态，不是产品事实源。
 
-## 当前 Discovery 轮次
+## Discovery/Activation 审计快照
+
+本节记录 2026-06-26 的 adoption/activation 审计，不声明当前 mode。当前 mode 值只以 `docs/product-spec/PROJECT-STATUS.md` 为准。
 
 | 字段 | 值 |
 |---|---|
-| 轮次 | 4 |
-| Subphase | spec-review |
-| 日期 | 2026-06-26 |
-| 目标 | 补齐 activation-time 非业务骨架、manifest、工程门禁和 readiness，不实现业务代码 |
-| 是否阻塞 | yes |
+| 审计轮次 | 4 |
+| 审计对象 | adoption subphase 和 activation 确认 |
+| 审计日期 | 2026-06-26 |
+| 目标 | 保留 adoption 转写审计；实现依据由 product-spec、engineering、manifest 和 agent-policy 提供 |
+| 是否阻塞 | no |
 
 ## Spec 转写完成审计
 
@@ -19,8 +21,8 @@
 | Durable product-spec | complete for confirmed MVP facts | `01-product-scope.md` 到 `13-security-and-compliance.md` 已替换为 Meeting Assistant 项目事实；阻塞性 open decisions 已关闭。 |
 | Engineering spec | complete for confirmed MVP facts | 多 agent 工作流、planned component commands、validation matrix、dependency policy 和 agent-policy 边界已记录。 |
 | 未确认假设 | non-blocking | 具体 capture API、具体 transcription/diarization runtime、未来团队分发和自动纪要仍需后续 spec-change，但不阻塞当前 spec 转写完成。 |
-| Activation 准备 | engineering ready; sign-off pending | 用户批准继续推进 adoption 后，非业务 skeleton、manifest components、full-stack/E2E smoke 计划和工程门禁已补齐；仍等待用户审查完整持久 spec 并显式批准 activation。 |
-| 用户确认 | pending | 用户尚未审查完整持久 spec，也未批准 project activation。 |
+| Activation 准备 | complete | 非业务 skeleton、manifest components、full-stack/E2E smoke 计划和工程门禁已补齐，并已完成 project activation。 |
+| 用户确认 | complete | 用户已审查持久 spec、ADR、open decisions、validation matrix、manifest 和 readiness，并批准 project activation。 |
 
 ## 已确认事实
 
@@ -63,7 +65,8 @@
 | CF-033 | 依赖和 agent-policy 审查应先列出允许来源并要求人工安装；自动下载不属于初始策略。 | 用户接受 Q-207 推荐，2026-06-26 | `docs/product-spec/13-security-and-compliance.md`, `docs/engineering/10-security-and-supply-chain.md`, `harness/agent-policy.json` | yes |
 | CF-034 | Adoption/spec 转写阶段统一使用 PM / Spec Owner + Discovery / Spec Draft Worker + read-only Governance Reviewer，并按需启用 Specialist。 | 用户确认，2026-06-26 | `docs/engineering/05-agent-operating-model.md` | yes |
 | CF-035 | 项目的持久 Markdown spec 已中文化；后续 agent 维护 `docs/product-spec/`、`docs/engineering/` 和 `docs/adoption/` 时默认使用中文，稳定技术标识保留英文或原文。 | 用户确认，2026-06-26 | `docs/engineering/05-agent-operating-model.md` | yes |
-| CF-036 | 用户批准基于 adoption 完成计划继续推进，允许创建 activation-time 非业务 skeleton、manifest/E2E smoke 接线和工程门禁；仍未批准运行 `activate-project`。 | 用户确认，2026-06-26 | `harness/project-manifest.json`, `docs/engineering/02-dev-commands.md`, `docs/engineering/06-product-validation-matrix.md`, `docs/adoption/SPEC-READINESS.md` | yes |
+| CF-036 | 用户批准基于 adoption 完成计划继续推进，允许创建 activation-time 非业务 skeleton、manifest/E2E smoke 接线和工程门禁；本条记录当时尚未批准运行 `activate-project`，后续 activation 批准见 CF-037。 | 用户确认，2026-06-26 | `harness/project-manifest.json`, `docs/engineering/02-dev-commands.md`, `docs/engineering/06-product-validation-matrix.md`, `docs/adoption/SPEC-READINESS.md` | yes |
+| CF-037 | 用户已审查并接受当前 `docs/product-spec/`、ADR、open decisions、validation matrix、manifest 和 `SPEC-READINESS`，并批准 project activation。 | 用户 confirmation，2026-06-26 | `harness/adoption-state.json`, `docs/product-spec/PROJECT-STATUS.md`, `docs/adoption/SPEC-READINESS.md` | yes |
 
 ## 假设
 
@@ -101,7 +104,7 @@
 | GAP-005 | 音频 artifact 契约已定义；不可用音轨的底层 capture fallback 需要实现验证。 | 不阻塞当前 spec 转写；属于 project 模式实现和测试风险。 | `docs/product-spec/02-domain-model.md`, `docs/product-spec/07-data-and-events.md`, `docs/engineering/06-product-validation-matrix.md` |
 | GAP-006 | MVP 最低宿主是 Apple Silicon 和 macOS 26.5.1；具体原生录制 API 能力仍需验证。 | 不阻塞当前 spec 转写；属于 skeleton 后的技术验证和实现风险。 | `docs/product-spec/08-implementation-guidance.md`, `docs/product-spec/09-acceptance-criteria.md` |
 | GAP-007 | MVP 的说话人区分是 best-effort 匿名 labels，并且没有可用本地引擎时允许 transcript-only fallback；具体 diarization 引擎和质量阈值仍未关闭。 | 不阻塞当前 spec 转写；具体引擎选择可以由 adapter 和 dependency-check 后续收敛。 | `docs/product-spec/05-business-rules-and-calculations.md`, `docs/product-spec/09-acceptance-criteria.md`, `docs/engineering/06-product-validation-matrix.md` |
-| GAP-008 | Q-201 到 Q-207 已转写到持久 spec，activation-time 非业务骨架和 manifest/E2E 注册已创建。 | 不再阻塞 activation 工程准备；当前只剩用户 spec-review 和显式 activation 批准。 | `harness/project-manifest.json`, `docs/engineering/06-product-validation-matrix.md`, `docs/adoption/SPEC-READINESS.md` |
+| GAP-008 | Q-201 到 Q-207 已转写到持久 spec，activation-time 非业务骨架和 manifest/E2E 注册已创建。 | 已完成 project activation；后续不再以 adoption readiness 作为实现依据。 | `harness/project-manifest.json`, `docs/engineering/06-product-validation-matrix.md`, `docs/adoption/SPEC-READINESS.md` |
 
 ## 问题队列
 
@@ -179,6 +182,7 @@
 | PL-006 | PM spec transfer review | `docs/product-spec/13-security-and-compliance.md`, `docs/adoption/SPEC-READINESS.md`, `harness/adoption-state.json` | 补充 Phase 1 生产就绪适用性，将 product-spec 分卷标记为 ready，并把 adoption 子阶段推进到 spec-review；activation 仍保持阻断。 | user request to continue spec transfer | 2026-06-26 |
 | PL-007 | `DISCOVERY-LEDGER.md` CF-035 | `docs/engineering/05-agent-operating-model.md` | 转写已确认的持久 Markdown spec 中文优先规则，并保留稳定技术标识原文。 | user | 2026-06-26 |
 | PL-008 | `DISCOVERY-LEDGER.md` CF-032, CF-036 | `harness/project-manifest.json`, `docs/engineering/02-dev-commands.md`, `docs/engineering/06-product-validation-matrix.md`, `docs/adoption/SPEC-READINESS.md`, `harness/adoption-state.json` | 创建并注册 `native-app` 与 `processing-cli` 非业务 activation skeleton、smoke E2E 计划、Phase 1 本地运行准备工件和项目门禁；产品行为验证仍保持 planned。 | user | 2026-06-26 |
+| PL-009 | `harness/adoption-state.json` confirmation | `docs/product-spec/PROJECT-STATUS.md`, `docs/adoption/SPEC-READINESS.md`, `docs/product-spec/README.md`, `docs/product-spec/10-open-decisions.md` | 记录 activation 审计，并把当前 mode 声明收敛到 `PROJECT-STATUS.md`；adoption 工作区仅保留审计用途。 | user confirmation | 2026-06-26 |
 
 ## 转写和 Activation 后续队列
 

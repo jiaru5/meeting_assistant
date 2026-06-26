@@ -1,6 +1,6 @@
 # Adoption 工作区
 
-本目录是从 starter 启动真实项目时的转写工作区。它用于保存初始意向、澄清问答、假设、冲突和 readiness 状态。
+本目录是从 starter 启动真实项目时的转写工作区。完成 activation 后，本目录只保留为 adoption 审计记录，用于追溯初始意向、澄清问答、假设、冲突和 readiness 状态。
 
 本目录不是产品事实源，也不是工程事实源。
 
@@ -35,6 +35,8 @@ project
   -> ./scripts/activate-project.sh 显式确认后切换
 ```
 
+当前 mode 值只以 `docs/product-spec/PROJECT-STATUS.md` 为准；`harness/adoption-state.json` 只记录 adoption subphase 和 activation 确认审计。若本目录中的历史记录与当前事实源冲突，不能把历史记录作为实现依据。
+
 ## Agent 规则
 
 1. 不要把 `INITIAL-REQUEST.md` 中的未经确认内容直接写入 product-spec。
@@ -42,4 +44,4 @@ project
 3. 每个问题必须说明：为什么重要、是否阻塞、建议选项或取舍、目标 product-spec 分卷。
 4. 假设只能留在 `DISCOVERY-LEDGER.md`，不得提升为事实。
 5. 冲突和未决问题进入 `docs/product-spec/10-open-decisions.md`，关闭后回写主责分卷和 ADR。
-6. 未经用户明确确认，不得运行 `activate-project`，不得创建业务实现代码。
+6. 仅在重新进入 adoption 或启动新项目时，才适用“未经用户明确确认不得运行 `activate-project`”的流程约束；业务实现必须按 `PROJECT-STATUS.md`、product-spec、engineering 和验证矩阵推进。
