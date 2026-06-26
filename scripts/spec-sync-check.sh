@@ -61,6 +61,8 @@ for file in "${CHANGED_FILES[@]+"${CHANGED_FILES[@]}"}"; do
   case "$file" in
     example-smart_team-harness_engineering/*)
       ;;
+    docs/product-spec/PROJECT-STATUS.md)
+      ;;
     docs/product-spec/*)
       product_surface_changed=true
       product_spec_changed=true

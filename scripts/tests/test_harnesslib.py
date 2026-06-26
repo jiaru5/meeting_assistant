@@ -76,10 +76,17 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertTrue(adoption_runtime.row_is_blocking(rows["validation matrix"]))
 
     def test_release_is_fail_closed_outside_project_mode(self) -> None:
-        failures = validate_manifest(ROOT, "release")
-        self.assertTrue(any("require mode: project" in failure for failure in failures))
-        self.assertTrue(any("dockerfile is required for release" in failure for failure in failures))
-        self.assertTrue(any("CODEOWNERS" in failure for failure in failures))
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            status = fixture / "docs/product-spec/PROJECT-STATUS.md"
+            status.write_text(
+                re.sub(r"mode: (framework|adoption|project)", "mode: adoption", status.read_text(encoding="utf-8"), count=1),
+                encoding="utf-8",
+            )
+            failures = validate_manifest(fixture, "release")
+            self.assertTrue(any("require mode: project" in failure for failure in failures))
+            self.assertTrue(any("dockerfile is required for release" in failure for failure in failures))
+            self.assertTrue(any("CODEOWNERS" in failure for failure in failures))
 
     def test_project_mode_rejects_unregistered_targets(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -109,6 +116,11 @@ class HarnessValidationTests(unittest.TestCase):
     def test_start_project_initializes_adoption_and_blocks_empty_activation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
+            status = fixture / "docs/product-spec/PROJECT-STATUS.md"
+            status.write_text(
+                re.sub(r"mode: (framework|adoption|project)", "mode: framework", status.read_text(encoding="utf-8"), count=1),
+                encoding="utf-8",
+            )
             result = subprocess.run(
                 [
                     str(fixture / "scripts/start-project.sh"),
@@ -152,6 +164,11 @@ class HarnessValidationTests(unittest.TestCase):
     def test_activate_project_requires_explicit_arguments_and_does_not_switch_mode(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
+            status = fixture / "docs/product-spec/PROJECT-STATUS.md"
+            status.write_text(
+                re.sub(r"mode: (framework|adoption|project)", "mode: framework", status.read_text(encoding="utf-8"), count=1),
+                encoding="utf-8",
+            )
             subprocess.run(
                 [
                     str(fixture / "scripts/start-project.sh"),
@@ -174,6 +191,43 @@ class HarnessValidationTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 2)
             self.assertIn("mode: adoption", (fixture / "docs/product-spec/PROJECT-STATUS.md").read_text(encoding="utf-8"))
+
+    def test_activation_lifecycle_diff_passes_agent_workflow(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            subprocess.run(["git", "init", "-b", "main"], cwd=fixture, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "config", "user.name", "Harness Test"], cwd=fixture, check=True)
+            subprocess.run(["git", "config", "user.email", "harness@example.test"], cwd=fixture, check=True)
+            subprocess.run(["git", "add", "."], cwd=fixture, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "commit", "-m", "baseline"], cwd=fixture, check=True, capture_output=True, text=True)
+
+            status = fixture / "docs/product-spec/PROJECT-STATUS.md"
+            status.write_text(
+                re.sub(r"mode: (framework|adoption|project)", "mode: project", status.read_text(encoding="utf-8"), count=1),
+                encoding="utf-8",
+            )
+            state_path = fixture / "harness/adoption-state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["adoption"]["subphase"] = "ready-for-activation"
+            state["adoption"]["confirmation"] = {
+                "product_spec_reviewed": True,
+                "blocking_open_decisions_closed": True,
+                "approved_for_project_activation": True,
+                "confirmed_by": "Harness Test",
+                "confirmed_at": "2026-06-26T00:00:00+00:00",
+                "confirmation_text": "Harness test reviewed specs and approved project activation.",
+            }
+            state["adoption"]["blockers"] = []
+            state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/agent-workflow-check.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
 
     def test_full_stack_runner_executes_config_up_seed_test_and_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

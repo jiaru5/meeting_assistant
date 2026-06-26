@@ -60,6 +60,34 @@ has_match() {
   return 1
 }
 
+has_product_behavior_change() {
+  local file
+  for file in "${CHANGED_FILES[@]+"${CHANGED_FILES[@]}"}"; do
+    case "$file" in
+      example-smart_team-harness_engineering/*|docs/product-spec/PROJECT-STATUS.md)
+        ;;
+      docs/product-spec/*|backend/services/*/src/main/*|backend/contracts/*|frontend/apps/*/src/*|frontend/apps/*/tests/e2e/*|frontend/packages/api-client/*|frontend/packages/ui/src/*)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+has_engineering_workflow_change() {
+  local file
+  for file in "${CHANGED_FILES[@]+"${CHANGED_FILES[@]}"}"; do
+    case "$file" in
+      example-smart_team-harness_engineering/*|harness/adoption-state.json)
+        ;;
+      scripts/*|harness/*|.github/workflows/*|docker-compose*.yml|platform/infra/*|docs/adoption/*|docs/engineering/*)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
 require_executable() {
   local file="$1"
   if [ ! -x "$file" ]; then
@@ -93,13 +121,7 @@ if [ "${#CHANGED_FILES[@]}" -eq 0 ]; then
 fi
 
 product_behavior_changed=false
-if has_match "docs/product-spec/*" \
-  || has_match "backend/services/*/src/main/*" \
-  || has_match "backend/contracts/*" \
-  || has_match "frontend/apps/*/src/*" \
-  || has_match "frontend/apps/*/tests/e2e/*" \
-  || has_match "frontend/packages/api-client/*" \
-  || has_match "frontend/packages/ui/src/*"; then
+if has_product_behavior_change; then
   product_behavior_changed=true
 fi
 
@@ -123,13 +145,7 @@ if has_match "backend/services/*/src/test/*" \
 fi
 
 engineering_changed=false
-if has_match "scripts/*" \
-  || has_match "harness/*" \
-  || has_match ".github/workflows/*" \
-  || has_match "docker-compose*.yml" \
-  || has_match "platform/infra/*" \
-  || has_match "docs/adoption/*" \
-  || has_match "docs/engineering/*"; then
+if has_engineering_workflow_change; then
   engineering_changed=true
 fi
 

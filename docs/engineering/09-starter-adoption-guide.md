@@ -208,6 +208,8 @@ activation 前必须完成：
 4. 运行 `docs-check`、`project-manifest-check development` 和 `agent-workflow-check`。
 5. 如果门禁失败，回滚到 `adoption` 模式。
 
+`PROJECT-STATUS.md` 和 `harness/adoption-state.json` 的 activation lifecycle diff 只记录模式和确认状态，不改变产品行为；workflow 门禁不应因此要求 validation matrix 更新。
+
 Agent 不能用自己的判断代替用户确认。
 
 ## 步骤 9：第一条可验证纵切

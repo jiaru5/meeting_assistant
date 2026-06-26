@@ -48,6 +48,7 @@ agent 完成非平凡改动后，必须生成可复制到 PR 或交付说明中�
 7. 项目清单和 Agent 权限策略是否有效。
 8. Harness 自测试是否覆盖新增失败路径。
 9. Adoption 生命周期变更是否通过 `./scripts/adoption-check.sh`，且 activation 不能绕过用户确认。
+10. 仅由 `docs/product-spec/PROJECT-STATUS.md` 和 `harness/adoption-state.json` 组成的 activation lifecycle diff 不属于产品行为变更，不要求额外更新 validation matrix；仍必须通过 activation check、manifest check 和 workflow check。
 
 ## CI 必过项
 
