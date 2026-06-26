@@ -1,0 +1,17 @@
+{
+  "id": "native-app",
+  "kind": "activation-skeleton",
+  "scope": "platform",
+  "business_behavior": "none",
+  "allowed_before_project_mode": true,
+  "planned_runtime": "Swift/SwiftUI",
+  "forbidden_capabilities": [
+    "real_recording",
+    "screen_capture",
+    "audio_capture",
+    "transcription",
+    "speaker_labeling",
+    "external_model_api",
+    "automatic_downloads"
+  ]
+}

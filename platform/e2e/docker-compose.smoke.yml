@@ -1,0 +1,9 @@
+services:
+  meeting-assistant-smoke:
+    image: ${MEETING_ASSISTANT_SMOKE_IMAGE:-busybox:1.36.1}
+    command: ["sh", "-c", "sleep 3600"]
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 5s
+      timeout: 3s
+      retries: 3

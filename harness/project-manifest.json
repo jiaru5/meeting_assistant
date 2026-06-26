@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "project": {
+    "name": "meeting_assistant",
+    "owner": "JeRRy"
+  },
+  "components": [
+    {
+      "id": "native-app",
+      "type": "platform",
+      "path": "platform/native-app",
+      "production": true,
+      "requires_migrations": false,
+      "architecture_test": "platform/native-app/tests/ArchitectureTest.md",
+      "commands": {
+        "lint": [
+          "./scripts/lint.sh"
+        ],
+        "test": [
+          "./scripts/test.sh"
+        ],
+        "build": [
+          "./scripts/build.sh"
+        ],
+        "architecture": [
+          "./scripts/architecture.sh"
+        ],
+        "security": [
+          "./scripts/security.sh"
+        ],
+        "sbom": [
+          "./scripts/sbom.sh"
+        ]
+      }
+    },
+    {
+      "id": "processing-cli",
+      "type": "platform",
+      "path": "platform/processing-cli",
+      "production": true,
+      "requires_migrations": false,
+      "architecture_test": "platform/processing-cli/tests/ArchitectureTest.md",
+      "commands": {
+        "lint": [
+          "./scripts/lint.sh"
+        ],
+        "test": [
+          "./scripts/test.sh"
+        ],
+        "build": [
+          "./scripts/build.sh"
+        ],
+        "architecture": [
+          "./scripts/architecture.sh"
+        ],
+        "security": [
+          "./scripts/security.sh"
+        ],
+        "sbom": [
+          "./scripts/sbom.sh"
+        ]
+      }
+    }
+  ],
+  "full_stack_e2e": {
+    "compose_files": [
+      "platform/e2e/docker-compose.smoke.yml"
+    ],
+    "services": [
+      "meeting-assistant-smoke"
+    ],
+    "seed_command": [],
+    "test_command": [
+      "./platform/e2e/smoke-test.sh"
+    ],
+    "cleanup": true
+  },
+  "release_policy": {
+    "require_project_mode": true,
+    "require_registered_components": true,
+    "require_full_stack_e2e": true,
+    "require_security_gate": true,
+    "require_supply_chain_gate": true,
+    "require_production_readiness": true,
+    "require_codeowners": true,
+    "require_human_approval": true
+  },
+  "production_readiness": {
+    "threat_model": "docs/engineering/operations/phase-1-local-readiness.md",
+    "slo": "docs/engineering/operations/phase-1-local-readiness.md",
+    "runbook": "docs/engineering/operations/phase-1-local-readiness.md",
+    "rollback_plan": "docs/engineering/operations/phase-1-local-readiness.md",
+    "backup_restore_plan": "docs/engineering/operations/phase-1-local-readiness.md",
+    "incident_response": "docs/engineering/operations/phase-1-local-readiness.md",
+    "data_classification": "docs/engineering/operations/phase-1-local-readiness.md"
+  },
+  "supply_chain": {
+    "provenance_target": "slsa-build-l2",
+    "sbom_format": "cyclonedx-json",
+    "artifact_signing": "keyless-oidc"
+  }
+}

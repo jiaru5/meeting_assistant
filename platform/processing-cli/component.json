@@ -1,0 +1,15 @@
+{
+  "id": "processing-cli",
+  "kind": "activation-skeleton",
+  "scope": "platform",
+  "business_behavior": "none",
+  "allowed_before_project_mode": true,
+  "planned_runtime": "local processing and dependency-check CLI",
+  "forbidden_capabilities": [
+    "real_media_processing",
+    "transcription",
+    "speaker_labeling",
+    "external_model_api",
+    "automatic_downloads"
+  ]
+}
