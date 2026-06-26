@@ -1,0 +1,73 @@
+# 10. 安全和供应链
+
+本文件定义安全开发、依赖治理、CI/CD、制品完整性和漏洞响应的工程规则。项目安全需求和威胁事实由 `docs/product-spec/13-security-and-compliance.md` 维护。
+
+## 安全开发基线
+
+1. adoption 阶段必须确定适用的 OWASP ASVS 5.0 等级、数据分类和合规约束。
+2. 认证、授权、租户隔离、密码学、文件处理和外部输入必须有负向测试。
+3. Agent 生成的代码与人工代码执行相同的 review、测试、SAST、SCA 和发布门禁。
+4. 禁止关闭框架安全保护、TLS 校验、反序列化保护或类型检查来绕过失败。
+5. 复杂安全逻辑必须使用成熟库，并记录版本、配置和验证证据。
+
+## 自动化门禁
+
+`./scripts/security-check.sh` 必须：
+
+1. 验证 agent 权限策略和项目清单。
+2. 检查高置信度 secret 或私钥泄露。
+3. 执行每个注册组件的 `security` 命令。
+4. 验证 GitHub Actions 固定到完整 commit SHA。
+
+真实项目的组件 `security` 命令至少覆盖：
+
+1. SAST。
+2. 依赖漏洞和许可证策略。
+3. secret scanning。
+4. IaC 和容器配置扫描。
+5. 高风险 Web/API 系统的 DAST 或等价动态验证。
+
+## 依赖与构建
+
+1. 依赖必须使用 lockfile 或 Maven dependency management 固定解析结果。
+2. 新依赖必须说明用途、维护状态、许可证和替代方案。
+3. 禁止使用来源不明、拼写近似或由 Agent 猜测出来的包名。
+4. CI 外部 Action 必须固定完整 commit SHA。
+5. 生产 Docker 基础镜像必须固定 digest，并以非 root 用户运行。
+6. release 组件必须生成 CycloneDX JSON 或项目明确选择的等价 SBOM。
+
+## Meeting Assistant MVP 依赖策略
+
+`meeting_assistant` Phase 1 采用允许来源 + 人工安装策略：
+
+1. bootstrap/check 脚本只检查和提示，不自动下载模型、二进制、驱动或外部脚本。
+2. 允许来源包括 Apple 官方 Xcode/Command Line Tools、官方或维护良好的开源项目发布源、用户已有本地 Whisper/Qwen 模型路径，以及后续经 ADR 批准的来源。
+3. Agent 不得自行放宽 `harness/agent-policy.json`、网络 allowlist、CI 安全门禁或外部写权限来获取依赖。
+4. 版本/hash 锁定、许可证自动门禁和依赖签名验证作为后续增强；在 MVP activation 前至少必须有允许来源说明和人工安装边界。
+5. 如果后续需要自动下载依赖、模型或二进制，必须先更新本分卷、`13-security-and-compliance.md`、`harness/agent-policy.json` 和 ADR。
+
+## 制品和来源
+
+生产发布目标：
+
+1. 构建在受控 CI 环境执行，不以开发者本地制品发布。
+2. 生成至少达到 SLSA Build L2 目标的 provenance。
+3. 使用 OIDC keyless signing 或组织批准的密钥系统签名制品。
+4. 部署前验证 digest、签名和 provenance。
+5. release tag、commit、镜像 digest、SBOM 和部署记录可相互追溯。
+
+## 漏洞响应
+
+1. 仓库必须提供私密漏洞报告渠道。
+2. 漏洞按严重度、可利用性和资产影响分级，并设置修复 SLA。
+3. 修复必须包含回归测试和受影响版本分析。
+4. 重复问题必须更新安全规范、Agent 规则、共享库或自动化门禁。
+5. 风险接受必须有 owner、到期日期和补偿控制。
+
+## 标准入口
+
+```bash
+./scripts/security-check.sh
+./scripts/supply-chain-check.sh current
+./scripts/supply-chain-check.sh release
+```
