@@ -1,0 +1,6 @@
+# Replace the examples during adoption and commit the result as .github/CODEOWNERS.
+#
+# * @organization/project-maintainers
+# /docs/product-spec/ @organization/product-owners @organization/architects
+# /.github/workflows/ @organization/platform-security
+# /harness/ @organization/platform-security

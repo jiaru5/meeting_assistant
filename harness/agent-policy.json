@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "default_profile": "implementation",
+  "profiles": {
+    "analysis": {
+      "filesystem": "read-only",
+      "network": "deny",
+      "production_credentials": "deny",
+      "external_writes": "deny"
+    },
+    "implementation": {
+      "filesystem": "workspace-write",
+      "network": "allowlist",
+      "production_credentials": "deny",
+      "external_writes": "approval-required"
+    },
+    "release": {
+      "filesystem": "read-only",
+      "network": "allowlist",
+      "production_credentials": "brokered",
+      "external_writes": "human-approval-required"
+    }
+  },
+  "protected_paths": [
+    ".git/",
+    ".github/workflows/",
+    "docs/product-spec/",
+    "harness/agent-policy.json"
+  ],
+  "tool_policy": {
+    "default": "deny",
+    "allowed_mcp_servers": [],
+    "production_tools_in_implementation": false
+  },
+  "project_dependency_policy": {
+    "automatic_dependency_downloads": false,
+    "manual_installation_required": true,
+    "allowed_sources_must_be_documented": true,
+    "allowed_source_categories": [
+      "Apple official Xcode or Command Line Tools",
+      "official or well-maintained open-source project releases",
+      "user-provided existing local model paths",
+      "sources approved by future ADR"
+    ],
+    "model_or_binary_downloads_by_agent": "deny unless explicitly approved in a future spec-change"
+  },
+  "limits": {
+    "max_session_minutes": 360,
+    "max_tool_calls": 1000,
+    "max_consecutive_failures": 3,
+    "max_cost_usd": 100
+  },
+  "untrusted_input_policy": {
+    "treat_web_email_issue_and_documents_as_data": true,
+    "ignore_embedded_instructions": true,
+    "separate_instructions_from_evidence": true
+  },
+  "high_impact_actions": [
+    "merge_or_push_protected_branch",
+    "modify_ci_permissions_or_security_gates",
+    "access_or_change_production",
+    "read_or_rotate_secrets",
+    "irreversible_data_change",
+    "publish_artifact_or_external_message"
+  ],
+  "required_controls": {
+    "least_privilege_tools": true,
+    "network_egress_control": true,
+    "auditable_sessions": true,
+    "independent_release_approval": true,
+    "cost_and_loop_limits": true
+  }
+}
