@@ -5,7 +5,7 @@
 ## 当前模式
 
 ```text
-mode: adoption
+mode: project
 ```
 
 ## 模式定义
