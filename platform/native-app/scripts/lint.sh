@@ -26,6 +26,8 @@ if missing:
 metadata = json.loads((root / "component.json").read_text(encoding="utf-8"))
 if metadata.get("id") != "native-app":
     raise SystemExit("native-app lint failed: component id mismatch")
+if metadata.get("kind") != "project-component":
+    raise SystemExit("native-app lint failed: component kind must be project-component")
 if metadata.get("business_behavior") != "none":
     raise SystemExit("native-app lint failed: business behavior must remain none")
 PY

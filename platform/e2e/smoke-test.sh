@@ -18,7 +18,7 @@ component_ids = {component["id"] for component in manifest["components"]}
 required = {"native-app", "processing-cli"}
 missing = required - component_ids
 if missing:
-    raise SystemExit(f"activation smoke failed: missing manifest components {sorted(missing)}")
+    raise SystemExit(f"local smoke failed: missing manifest components {sorted(missing)}")
 PY
 
-echo "activation e2e smoke passed."
+echo "local e2e smoke passed."

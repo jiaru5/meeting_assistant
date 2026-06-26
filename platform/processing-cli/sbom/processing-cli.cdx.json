@@ -6,8 +6,8 @@
   "metadata": {
     "component": {
       "type": "application",
-      "name": "meeting-assistant-processing-cli-skeleton",
-      "version": "0.0.0-adoption"
+      "name": "meeting-assistant-processing-cli",
+      "version": "0.1.0-dependency-check"
     }
   },
   "components": []

@@ -69,6 +69,9 @@
     "services": [
       "meeting-assistant-smoke"
     ],
+    "pre_start_command": [
+      "./platform/e2e/prepare-smoke-image.sh"
+    ],
     "seed_command": [],
     "test_command": [
       "./platform/e2e/smoke-test.sh"

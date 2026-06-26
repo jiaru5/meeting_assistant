@@ -1,12 +1,12 @@
 # Processing CLI Skeleton
 
-本目录是 activation 阶段允许存在的非业务骨架，用于给本地 processing/dependency-check CLI 预留组件边界和门禁入口。
+本目录承载本地 processing/dependency-check CLI。组件注册状态以 `harness/project-manifest.json` 为准。
 
-当前目录只允许包含：
+当前已实现：
 
-1. 组件元数据。
-2. 结构检查脚本。
-3. 架构和安全边界检查。
-4. 最小 SBOM 描述。
+1. `check_dependencies` 命令契约。
+2. 稳定 JSON 响应和缺失依赖失败语义。
+3. fake 环境下的 dependency-check 单元测试。
+4. 结构、架构、安全和 SBOM 检查。
 
-当前目录不得实现真实媒体处理、真实转写、真实 speaker labeling、外部模型调用或自动依赖下载。
+当前目录仍不得实现真实媒体处理、真实转写、真实 speaker labeling、外部模型调用或自动依赖下载。

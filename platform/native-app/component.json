@@ -1,10 +1,10 @@
 {
   "id": "native-app",
-  "kind": "activation-skeleton",
+  "kind": "project-component",
   "scope": "platform",
   "business_behavior": "none",
-  "allowed_before_project_mode": true,
-  "planned_runtime": "Swift/SwiftUI",
+  "allowed_before_project_mode": false,
+  "planned_runtime": "Swift/SwiftUI native control surface",
   "forbidden_capabilities": [
     "real_recording",
     "screen_capture",

@@ -9,15 +9,17 @@ import json
 from pathlib import Path
 
 metadata = json.loads(Path("component.json").read_text(encoding="utf-8"))
+if metadata.get("kind") != "project-component":
+    raise SystemExit("native-app test failed: component kind must be project-component")
 if metadata.get("business_behavior") != "none":
-    raise SystemExit("native-app test failed: skeleton must not claim business behavior")
-if metadata.get("allowed_before_project_mode") is not True:
-    raise SystemExit("native-app test failed: skeleton adoption boundary is missing")
+    raise SystemExit("native-app test failed: project skeleton must not claim business behavior")
+if metadata.get("allowed_before_project_mode") is not False:
+    raise SystemExit("native-app test failed: project component cannot be allowed before project mode")
 
 architecture = Path("tests/ArchitectureTest.md").read_text(encoding="utf-8")
 required_phrases = (
     "Component: `native-app`",
-    "non-business activation skeleton",
+    "non-business project skeleton",
     "must not implement recording",
 )
 missing = [phrase for phrase in required_phrases if phrase not in architecture]

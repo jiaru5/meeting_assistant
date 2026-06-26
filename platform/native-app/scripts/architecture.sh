@@ -6,6 +6,6 @@ cd "$component_dir"
 
 test -f tests/ArchitectureTest.md
 grep -q "Component: \`native-app\`" tests/ArchitectureTest.md
-grep -q "non-business activation skeleton" tests/ArchitectureTest.md
+grep -q "non-business project skeleton" tests/ArchitectureTest.md
 
 echo "native-app architecture check passed."

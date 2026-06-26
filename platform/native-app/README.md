@@ -1,6 +1,6 @@
-# Native App Skeleton
+# Native App Project Skeleton
 
-本目录是 activation 阶段允许存在的非业务骨架，用于给原生 macOS 控制面预留组件边界和门禁入口。
+本目录是非业务 project skeleton，用于给原生 macOS 控制面预留组件边界和门禁入口。组件注册状态以 `harness/project-manifest.json` 为准。
 
 当前目录只允许包含：
 
