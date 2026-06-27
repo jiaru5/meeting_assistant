@@ -11,8 +11,8 @@ import json
 from pathlib import Path
 
 metadata = json.loads(Path("component.json").read_text(encoding="utf-8"))
-if metadata.get("business_behavior") != "dependency_check_artifact_contract_import_media_audio_normalization_transcript_fake":
-    raise SystemExit("processing-cli test failed: dependency_check_artifact_contract_import_media_audio_normalization_transcript_fake behavior is missing")
+if metadata.get("business_behavior") != "dependency_check_artifact_contract_import_media_audio_normalization_transcript_fake_whisper_cpp":
+    raise SystemExit("processing-cli test failed: dependency_check_artifact_contract_import_media_audio_normalization_transcript_fake_whisper_cpp behavior is missing")
 implemented_contracts = set(metadata.get("implemented_contracts", []))
 required_contracts = {
     "check_dependencies",
@@ -22,6 +22,7 @@ required_contracts = {
     "normalized_audio_stage",
     "generate_transcript",
     "transcription_fake_adapter",
+    "transcription_whisper_cpp_adapter",
 }
 if not required_contracts.issubset(implemented_contracts):
     raise SystemExit("processing-cli test failed: implemented contracts are incomplete")
@@ -29,7 +30,7 @@ if metadata.get("allowed_before_project_mode") is not False:
     raise SystemExit("processing-cli test failed: project behavior cannot be allowed before project mode")
 required_forbidden = {
     "production_grade_transcoding",
-    "real_transcription_runtime",
+    "production_grade_transcription_quality",
     "speaker_labeling",
     "external_model_api",
     "automatic_downloads",
@@ -48,8 +49,8 @@ required_phrases = (
     "implements the `import_media` command contract",
     "implements the internal normalized audio stage",
     "must not expose `normalize_audio` as a public command",
-    "implements the `generate_transcript` command contract with a deterministic fake transcription adapter",
-    "must not implement production-grade media transcoding, a real transcription runtime",
+    "implements the `generate_transcript` command contract with a deterministic fake transcription adapter and a minimal `whisper.cpp` runtime adapter",
+    "must not implement production-grade media transcoding, production-grade transcription quality gates",
     "must not implement production-grade media transcoding",
     "Missing required dependencies must be reported as `ok: false`",
 )
@@ -72,5 +73,39 @@ expected = {"check_dependencies", "import_media", "generate_transcript"}
 if commands != expected:
     raise SystemExit(f"processing-cli test failed: public CLI commands drifted: {sorted(commands)}")
 PY
+
+smoke_tmp="$(mktemp -d)"
+cleanup_smoke_tmp() {
+  rm -rf "$smoke_tmp"
+}
+trap cleanup_smoke_tmp EXIT
+printf '#!/usr/bin/env sh\nexit 0\n' > "$smoke_tmp/whisper-cli"
+chmod +x "$smoke_tmp/whisper-cli"
+printf 'fake model' > "$smoke_tmp/ggml-base.bin"
+printf 'fake wav' > "$smoke_tmp/mixed-zh-en-tech.wav"
+set +e
+smoke_output="$(
+  MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$smoke_tmp/whisper-cli" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL="$smoke_tmp/ggml-base.bin" \
+    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$smoke_tmp/mixed-zh-en-tech.wav" \
+    MEETING_ASSISTANT_REQUIRE_WHISPER_CPP_SMOKE=1 \
+    ./scripts/smoke-whisper-cpp.sh 2>&1
+)"
+smoke_status="$?"
+set -e
+if [ "$smoke_status" -eq 0 ]; then
+  echo "processing-cli test failed: whisper smoke accepted a non-recommended model" >&2
+  exit 1
+fi
+case "$smoke_output" in
+  *"requires a large-v3"*) ;;
+  *)
+    echo "processing-cli test failed: whisper smoke did not explain the recommended model requirement" >&2
+    echo "$smoke_output" >&2
+    exit 1
+    ;;
+esac
+
+./scripts/smoke-whisper-cpp.sh
 
 echo "processing-cli tests passed."

@@ -285,21 +285,71 @@ if [ "${1:-}" = "--check" ] || [ "${1:-}" = "--require-evidence" ] || [ "${1:-}"
     if [ "${1:-}" = "--require-release-evidence" ]; then
       evidence_scope="$evidence_dir"
     fi
-    if ! find "$evidence_scope" -type f -name "*.meta" -print -quit 2>/dev/null | grep -q .; then
+    meta_files=()
+    while IFS= read -r -d '' meta_file; do
+      meta_files+=("$meta_file")
+    done < <(find "$evidence_scope" -type f -name "*.meta" -print0 2>/dev/null)
+
+    if [ "${#meta_files[@]}" -eq 0 ]; then
       echo "review-report check failed: no recorded validation evidence" >&2
       exit 1
     fi
-    if find "$evidence_scope" -type f -name "*.meta" -exec awk -F= '$1 == "exit_code" && $2 != "0" { bad=1 } END { exit bad ? 0 : 1 }' {} \; -print \
-      2>/dev/null | grep -q .; then
-      echo "review-report check failed: validation evidence contains failed commands" >&2
-      exit 1
-    fi
+
+    for meta_file in "${meta_files[@]}"; do
+      step="$(awk -F= '$1 == "step" { print substr($0, index($0, "=") + 1); found=1; exit } END { if (!found) exit 1 }' "$meta_file" 2>/dev/null || true)"
+      command="$(awk -F= '$1 == "command" { print substr($0, index($0, "=") + 1); found=1; exit } END { if (!found) exit 1 }' "$meta_file" 2>/dev/null || true)"
+      log="$(awk -F= '$1 == "log" { print substr($0, index($0, "=") + 1); found=1; exit } END { if (!found) exit 1 }' "$meta_file" 2>/dev/null || true)"
+      if [ -z "$step" ] || [ -z "$command" ] || [ -z "$log" ] || [ ! -f "$log" ]; then
+        echo "review-report check failed: validation evidence metadata is incomplete" >&2
+        exit 1
+      fi
+      exit_code="$(awk -F= '$1 == "exit_code" { print $2; found=1; exit } END { if (!found) exit 1 }' "$meta_file" 2>/dev/null || true)"
+      if [ "$exit_code" != "0" ]; then
+        echo "review-report check failed: validation evidence contains failed commands" >&2
+        exit 1
+      fi
+    done
+
     current_fingerprint="$(python3 scripts/worktree-fingerprint.py)"
-    if find "$evidence_scope" -type f -name "*.meta" -exec awk -F= -v expected="$current_fingerprint" \
-      '$1 == "worktree_fingerprint" { found=1; if ($2 != expected) bad=1 } END { exit (!found || bad) ? 0 : 1 }' {} \; -print \
-      2>/dev/null | grep -q .; then
-      echo "review-report check failed: validation evidence is stale for the current worktree" >&2
-      exit 1
+    for meta_file in "${meta_files[@]}"; do
+      fingerprint="$(awk -F= '$1 == "worktree_fingerprint" { print $2; found=1; exit } END { if (!found) exit 1 }' "$meta_file" 2>/dev/null || true)"
+      if [ "$fingerprint" != "$current_fingerprint" ]; then
+        echo "review-report check failed: validation evidence is stale for the current worktree" >&2
+        exit 1
+      fi
+    done
+
+    if [ "${1:-}" = "--require-evidence" ]; then
+      required_steps=(
+        docs-check
+        adoption
+        manifest
+        harness-self-test
+        compose
+        workflow
+        prod-config
+        architecture
+        security
+        supply-chain
+        migration
+        lint
+        test
+        build
+      )
+      for required_step in "${required_steps[@]}"; do
+        found_step=false
+        for meta_file in "${meta_files[@]}"; do
+          step="$(awk -F= '$1 == "step" { print substr($0, index($0, "=") + 1); found=1; exit } END { if (!found) exit 1 }' "$meta_file" 2>/dev/null || true)"
+          if [ "$step" = "$required_step" ]; then
+            found_step=true
+            break
+          fi
+        done
+        if [ "$found_step" = false ]; then
+          echo "review-report check failed: missing required validation evidence step $required_step" >&2
+          exit 1
+        fi
+      done
     fi
   fi
   echo "review-report check passed."

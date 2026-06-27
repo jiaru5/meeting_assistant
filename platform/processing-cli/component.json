@@ -2,7 +2,7 @@
   "id": "processing-cli",
   "kind": "project-component",
   "scope": "platform",
-  "business_behavior": "dependency_check_artifact_contract_import_media_audio_normalization_transcript_fake",
+  "business_behavior": "dependency_check_artifact_contract_import_media_audio_normalization_transcript_fake_whisper_cpp",
   "implemented_contracts": [
     "check_dependencies",
     "workspace_artifact_contract",
@@ -10,13 +10,14 @@
     "audio_source_selection",
     "normalized_audio_stage",
     "generate_transcript",
-    "transcription_fake_adapter"
+    "transcription_fake_adapter",
+    "transcription_whisper_cpp_adapter"
   ],
   "allowed_before_project_mode": false,
   "planned_runtime": "local processing and dependency-check CLI",
   "forbidden_capabilities": [
     "production_grade_transcoding",
-    "real_transcription_runtime",
+    "production_grade_transcription_quality",
     "speaker_labeling",
     "external_model_api",
     "automatic_downloads"

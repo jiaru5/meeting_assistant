@@ -12,9 +12,31 @@ from .settings import default_workspace
 from .transcript_processing import run_generate_transcript
 
 
+class ContractParseError(Exception):
+    pass
+
+
+class ContractArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise ContractParseError(message)
+
+
+EXIT_CODES = {
+    "invalid_input": 2,
+    "not_found": 3,
+    "artifact_missing": 3,
+    "path_conflict": 3,
+    "permission_denied": 4,
+    "dependency_missing": 4,
+    "capture_failed": 5,
+    "processing_failed": 5,
+    "internal_error": 1,
+}
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="meeting-assistant-cli")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser = ContractArgumentParser(prog="meeting-assistant-cli")
+    subparsers = parser.add_subparsers(dest="command", required=True, parser_class=ContractArgumentParser)
 
     check = subparsers.add_parser("check_dependencies")
     check.add_argument("--workspace-dir", default=None)
@@ -56,8 +78,31 @@ def _print_pretty(response: dict) -> None:
         print(f"warning: {warning}")
 
 
+def _parse_failure_response(message: str, argv: Sequence[str] | None) -> dict:
+    command = "unknown"
+    if argv:
+        first = str(argv[0])
+        if not first.startswith("-"):
+            command = first
+    return {
+        "ok": False,
+        "request_id": "local-parse-error",
+        "command": command,
+        "code": "invalid_input",
+        "message": "Invalid command input.",
+        "details": {"error": message},
+        "warnings": [],
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    actual_argv = list(sys.argv[1:] if argv is None else argv)
+    try:
+        args = build_parser().parse_args(actual_argv)
+    except ContractParseError as exc:
+        response = _parse_failure_response(str(exc), actual_argv)
+        print(json.dumps(response, ensure_ascii=False, sort_keys=True))
+        return _exit_code(response)
     if args.command == "check_dependencies":
         workspace = Path(args.workspace_dir).expanduser() if args.workspace_dir else default_workspace()
         response = run_dependency_check(workspace)
@@ -65,14 +110,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(response, ensure_ascii=False, sort_keys=True))
         else:
             _print_pretty(response)
-        return 0 if response["ok"] else 1
+        return _exit_code(response)
     if args.command == "import_media":
         response = run_import_media(Path(args.path), workspace=default_workspace(), title=args.title)
         if args.format == "json":
             print(json.dumps(response, ensure_ascii=False, sort_keys=True))
         else:
             _print_pretty(response)
-        return 0 if response["ok"] else 1
+        return _exit_code(response)
     if args.command == "generate_transcript":
         response = run_generate_transcript(
             args.session_id,
@@ -85,6 +130,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(response, ensure_ascii=False, sort_keys=True))
         else:
             _print_pretty(response)
-        return 0 if response["ok"] else 1
+        return _exit_code(response)
     print(f"unsupported command: {args.command}", file=sys.stderr)
     return 2
+
+
+def _exit_code(response: dict) -> int:
+    if response["ok"]:
+        return 0
+    return EXIT_CODES.get(str(response.get("code", "internal_error")), 1)

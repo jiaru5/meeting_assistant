@@ -37,9 +37,8 @@ def _failure_response(
         "code": code,
         "message": message,
         "warnings": [],
+        "details": details or {},
     }
-    if details:
-        response["details"] = details
     return response
 
 

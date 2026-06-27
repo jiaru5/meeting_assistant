@@ -99,6 +99,13 @@ MVP 首批 `import_media` 只支持用户显式提供的本地文件路径，不
 | `workspace_dir` | path | no | 要检查的会议 workspace；缺省使用默认 workspace |
 | `format` | enum `json`, `pretty` | no | 输出格式；自动化验证使用 `json` |
 
+`check_dependencies` 必须暴露本地 transcription runtime 的部署前置条件，但该检查不能替代真实 runtime smoke：
+
+1. 必须报告 `transcription.runtime`、`transcription.model`、`transcription.model.multilingual` 和 `transcription.hardware` 等检查项。
+2. `transcription.hardware` 只报告不含序列号、硬件 UUID、UDID 等敏感标识的本机能力摘要，例如 CPU 架构、芯片名称和内存等级；不得上传或保存到外部系统。
+3. 对 `large-v3`、`large-v3-turbo` 同级 multilingual 模型，Apple Silicon `arm64` 且 16 GB 及以上 unified memory 可作为本地运行 preflight 通过条件；8 GB 到 16 GB 之间只能报告 `constrained`，低于 8 GB 或非 Apple Silicon 报告不适合该推荐模型等级。
+4. 硬件 preflight 是部署建议和风险提示，不改变 `runtime=whisper_cpp` 的错误码语义；是否能作为 `PV-MA-007` covered 证据仍取决于真实 multilingual mixed-language smoke 纳入标准门禁。
+
 ### `generate_transcript`
 
 | 字段 | 类型 | 必填 | 说明 |
@@ -106,7 +113,35 @@ MVP 首批 `import_media` 只支持用户显式提供的本地文件路径，不
 | `session_id` | string | yes | 目标会话 |
 | `source_artifact_id` | string | no | 默认使用 `mixed_audio`；缺失时用户可选择可用音频 |
 | `language` | string | no | 可选语言提示 |
-| `runtime` | string | no | 可选转写 runtime 名称；缺省由本地 adapter 配置选择 |
+| `runtime` | enum `whisper_cpp` | no | 可选真实转写 runtime；缺省继续使用当前 adapter 默认策略 |
+
+VS-MA-06 的首个真实本地转写 runtime 选择为 `whisper_cpp`。本地配置必须使用人工准备的 `whisper.cpp` CLI 可执行文件和本地模型文件，不自动下载模型、二进制或调用外部 API：
+
+| 配置 | 必填条件 | 说明 |
+|---|---|---|
+| `runtime=whisper_cpp` | 显式请求真实 runtime 时必填 | 其他 runtime 值必须返回 `invalid_input` |
+| `MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME` | `runtime=whisper_cpp` 时必填 | 指向 `whisper.cpp` CLI 可执行文件，或可在 `PATH` 中解析的命令名 |
+| `MEETING_ASSISTANT_TRANSCRIPTION_MODEL` | `runtime=whisper_cpp` 时必填 | 指向用户人工准备的本地 Whisper-compatible multilingual 模型文件 |
+
+本机共享放置约定用于复用正式 runtime、模型和 smoke fixture，但不作为自动发现或下载机制：
+
+| 资产 | 推荐位置 | 说明 |
+|---|---|---|
+| `whisper.cpp` runtime | `~/.local/opt/whisper.cpp/<version>/bin/whisper-cli`，并通过 `~/.local/bin/whisper-cli` 建立 symlink | runtime 可跨项目复用；升级版本时只调整 symlink |
+| Whisper multilingual 模型 | `~/.local/share/ai-models/whisper.cpp/<model-family>/...` | 例如 `large-v3-turbo` 或量化 `large-v3`；模型文件不得提交到项目仓库 |
+| 中英混合 smoke WAV | `~/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav` | fixture 必须是不含真实会议敏感内容的小样例 |
+
+即使文件位于推荐目录，`generate_transcript runtime=whisper_cpp` 仍必须由 `MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME` 和 `MEETING_ASSISTANT_TRANSCRIPTION_MODEL` 显式指定目标路径。
+
+会议语音以中文为主但常混入英文技术词汇，例如 `HTTP`、`LLM`、`clean architecture`、`EDA`。用于真实 smoke 和 `PV-MA-007` covered 证据的模型必须是 multilingual Whisper-compatible 模型，不能使用 English-only `.en` 模型作为完整覆盖证据；优先选择能稳定处理中英混合语音的 `large-v3` 或 `large-v3-turbo` 同级本地模型。较小 multilingual 模型只能作为低质量或开发 smoke 证据，不能单独证明产品级识别质量。
+
+`runtime=whisper_cpp` 的错误语义：
+
+1. 非 `whisper_cpp` 的 runtime 值必须返回 `invalid_input`，不得创建或覆盖 transcript artifact。
+2. runtime 可执行文件、模型路径缺失、不可读或不可执行必须返回 `dependency_missing`。
+3. runtime 进程执行失败、输出无法解析或 transcript segments 不满足排序与时间范围契约时，必须返回 `processing_failed`。
+4. 失败不得覆盖原始媒体、已有有效 transcript artifact 或未选择替换的派生 artifact。
+5. fake adapter 仍是确定性契约测试替身；fake adapter 证据不得作为真实 runtime covered 证据。
 
 ### `generate_speaker_labels`
 
@@ -178,7 +213,8 @@ MVP 首批 `import_media` 只支持用户显式提供的本地文件路径，不
   "command": "start_native_recording",
   "code": "permission_denied",
   "message": "可读错误摘要",
-  "details": []
+  "details": [],
+  "warnings": []
 }
 ```
 
@@ -212,7 +248,7 @@ CLI exit code 断言：
 | `stop_recording` | `session_id`, `status`, `artifacts`; 不可用目标产物必须在对应 artifact 中给出 `capture_status` 和 `degradation_reason` | `code`, `message`, `details`; 缺失会话使用 `not_found`，重复或冲突使用可解释的当前最终状态或 `path_conflict` |
 | `import_media` | `session_id`, `source_type`, `artifacts`; artifact 至少包含 `id`, `artifact_type`, `format`, `path`, `checksum` | `code`, `message`, `details`; 不支持格式、目录、缺失路径、非法路径和 unknown field 使用 `invalid_input` |
 | `check_dependencies` | `command`, `checks`, `warnings`; 每个 check 至少包含 `id`, `status`, `required`, `message` | `code`, `message`, `checks`, `warnings`; 缺失必需依赖使用 `dependency_missing` |
-| `generate_transcript` | `session_id`, `transcript_id`, `artifact_id`, `segment_count`, `warnings` | `code`, `message`, `details`; 缺失音频或 transcript 输入使用 `artifact_missing`，adapter 失败使用 `processing_failed` |
+| `generate_transcript` | `session_id`, `transcript_id`, `artifact_id`, `segment_count`, `warnings` | `code`, `message`, `details`; 缺失音频或 transcript 输入使用 `artifact_missing`；非法 runtime 使用 `invalid_input`；runtime 或模型缺失使用 `dependency_missing`；adapter 或 runtime 执行失败使用 `processing_failed` |
 | `generate_speaker_labels` | `session_id`, `transcript_id`, `label_status`, `speaker_labels_artifact_id`, `warnings`; transcript-only 降级时 `label_status=transcript_only` 并给出 `degradation_reason` | `code`, `message`, `details`; 缺失 transcript 使用 `artifact_missing`，adapter 失败使用 `processing_failed`，但允许按规则降级为成功的 transcript-only 响应 |
 | `export_transcript` | `session_id`, `export_type`, `export_package_id`, `target_path` 或 `content`, `warnings` | `code`, `message`, `details`; 缺失 transcript 使用 `artifact_missing`，导出路径冲突使用 `path_conflict` |
 | `delete_session` | `session_id`, `deleted`, `deleted_items`, `retained_external_exports`, `warnings`; 删除完成或部分失败必须返回摘要 | `code`, `message`, `details`; `confirm` 非 `true` 使用 `invalid_input`，越界或 symlink 逃逸使用 `path_conflict`，目标不存在使用 `not_found` |
@@ -236,7 +272,7 @@ CLI exit code 断言：
 | 外部系统 | 集成方式 | MVP 状态 | 约束 |
 |---|---|---|---|
 | GPT 或其他外部 LLM 工具 | 用户手动复制或导出 transcript 后自行使用 | 允许的用户动作 | 应用不自动上传、不保存外部账号或 API key |
-| Transcription adapter | 本地依赖或模型 | planned | 先稳定 adapter contract；首个候选可复用现有本地 Whisper，具体 runtime 由 dependency check 报告 |
+| Transcription adapter | 本地 `whisper.cpp` CLI + 用户人工准备的 multilingual Whisper-compatible 模型 | planned | 先稳定 adapter contract；真实 runtime 使用 `runtime=whisper_cpp` 和本地路径配置；不自动下载，不调用外部 API |
 | Speaker labeling engine | 本地依赖或模型 | planned with fallback | 无可用引擎时允许降级为 transcript-only，并记录原因 |
 | FFmpeg 或兼容媒体处理工具 | 本地依赖 | planned | 通过 bootstrap/check 脚本验证 |
 

@@ -267,3 +267,84 @@ ADR 记录决策背景、取舍和历史原因。当前可执行规则必须维�
 - 先创建 Web 前端、远程后端服务和数据库：拒绝，因为 Phase 1 产品事实是本地 macOS 文件化工具。
 - 使用 Playwright 作为当前原生 UI 主测试工具：拒绝，因为当前没有 Web UI，SwiftUI 状态应通过 Swift/XCTest 体系验证。
 - 在代码中直接切换到 OBS/BlackHole/FFmpeg 主录制：拒绝，因为这会绕开已确认的 native-first 产品决策。
+
+## ADR-20260627-01: VS-MA-06 使用 whisper.cpp 和 Multilingual Whisper 模型
+
+状态：Accepted
+
+背景：
+- `generate_transcript` 的 fake adapter 契约已经建立，但 `PV-MA-007` 仍需要真实本地 runtime smoke 才能进入 covered。
+- 会议语音以中文为主，常夹杂 `HTTP`、`LLM`、`clean architecture`、`EDA` 等英文技术词汇；English-only 转写模型不能覆盖该产品场景。
+- MVP 仍是本地优先工具，不允许自动下载模型、二进制或调用外部模型 API。
+
+决策：
+- VS-MA-06 的首个真实 transcription runtime 固定为 `runtime=whisper_cpp`。
+- `MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME` 指向用户本机的 `whisper.cpp` CLI 可执行文件或可解析命令名。
+- `MEETING_ASSISTANT_TRANSCRIPTION_MODEL` 指向用户人工准备的本地 Whisper-compatible multilingual 模型文件。
+- 真实 smoke 和 `PV-MA-007` covered 证据必须使用 multilingual 模型并覆盖中英混合技术词汇；English-only `.en` 模型不能作为完整覆盖证据。
+- fake adapter 继续作为确定性契约测试替身；fake adapter 证据不能替代真实 runtime covered 证据。
+- runtime 或模型缺失时 fail closed，按 `06-api-contracts.md` 返回 `dependency_missing`；非法 runtime 返回 `invalid_input`；runtime 执行或输出解析失败返回 `processing_failed`。
+
+影响：
+- `06-api-contracts.md` 固定 `runtime=whisper_cpp`、本地配置字段和错误语义。
+- `08-implementation-guidance.md` 和 `13-security-and-compliance.md` 约束人工安装、无自动下载、无外部 API 和 multilingual 模型要求。
+- `06-product-validation-matrix.md` 中 `PV-MA-007` 在真实 runtime smoke 和标准门禁落地前保持 `partial`。
+
+备选方案：
+- 继续保持未指定“本地 Whisper”候选：拒绝，因为无法定义 runtime 缺失、模型路径和验证边界。
+- 使用 English-only `.en` Whisper 模型：拒绝，因为不能覆盖中英混合会议语音。
+- 自动下载模型或二进制：MVP 拒绝，因为会扩大供应链、许可证和 agent 权限范围。
+- 外部云转写 API：MVP 拒绝，因为会改变隐私、API、凭据和合规边界。
+
+## ADR-20260627-02: Whisper 部署前增加非敏感硬件 Preflight
+
+状态：Accepted
+
+背景：
+- VS-MA-06 已选择本地 `whisper.cpp` CLI 和用户人工准备的 multilingual Whisper 模型。
+- 用户的会议场景需要处理中英混合语音，推荐模型等级是 `large-v3` 或 `large-v3-turbo` 同级本地模型。
+- 部署模型前需要知道当前 Mac 是否适合所选模型，但安全规范禁止输出序列号、硬件 UUID、UDID 等设备唯一标识。
+
+决策：
+- `check_dependencies` 增加 `transcription.hardware` 检查项，报告 CPU 架构、芯片名称、内存等级和所选模型等级。
+- Apple Silicon `arm64` 且 16 GB 及以上 unified memory 可作为 `large-v3`、`large-v3-turbo` 同级 multilingual 模型的 preflight 通过条件。
+- Apple Silicon 8 GB 到 16 GB 之间报告 `constrained`，低于 8 GB 或非 Apple Silicon 对推荐模型等级报告 `unsupported`。
+- 硬件 preflight 只作为部署风险判断，不替代真实模型加载、mixed-language runtime smoke、模型来源、license/hash 或 provenance 审查。
+
+影响：
+- `06-api-contracts.md` 定义 `check_dependencies` 的 `transcription.hardware` 响应语义。
+- `08-implementation-guidance.md` 定义本地硬件 preflight 策略。
+- `13-security-and-compliance.md` 和 `10-security-and-supply-chain.md` 限制硬件摘要不得包含设备唯一标识。
+- `06-product-validation-matrix.md` 中 `PV-MA-005` 可记录硬件 preflight 自动化证据；`PV-MA-007` 在真实 multilingual mixed-language smoke 前仍保持 `partial`。
+
+备选方案：
+- 不做硬件检查：拒绝，因为部署真实模型前无法向用户解释可运行性风险。
+- 使用 `system_profiler` 完整输出作为 evidence：拒绝，因为其中可能包含序列号、硬件 UUID 和 Provisioning UDID。
+- 用硬件 preflight 直接推进 `PV-MA-007` covered：拒绝，因为它不能证明真实转写质量或 mixed-language 术语识别。
+
+## ADR-20260627-03: 本机共享 Whisper Runtime、模型和 ASR Fixture 目录
+
+状态：Accepted
+
+背景：
+- 正式 `whisper.cpp` runtime、multilingual Whisper 模型和 mixed-language smoke WAV 未来会被 `meeting_assistant` 之外的本地项目复用。
+- 大型模型和本地工具不应放在单个项目仓库或项目 `.tools` 目录中，避免重复占用磁盘、误提交和项目之间路径耦合。
+- MVP 仍坚持人工准备依赖，不允许 agent 或应用自动下载模型、二进制或外部脚本。
+
+决策：
+- 用户级共享 runtime 版本目录为 `~/.local/opt/whisper.cpp/<version>/bin/whisper-cli`。
+- 当前 runtime 入口为 `~/.local/bin/whisper-cli` symlink，指向已人工准备和验证的版本目录。
+- Whisper 模型目录为 `~/.local/share/ai-models/whisper.cpp/<model-family>/`，例如 `large-v3-turbo/` 或 `large-v3/`。
+- 中英混合 ASR smoke fixture 路径为 `~/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav`。
+- `generate_transcript runtime=whisper_cpp` 仍必须由 `MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME` 和 `MEETING_ASSISTANT_TRANSCRIPTION_MODEL` 显式指定路径；共享目录约定不是自动发现、自动下载或自动安装机制。
+
+影响：
+- `06-api-contracts.md` 和 `08-implementation-guidance.md` 记录推荐路径和显式配置边界。
+- `13-security-and-compliance.md` 和 `10-security-and-supply-chain.md` 明确大型模型和 fixture 不进入项目仓库、缓存目录或真实会议 workspace。
+- `check_dependencies` 可以在缺失 runtime/model 时提示推荐路径，但不能自动创建 symlink 或复制模型。
+- `PV-MA-007` covered 条件不变：仍需要真实 multilingual mixed-language smoke 纳入标准门禁。
+
+备选方案：
+- 放入 `meeting_assistant/.tools`：拒绝，因为 runtime 和模型会被多个项目复用，且会把大型资产耦合到单个项目。
+- 放入 `/opt/homebrew` 或 `/usr/local`：拒绝作为手工默认路径，因为权限和包管理边界更复杂；Homebrew 可管理 runtime，但模型仍不应放入包管理目录。
+- 放入 `Downloads`、`Desktop` 或 `Library/Caches`：拒绝，因为容易被清理、误删或混入临时文件。

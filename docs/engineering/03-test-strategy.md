@@ -46,6 +46,7 @@ Playwright 只在后续引入 Web UI 时作为 Web mocked/full-stack E2E 工具�
 | 命令 schema | `06-api-contracts.md` 已定义目标命令的输入、成功响应关键字段、失败响应关键字段、错误码、unknown field fail-fast 和 exit code；测试能断言 JSON object，而不是只看 stdout 字符串 | 先补 API 契约和本地命令契约测试；相关 `PV-MA-*` 保持 `planned` 或 `partial` |
 | Artifact schema | `07-data-and-events.md` 已定义 `session.json`、artifact registry、`transcript.json`、`speaker_labels.json` 或 delete summary 的最小字段和路径边界 | 先补文件契约测试和 fixture；不得通过 ad hoc 文件内容判断产品完成 |
 | 确定性 fixture | 测试使用临时 workspace、受控 clock 或可断言时间格式、小型媒体 fixture、fake adapter 和固定依赖状态；不得依赖用户真实会议数据或本机常驻服务 | 先补 fixture/fake adapter；真实 runtime smoke 只能作为附加证据 |
+| 本地转写 runtime smoke | VS-MA-06 使用 `runtime=whisper_cpp`、本地 `whisper.cpp` CLI 和用户人工准备的 multilingual Whisper-compatible 模型；`check_dependencies` 必须报告不含设备唯一标识的硬件 preflight；小 WAV fixture 必须包含中文为主且夹杂 `HTTP`、`LLM`、`clean architecture`、`EDA` 等英文技术词汇；不得自动下载模型或调用外部 API | runtime 或模型缺失时先覆盖 `dependency_missing`；硬件 preflight 只能证明部署适配风险，不能替代真实 mixed-language smoke；真实 runtime smoke 未能在标准门禁稳定运行前，`PV-MA-007` 保持 `partial` |
 | UI locator | SwiftUI 控件和状态有 accessible name、状态文本和稳定 accessibility identifier；测试可定位权限、依赖、录制、处理、回查、导出和删除状态 | 先补 view model、locator 和 XCUITest/Swift Testing 基础；不能只以人工截图作为长期证据 |
 | 负向用例 | 至少覆盖 unknown field、非法 enum、缺失必填字段、权限缺失、依赖缺失、artifact 缺失、路径越界、symlink 逃逸、处理失败、导出冲突、确认缺失、no-auto-upload 和 no-auto-download | 先补负向测试；未覆盖的高风险边界必须写入验证矩阵缺口 |
 | 证据入口 | `06-product-validation-matrix.md` 必须写明目标测试文件或脚本、标准命令入口、当前证据、阻塞缺口和关闭条件 | 不能只写“未来测试”；缺少目标入口时不能标 `covered`，也不应扩大产品实现范围 |

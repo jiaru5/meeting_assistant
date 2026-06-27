@@ -13,8 +13,10 @@ run_step() {
   ./scripts/evidence-run.sh check "$name" "$@"
 }
 
+run_step docs-check ./scripts/docs-check.sh
 run_step adoption ./scripts/adoption-check.sh
 run_step manifest ./scripts/project-manifest-check.sh current
+run_step harness-self-test ./scripts/harness-self-test.sh
 run_step compose ./scripts/compose-check.sh
 run_step workflow ./scripts/agent-workflow-check.sh
 run_step prod-config ./scripts/prod-config-check.sh

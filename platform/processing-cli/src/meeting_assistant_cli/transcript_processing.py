@@ -8,6 +8,8 @@ from typing import Callable, Optional
 
 from .audio_processing import run_audio_normalization
 from .settings import default_workspace
+from .transcription_runtime_config import SUPPORTED_TRANSCRIPTION_RUNTIME
+from .whisper_cpp_adapter import validate_whisper_cpp_config, whisper_cpp_transcript_adapter
 from .workspace_contract import (
     ContractError,
     ORIGINAL_MEDIA_ARTIFACT_TYPES,
@@ -46,9 +48,8 @@ def _failure_response(
         "code": code,
         "message": message,
         "warnings": [],
+        "details": details or {},
     }
-    if details:
-        response["details"] = details
     return response
 
 
@@ -67,6 +68,11 @@ def _success_response(
         "artifacts": [artifact],
         "warnings": [],
     }
+    transcript_path = Path(str(artifact["path"]))
+    payload = json.loads(transcript_path.read_text(encoding="utf-8"))
+    response["transcript_id"] = payload["id"]
+    response["artifact_id"] = artifact["id"]
+    response["segment_count"] = len(payload.get("segments", []))
     if reused:
         response["reused"] = True
         response["warnings"] = ["transcript_text already exists; existing transcript artifact was reused."]
@@ -167,7 +173,12 @@ def _select_transcription_input(
 
 def _fake_transcript_adapter(audio_path: Path, language: str | None, runtime: str | None) -> list[dict]:
     if runtime:
-        raise _unsupported_runtime_error(runtime)
+        validate_whisper_cpp_config(runtime)
+        raise ContractError(
+            "processing_failed",
+            "Explicit transcription runtime selection cannot use the fake adapter.",
+            runtime=runtime,
+        )
     if not audio_path.is_file():
         raise ContractError("artifact_missing", "Transcription input audio file was not found.", path=str(audio_path))
     text = "Fake transcript generated from local audio."
@@ -181,14 +192,6 @@ def _fake_transcript_adapter(audio_path: Path, language: str | None, runtime: st
             "text": text,
         }
     ]
-
-
-def _unsupported_runtime_error(runtime: str) -> ContractError:
-    return ContractError(
-        "processing_failed",
-        "Explicit transcription runtime selection is not implemented by the fake adapter in this slice.",
-        runtime=runtime,
-    )
 
 
 def _normalized_segments(raw_segments: list[dict]) -> list[dict]:
@@ -290,6 +293,23 @@ def _matching_transcript(session_dir: Path, source_artifact_id: str, *, language
     return None
 
 
+def _reject_existing_transcript_for_runtime(session_dir: Path, runtime: str) -> None:
+    session = load_session(session_dir)
+    for artifact in session.get("artifacts", []):
+        if artifact.get("artifact_type") != "transcript_text":
+            continue
+        verify_registered_artifacts(session_dir, {"transcript_text"})
+        path = _available_artifact(session_dir, artifact)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        _validate_transcript_payload(payload)
+        raise ContractError(
+            "processing_failed",
+            "transcript_text already exists but runtime metadata is not available; replace policy is not defined in this slice.",
+            runtime=runtime,
+            existing_artifact_id=artifact.get("id"),
+        )
+
+
 def _remove_registered_artifact(session_dir: Path, artifact_id: str) -> None:
     session = load_session(session_dir)
     artifacts = [artifact for artifact in session.get("artifacts", []) if artifact.get("id") != artifact_id]
@@ -319,10 +339,13 @@ def run_generate_transcript(
     destination_written = False
 
     try:
+        if runtime and runtime != SUPPORTED_TRANSCRIPTION_RUNTIME:
+            validate_whisper_cpp_config(runtime)
         session_dir = session_directory(workspace_path, session_id)
         load_session(session_dir)
         if runtime:
-            raise _unsupported_runtime_error(runtime)
+            validate_whisper_cpp_config(runtime)
+            _reject_existing_transcript_for_runtime(session_dir, runtime)
         if source_artifact_id is None:
             existing_default = _existing_transcript(session_dir, None, language=language)
             if existing_default is not None:
@@ -354,10 +377,13 @@ def run_generate_transcript(
         with acquire_session_lock(session_dir):
             try:
                 verify_registered_artifacts(session_dir, ORIGINAL_MEDIA_ARTIFACT_TYPES | {"normalized_audio"})
+                if runtime:
+                    _reject_existing_transcript_for_runtime(session_dir, runtime)
                 existing = _existing_transcript(session_dir, str(source.get("id")), language=language)
                 if existing is not None:
                     return _success_response(request_id=assigned_request_id, session_id=session_id, artifact=existing, reused=True)
-                segments = _normalized_segments((adapter or _fake_transcript_adapter)(source_path, language, runtime))
+                selected_adapter = adapter or (whisper_cpp_transcript_adapter if runtime else _fake_transcript_adapter)
+                segments = _normalized_segments(selected_adapter(source_path, language, runtime))
                 payload = _transcript_payload(
                     session_id=session_id,
                     source_artifact_id=str(source.get("id")),

@@ -18,7 +18,7 @@
 |---|---|---|
 | 录制 | 原生 macOS 录制优先；辅助 capture adapter 只能在技术 spike 证明 native 不可行后经 spec-change/ADR 纳入 | confirmed |
 | 媒体处理 | 本地媒体处理工具，候选包括 FFmpeg 或兼容能力 | 已确认方向；具体依赖后续确定 |
-| 转写 | Adapter-first 本地转写；首个候选可复用现有本地 Whisper | confirmed |
+| 转写 | Adapter-first 本地转写；首个真实 runtime 使用本地 `whisper.cpp` CLI + multilingual Whisper-compatible 模型 | confirmed |
 | Speaker labeling | 本地 best-effort 匿名 speaker labeling；无可用引擎时降级 transcript-only | confirmed |
 | 纪要生成 | 非 MVP 必需；用户可手动复制 transcript 到 GPT | confirmed |
 | UI 交互面 | 最小 Swift/SwiftUI app + local helper / processing CLI | confirmed |
@@ -114,7 +114,7 @@ flowchart LR
 |---|---|---|
 | 原生 macOS 工具链 | 通过 bootstrap/check 脚本检查；人工安装 | 允许来源为 Apple 官方 Xcode/Command Line Tools |
 | 媒体工具 | 通过 bootstrap/check 脚本检查；人工安装 | FFmpeg 或兼容能力是候选；脚本只检查，不自动下载 |
-| 转写模型/runtime | Adapter-first，通过 bootstrap/check 脚本检查；人工安装 | 首个候选可复用现有本地 Whisper；具体 adapter 在组件骨架后落地 |
+| 转写模型/runtime | Adapter-first，通过 bootstrap/check 脚本检查；人工安装 | VS-MA-06 首个真实 runtime 为本地 `whisper.cpp` CLI；模型必须由用户人工准备为 multilingual Whisper-compatible 本地文件 |
 | Speaker labeling runtime | 通过 bootstrap/check 脚本检查；人工安装；允许缺失时降级 | WhisperX、pyannote.audio 或其他方案可作为后续 adapter 候选 |
 | OBS/BlackHole | 不作为 MVP 主录制依赖 | 原生录制失败或用户改决策后可重新评估 |
 | External GPT | 不作为应用依赖 | 仅允许用户手动复制或导出 transcript 后自行使用 |
@@ -162,6 +162,28 @@ Phase 1 采用 bootstrap/check 脚本，而不是一次性打包所有依赖。�
 6. workspace 路径是否可写。
 7. macOS 录屏、麦克风和文件访问权限状态是否可检测。
 8. 依赖来源是否在允许来源清单内；版本/hash 锁定作为后续增强，不阻塞 MVP activation。
+9. 本机硬件是否适合推荐的本地 transcription 模型等级；该检查只输出 CPU 架构、芯片名称和内存等级等非敏感摘要，不输出序列号、硬件 UUID 或 UDID。
+
+## 本地转写 Runtime 策略
+
+VS-MA-06 的目标是在不破坏 fake adapter 契约的前提下，接入或准备接入首个真实本地 transcription runtime。首个真实 runtime 固定为 `whisper_cpp`：
+
+1. `runtime=whisper_cpp` 通过 `MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME` 指向本地 `whisper.cpp` CLI 可执行文件，或可在 `PATH` 中解析的命令名。
+2. `MEETING_ASSISTANT_TRANSCRIPTION_MODEL` 指向用户人工准备的本地 Whisper-compatible 模型文件。
+3. 检查和运行不得自动下载模型、二进制、驱动或外部脚本，也不得调用外部 API。
+4. 会议语音默认需要处理中英混合：中文为主，夹杂 `HTTP`、`LLM`、`clean architecture`、`EDA` 等英文技术词汇。真实 smoke 和 `PV-MA-007` covered 证据必须使用 multilingual 模型，不能使用 English-only `.en` 模型作为完整覆盖证据；优先使用 `large-v3` 或 `large-v3-turbo` 同级本地模型。
+5. 小样例 smoke 必须固定在仓库测试或标准门禁可调用路径中，并包含中英混合技术词汇断言；没有真实 runtime 和该 smoke 证据时，`PV-MA-007` 保持 `partial`。
+6. fake adapter 仍保留为确定性契约测试替身；真实 runtime adapter 必须输出与 fake adapter 一致的 `transcript.json` 契约：segments 按时间排序，`start_ms < end_ms`，失败不覆盖原始媒体或已有有效 transcript。
+7. 在 replace policy 和 runtime metadata 尚未完整落地前，显式 runtime 请求不得复用不匹配或无法证明匹配的现有 transcript。
+8. 部署 `whisper.cpp` 前必须用 `check_dependencies` 报告本机硬件 preflight：Apple Silicon `arm64` 且 16 GB 及以上 unified memory 可支持推荐的 `large-v3`、`large-v3-turbo` 同级 multilingual 模型进入真实 smoke；8 GB 到 16 GB 之间只能作为受限环境；低于 8 GB 或非 Apple Silicon 不适合作为该模型等级的产品验证环境。硬件 preflight 不能替代实际模型加载和 mixed-language smoke。
+
+本机共享资产采用用户级目录，不放入项目仓库或单个项目的 `.tools` 目录：
+
+1. runtime 版本目录：`~/.local/opt/whisper.cpp/<version>/bin/whisper-cli`。
+2. runtime 当前入口：`~/.local/bin/whisper-cli`，指向当前选定版本的 symlink。
+3. 模型根目录：`~/.local/share/ai-models/whisper.cpp/`，按模型族分目录，例如 `large-v3-turbo/`、`large-v3/`。
+4. ASR smoke fixture：`~/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav`。
+5. 该目录约定服务多个本地项目复用；应用和脚本只能检查、提示和使用用户显式配置的路径，不得自动下载、自动复制模型或静默改写 symlink。
 
 ## 配置和环境
 

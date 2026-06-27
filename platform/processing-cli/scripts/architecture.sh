@@ -11,8 +11,8 @@ grep -q "implements the workspace artifact contract kernel" tests/ArchitectureTe
 grep -q "implements the \`import_media\` command contract" tests/ArchitectureTest.md
 grep -q "implements the internal normalized audio stage" tests/ArchitectureTest.md
 grep -q "must not expose \`normalize_audio\` as a public command" tests/ArchitectureTest.md
-grep -q "implements the \`generate_transcript\` command contract with a deterministic fake transcription adapter" tests/ArchitectureTest.md
-grep -q "must not implement production-grade media transcoding, a real transcription runtime" tests/ArchitectureTest.md
+grep -q "implements the \`generate_transcript\` command contract with a deterministic fake transcription adapter and a minimal \`whisper.cpp\` runtime adapter" tests/ArchitectureTest.md
+grep -q "must not implement production-grade media transcoding, production-grade transcription quality gates" tests/ArchitectureTest.md
 
 PYTHONPATH=src python3 - <<'PY'
 import argparse

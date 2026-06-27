@@ -45,6 +45,10 @@
 3. Agent 不得自行放宽 `harness/agent-policy.json`、网络 allowlist、CI 安全门禁或外部写权限来获取依赖。
 4. 版本/hash 锁定、许可证自动门禁和依赖签名验证作为后续增强；在真实 dependency-check 实现前至少必须有允许来源说明和人工安装边界。
 5. 如果后续需要自动下载依赖、模型或二进制，必须先更新本分卷、`13-security-and-compliance.md`、`harness/agent-policy.json` 和 ADR。
+6. VS-MA-06 的首个真实 transcription runtime 为本地 `whisper.cpp` CLI：`MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME` 只能指向本地可执行文件或可解析命令名，`MEETING_ASSISTANT_TRANSCRIPTION_MODEL` 只能指向用户人工准备的本地 multilingual Whisper-compatible 模型文件。
+7. English-only `.en` Whisper 模型不能作为 `PV-MA-007` covered 证据；真实 smoke 必须覆盖中文为主且夹杂英文技术词汇的会议音频，并记录 no-auto-download 证据。
+8. `check_dependencies` 的 transcription hardware preflight 只能输出 CPU 架构、芯片名称和内存等级等非敏感摘要，不得输出序列号、硬件 UUID 或 Provisioning UDID；该 preflight 只用于部署风险判断，不能替代模型 provenance、license/hash 审查或真实 runtime smoke。
+9. 用户级共享资产目录固定为 `~/.local/opt/whisper.cpp/`、`~/.local/bin/whisper-cli`、`~/.local/share/ai-models/whisper.cpp/` 和 `~/.local/share/ai-fixtures/asr/zh-en-tech/`。项目脚本可以检查并提示这些位置，但不得自动下载、自动复制模型、自动创建 runtime symlink 或把大型模型提交到仓库。
 
 ## 制品和来源
 

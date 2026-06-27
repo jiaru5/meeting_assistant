@@ -16,6 +16,7 @@ root = Path(".")
 required = [
     "README.md",
     "component.json",
+    "scripts/smoke-whisper-cpp.sh",
     "src/meeting_assistant_cli/__main__.py",
     "src/meeting_assistant_cli/audio_processing.py",
     "src/meeting_assistant_cli/cli.py",
@@ -23,6 +24,8 @@ required = [
     "src/meeting_assistant_cli/import_media.py",
     "src/meeting_assistant_cli/settings.py",
     "src/meeting_assistant_cli/transcript_processing.py",
+    "src/meeting_assistant_cli/transcription_runtime_config.py",
+    "src/meeting_assistant_cli/whisper_cpp_adapter.py",
     "src/meeting_assistant_cli/workspace_contract.py",
     "tests/ArchitectureTest.md",
     "tests/test_audio_processing.py",
@@ -39,8 +42,8 @@ if missing:
 metadata = json.loads((root / "component.json").read_text(encoding="utf-8"))
 if metadata.get("id") != "processing-cli":
     raise SystemExit("processing-cli lint failed: component id mismatch")
-if metadata.get("business_behavior") != "dependency_check_artifact_contract_import_media_audio_normalization_transcript_fake":
-    raise SystemExit("processing-cli lint failed: business behavior must be dependency_check_artifact_contract_import_media_audio_normalization_transcript_fake")
+if metadata.get("business_behavior") != "dependency_check_artifact_contract_import_media_audio_normalization_transcript_fake_whisper_cpp":
+    raise SystemExit("processing-cli lint failed: business behavior must be dependency_check_artifact_contract_import_media_audio_normalization_transcript_fake_whisper_cpp")
 implemented_contracts = set(metadata.get("implemented_contracts", []))
 if {
     "check_dependencies",
@@ -50,11 +53,12 @@ if {
     "normalized_audio_stage",
     "generate_transcript",
     "transcription_fake_adapter",
+    "transcription_whisper_cpp_adapter",
 } - implemented_contracts:
     raise SystemExit("processing-cli lint failed: implemented contract list is incomplete")
 required_forbidden = {
     "production_grade_transcoding",
-    "real_transcription_runtime",
+    "production_grade_transcription_quality",
     "speaker_labeling",
     "external_model_api",
     "automatic_downloads",

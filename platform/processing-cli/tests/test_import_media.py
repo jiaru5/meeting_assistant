@@ -119,6 +119,66 @@ class ImportMediaTests(unittest.TestCase):
         self.assertTrue(artifact_exists)
         self.assertEqual(artifact_bytes, b"cli-source")
 
+    def test_cli_import_media_invalid_input_uses_contract_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            old_env = os.environ.copy()
+            os.environ["MEETING_ASSISTANT_WORKSPACE"] = str(workspace)
+            stdout = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = main(["import_media", "--path", str(root / "missing.wav"), "--format", "json"])
+            finally:
+                os.environ.clear()
+                os.environ.update(old_env)
+
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 2)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["code"], "invalid_input")
+        self.assertEqual(payload["details"]["path"], str(root / "missing.wav"))
+
+    def test_cli_missing_required_argument_emits_contract_json(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["import_media", "--format", "json"])
+
+        payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 2)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["command"], "import_media")
+        self.assertEqual(payload["code"], "invalid_input")
+        self.assertIn("--path", payload["details"]["error"])
+
+    def test_cli_unknown_argument_emits_contract_json(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["generate_transcript", "--session-id", "session-1", "--unknown-field", "value"])
+
+        payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 2)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["command"], "generate_transcript")
+        self.assertEqual(payload["code"], "invalid_input")
+        self.assertIn("--unknown-field", payload["details"]["error"])
+
+    def test_cli_illegal_enum_emits_contract_json(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["check_dependencies", "--format", "yaml"])
+
+        payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 2)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["command"], "check_dependencies")
+        self.assertEqual(payload["code"], "invalid_input")
+        self.assertIn("invalid choice", payload["details"]["error"])
+
     def test_unsupported_suffix_returns_invalid_input_without_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -34,6 +34,18 @@
 | THREAT-MA-004 | 本地依赖供应链 | 不可信工具或模型处理会议内容 | 安装来源不明、模型被替换 | bootstrap/check 显示依赖和模型摘要；只允许人工安装和允许来源 | 依赖检查输出 | 版本/hash 锁定作为后续增强 |
 | THREAT-MA-005 | AI speaker labeling | 错误 speaker labels 被误认为真实身份 | 混音、噪音、重叠说话导致错误标签 | UI 和导出中标记为匿名 best-effort；失败时降级 transcript-only | 处理日志记录引擎和失败状态 | 无法保证 diarization 准确率 |
 
+## 本地模型和 Runtime 边界
+
+VS-MA-06 的本地 transcription runtime 不改变 MVP 的隐私和供应链边界：
+
+1. `whisper.cpp` CLI 和 Whisper-compatible multilingual 模型必须由用户人工准备在本机，应用和 agent 不得自动下载。
+2. `MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME` 和 `MEETING_ASSISTANT_TRANSCRIPTION_MODEL` 只记录本地路径或命令摘要；日志不得记录完整会议音频、完整 transcript、外部账号或 API key。
+3. 真实 smoke 和 covered 证据必须使用 multilingual 模型，以覆盖中文为主、夹杂英文技术词汇的会议语音；English-only `.en` 模型不能作为产品级 covered 证据。
+4. runtime 或模型缺失时必须 fail closed，并返回 `06-api-contracts.md` 定义的错误码；不得静默回退到外部 API 或自动下载路径。
+5. 硬件 preflight 只能输出非敏感摘要，例如 CPU 架构、芯片名称和内存等级；不得输出或持久化本机序列号、硬件 UUID、Provisioning UDID 等设备唯一标识。
+6. 正式 runtime、模型和 ASR smoke fixture 使用 `~/.local` 下的用户级共享目录；不得保存在项目仓库、`Downloads`、`Desktop`、`Library/Caches` 或真实会议 workspace 中，避免误提交、缓存清理或敏感会议数据混入测试 fixture。
+7. 依赖版本、hash 锁定、许可证自动门禁和模型 provenance 自动校验作为后续硬化增强，进入团队分发或发布候选前重新审查。
+
 ## 安全验证基线
 
 1. Phase 1 不是 Web/API 多用户系统，不适用完整 Web ASVS 范围。
@@ -47,7 +59,7 @@
 |---|---|---|---|---|
 | 个人本地使用 | Phase 1 MVP | 不引入组织账号、云同步或远程审计 | `01-product-scope.md` | JeRRy |
 | 用户主动外部复制 | transcript export/copy | 应用不自动上传，外部工具处理由用户自行决定 | `06-api-contracts.md` | JeRRy |
-| 依赖人工安装和允许来源 | 原生工具链、媒体工具、转写 runtime、speaker labeling runtime | bootstrap/check 只检查和提示，不自动下载模型或二进制 | `08-implementation-guidance.md` | JeRRy |
+| 依赖人工安装和允许来源 | 原生工具链、媒体工具、`whisper.cpp` CLI、multilingual Whisper 模型、speaker labeling runtime | bootstrap/check 只检查和提示，不自动下载模型或二进制 | `08-implementation-guidance.md` | JeRRy |
 | 未来团队内部使用 | 后续团队内部使用 | 需要重新确认权限、共享、审计、安装和数据治理 | `10-open-decisions.md` | JeRRy |
 
 ## 生产就绪适用性

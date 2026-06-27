@@ -33,6 +33,64 @@ def wav_bytes(payload: bytes = b"\x00\x01") -> bytes:
     )
 
 
+def fake_whisper_cli(directory: Path, mode: str = "valid") -> str:
+    path = directory / "whisper-cli"
+    path.write_text(
+        f"""#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+MODE = {mode!r}
+args = sys.argv[1:]
+log_path = os.environ.get("MEETING_ASSISTANT_FAKE_WHISPER_ARGS_LOG")
+if log_path:
+    Path(log_path).write_text(json.dumps(args, ensure_ascii=False), encoding="utf-8")
+output_prefix = None
+for index, arg in enumerate(args):
+    if arg in {"--output-file", "-of"} and index + 1 < len(args):
+        output_prefix = args[index + 1]
+        break
+if output_prefix:
+    output_path = Path(output_prefix + ".json")
+    if MODE == "invalid_json":
+        output_path.write_text("not-json", encoding="utf-8")
+    elif MODE == "invalid_utf8_token_json":
+        payload = {{
+            "transcription": [{{"offsets": {{"from": 0, "to": 1200}}, "text": "中文 HTTP LLM clean architecture EDA"}}],
+            "tokens": [{{"text": "token-placeholder"}}],
+        }}
+        output_path.write_bytes(
+            json.dumps(payload, ensure_ascii=False).encode("utf-8").replace(b'"token-placeholder"', b'"\\xe8\\xae"')
+        )
+    elif MODE == "empty_segments":
+        output_path.write_text(json.dumps({{"transcription": []}}, ensure_ascii=False), encoding="utf-8")
+    elif MODE == "bad_offsets":
+        payload = {{"transcription": [{{"offsets": {{"from": 2000, "to": 1000}}, "text": "bad"}}]}}
+        output_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    else:
+        payload = {{
+            "transcription": [
+                {{"offsets": {{"from": 1000, "to": 2200}}, "text": "第二段 EDA"}},
+                {{"offsets": {{"from": 0, "to": 900}}, "text": "中文 HTTP LLM clean architecture"}},
+            ]
+        }}
+        output_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+raise SystemExit(int(os.environ.get("MEETING_ASSISTANT_FAKE_WHISPER_EXIT_CODE", "0")))
+""",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+    return str(path)
+
+
+def fake_model(directory: Path, name: str = "ggml-large-v3-turbo.bin") -> str:
+    path = directory / name
+    path.write_bytes(b"fake-whisper-model")
+    return str(path)
+
+
 def create_audio_session(workspace: Path, artifacts: list[tuple[str, str, bytes]]) -> Path:
     create_session(workspace, source_type="native_recording", session_id="session-1", status="recorded")
     session_dir = session_directory(workspace, "session-1")
@@ -106,6 +164,9 @@ class TranscriptProcessingTests(unittest.TestCase):
 
         self.assertTrue(response["ok"])
         self.assertEqual(response["command"], "generate_transcript")
+        self.assertEqual(response["transcript_id"], payload["id"])
+        self.assertEqual(response["artifact_id"], response["artifacts"][0]["id"])
+        self.assertEqual(response["segment_count"], 1)
         self.assertIn("normalized_audio", artifact_types)
         self.assertIn("transcript_text", artifact_types)
         self.assertTrue(normalized_exists)
@@ -233,7 +294,7 @@ class TranscriptProcessingTests(unittest.TestCase):
         self.assertFalse(transcript_exists)
         self.assertNotIn("transcript_text", artifact_types)
 
-    def test_explicit_runtime_is_rejected_before_creating_transcript_or_normalized_audio(self) -> None:
+    def test_unsupported_runtime_is_rejected_before_creating_transcript_or_normalized_audio(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
@@ -245,11 +306,196 @@ class TranscriptProcessingTests(unittest.TestCase):
             normalized_exists = (session_dir / "artifacts" / "normalized_audio.wav").exists()
 
         self.assertFalse(response["ok"])
-        self.assertEqual(response["code"], "processing_failed")
+        self.assertEqual(response["code"], "invalid_input")
         self.assertNotIn("transcript_text", artifact_types)
         self.assertNotIn("normalized_audio", artifact_types)
         self.assertFalse(transcript_exists)
         self.assertFalse(normalized_exists)
+
+    def test_unsupported_runtime_is_rejected_before_missing_session_lookup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+
+            response = run_generate_transcript("missing-session", workspace=workspace, runtime="not-supported")
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "invalid_input")
+        self.assertEqual(response["details"]["supported_runtime"], "whisper_cpp")
+
+    def test_whisper_cpp_missing_config_returns_dependency_missing_without_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+            with mock.patch.dict(os.environ, {}, clear=True):
+                response = run_generate_transcript("session-1", workspace=workspace, runtime="whisper_cpp")
+
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+            transcript_exists = (session_dir / "artifacts" / "transcript.json").exists()
+            normalized_exists = (session_dir / "artifacts" / "normalized_audio.wav").exists()
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "dependency_missing")
+        self.assertEqual(
+            response["details"]["missing"],
+            ["MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME", "MEETING_ASSISTANT_TRANSCRIPTION_MODEL"],
+        )
+        self.assertNotIn("transcript_text", artifact_types)
+        self.assertNotIn("normalized_audio", artifact_types)
+        self.assertFalse(transcript_exists)
+        self.assertFalse(normalized_exists)
+
+    def test_whisper_cpp_english_only_model_is_rejected_before_normalization(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            runtime_dir = root / "runtime"
+            runtime_dir.mkdir()
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+            env = {
+                "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME": fake_whisper_cli(runtime_dir),
+                "MEETING_ASSISTANT_TRANSCRIPTION_MODEL": fake_model(runtime_dir, "ggml-base.en-q5_0.bin"),
+            }
+            with mock.patch.dict(os.environ, env, clear=True):
+                response = run_generate_transcript("session-1", workspace=workspace, runtime="whisper_cpp")
+
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+            transcript_exists = (session_dir / "artifacts" / "transcript.json").exists()
+            normalized_exists = (session_dir / "artifacts" / "normalized_audio.wav").exists()
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "dependency_missing")
+        self.assertEqual(response["details"]["model_name"], "ggml-base.en-q5_0.bin")
+        self.assertNotIn("transcript_text", artifact_types)
+        self.assertNotIn("normalized_audio", artifact_types)
+        self.assertFalse(transcript_exists)
+        self.assertFalse(normalized_exists)
+
+    def test_configured_whisper_cpp_writes_transcript_from_runtime_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            runtime_dir = root / "runtime"
+            runtime_dir.mkdir()
+            args_log = root / "whisper-args.json"
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+            env = {
+                "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME": fake_whisper_cli(runtime_dir),
+                "MEETING_ASSISTANT_TRANSCRIPTION_MODEL": fake_model(runtime_dir),
+                "MEETING_ASSISTANT_FAKE_WHISPER_ARGS_LOG": str(args_log),
+            }
+            with mock.patch.dict(os.environ, env, clear=True):
+                response = run_generate_transcript("session-1", workspace=workspace, language="zh", runtime="whisper_cpp")
+
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+            payload = transcript_payload(response)
+            args = json.loads(args_log.read_text(encoding="utf-8"))
+
+        self.assertTrue(response["ok"])
+        self.assertIn("transcript_text", artifact_types)
+        self.assertIn("normalized_audio", artifact_types)
+        self.assertEqual(response["segment_count"], 2)
+        self.assertEqual([segment["text"] for segment in payload["segments"]], ["中文 HTTP LLM clean architecture", "第二段 EDA"])
+        self.assertEqual([segment["start_ms"] for segment in payload["segments"]], [0, 1000])
+        self.assertIn("--output-json-full", args)
+        self.assertIn("--no-prints", args)
+        self.assertIn("-l", args)
+        self.assertIn("zh", args)
+        self.assertIn("--prompt", args)
+        prompt_index = args.index("--prompt") + 1
+        self.assertEqual(args[prompt_index], "HTTP LLM clean architecture EDA")
+
+    def test_whisper_cpp_tolerates_invalid_utf8_in_unused_json_details(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            runtime_dir = root / "runtime"
+            runtime_dir.mkdir()
+            create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+            env = {
+                "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME": fake_whisper_cli(runtime_dir, "invalid_utf8_token_json"),
+                "MEETING_ASSISTANT_TRANSCRIPTION_MODEL": fake_model(runtime_dir),
+            }
+            with mock.patch.dict(os.environ, env, clear=True):
+                response = run_generate_transcript("session-1", workspace=workspace, language="zh", runtime="whisper_cpp")
+
+            payload = transcript_payload(response)
+
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["segment_count"], 1)
+        self.assertEqual(payload["segments"][0]["text"], "中文 HTTP LLM clean architecture EDA")
+
+    def test_whisper_cpp_invalid_json_returns_processing_failed_without_transcript(self) -> None:
+        for mode in ("invalid_json", "empty_segments", "bad_offsets"):
+            with self.subTest(mode=mode):
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    workspace = root / "workspace"
+                    runtime_dir = root / "runtime"
+                    runtime_dir.mkdir()
+                    session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+                    env = {
+                        "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME": fake_whisper_cli(runtime_dir, mode),
+                        "MEETING_ASSISTANT_TRANSCRIPTION_MODEL": fake_model(runtime_dir),
+                    }
+                    with mock.patch.dict(os.environ, env, clear=True):
+                        response = run_generate_transcript("session-1", workspace=workspace, runtime="whisper_cpp")
+
+                    transcript_exists = (session_dir / "artifacts" / "transcript.json").exists()
+                    artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+                self.assertFalse(response["ok"])
+                self.assertEqual(response["code"], "processing_failed")
+                self.assertFalse(transcript_exists)
+                self.assertNotIn("transcript_text", artifact_types)
+
+    def test_whisper_cpp_runtime_failure_returns_processing_failed_without_transcript(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            runtime_dir = root / "runtime"
+            runtime_dir.mkdir()
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+            env = {
+                "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME": fake_whisper_cli(runtime_dir),
+                "MEETING_ASSISTANT_TRANSCRIPTION_MODEL": fake_model(runtime_dir),
+                "MEETING_ASSISTANT_FAKE_WHISPER_EXIT_CODE": "7",
+            }
+            with mock.patch.dict(os.environ, env, clear=True):
+                response = run_generate_transcript("session-1", workspace=workspace, runtime="whisper_cpp")
+
+            transcript_exists = (session_dir / "artifacts" / "transcript.json").exists()
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "processing_failed")
+        self.assertEqual(response["details"]["exit_code"], 7)
+        self.assertFalse(transcript_exists)
+        self.assertNotIn("transcript_text", artifact_types)
+
+    def test_runtime_request_does_not_reuse_existing_transcript_without_runtime_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            runtime_dir = root / "runtime"
+            runtime_dir.mkdir()
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+            write_registered_transcript(session_dir, source_artifact_id="artifact-mixed_audio")
+            original_payload = (session_dir / "artifacts" / "transcript.json").read_text(encoding="utf-8")
+            env = {
+                "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME": fake_whisper_cli(runtime_dir),
+                "MEETING_ASSISTANT_TRANSCRIPTION_MODEL": fake_model(runtime_dir),
+            }
+            with mock.patch.dict(os.environ, env, clear=True):
+                response = run_generate_transcript("session-1", workspace=workspace, runtime="whisper_cpp")
+
+            final_payload = (session_dir / "artifacts" / "transcript.json").read_text(encoding="utf-8")
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "processing_failed")
+        self.assertEqual(final_payload, original_payload)
+        self.assertIn("transcript_text", artifact_types)
+        self.assertNotIn("normalized_audio", artifact_types)
 
     def test_existing_transcript_is_reused_without_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -365,7 +611,7 @@ class TranscriptProcessingTests(unittest.TestCase):
             artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
 
         self.assertFalse(response["ok"])
-        self.assertEqual(response["code"], "processing_failed")
+        self.assertEqual(response["code"], "invalid_input")
         self.assertIn("transcript_text", artifact_types)
         self.assertNotIn("normalized_audio", artifact_types)
 
@@ -428,6 +674,98 @@ class TranscriptProcessingTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["command"], "generate_transcript")
         self.assertEqual(payload["session_id"], "session-1")
+        self.assertEqual(payload["artifact_id"], payload["artifacts"][0]["id"])
+        self.assertEqual(payload["segment_count"], 1)
+
+    def test_cli_generate_transcript_missing_session_uses_contract_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            old_env = os.environ.copy()
+            os.environ["MEETING_ASSISTANT_WORKSPACE"] = str(workspace)
+            stdout = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = main(["generate_transcript", "--session-id", "missing-session", "--format", "json"])
+            finally:
+                os.environ.clear()
+                os.environ.update(old_env)
+
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 3)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["code"], "not_found")
+
+    def test_cli_generate_transcript_runtime_success_uses_zero_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            runtime_dir = root / "runtime"
+            runtime_dir.mkdir()
+            create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+            old_env = os.environ.copy()
+            os.environ.clear()
+            os.environ.update(
+                {
+                    "MEETING_ASSISTANT_WORKSPACE": str(workspace),
+                    "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME": fake_whisper_cli(runtime_dir),
+                    "MEETING_ASSISTANT_TRANSCRIPTION_MODEL": fake_model(runtime_dir),
+                }
+            )
+            stdout = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "generate_transcript",
+                            "--session-id",
+                            "session-1",
+                            "--runtime",
+                            "whisper_cpp",
+                            "--format",
+                            "json",
+                        ]
+                    )
+            finally:
+                os.environ.clear()
+                os.environ.update(old_env)
+
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["segment_count"], 2)
+
+    def test_cli_generate_transcript_runtime_dependency_missing_uses_contract_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+            old_env = os.environ.copy()
+            os.environ.clear()
+            os.environ["MEETING_ASSISTANT_WORKSPACE"] = str(workspace)
+            stdout = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "generate_transcript",
+                            "--session-id",
+                            "session-1",
+                            "--runtime",
+                            "whisper_cpp",
+                            "--format",
+                            "json",
+                        ]
+                    )
+            finally:
+                os.environ.clear()
+                os.environ.update(old_env)
+
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 4)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["code"], "dependency_missing")
 
 
 if __name__ == "__main__":

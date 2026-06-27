@@ -317,6 +317,165 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertIn("./scripts/architecture-check.sh", result.stdout)
             self.assertIn("./scripts/security-check.sh", result.stdout)
 
+    def test_review_report_require_evidence_rejects_stale_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            evidence_dir = fixture / ".harness/evidence/check"
+            evidence_dir.mkdir(parents=True)
+            for index in range(200):
+                (evidence_dir / f"stale-{index}.log").write_text("stale evidence\n", encoding="utf-8")
+                (evidence_dir / f"stale-{index}.meta").write_text(
+                    "\n".join(
+                        [
+                            f"step=stale-{index}",
+                            "exit_code=0",
+                            "worktree_fingerprint=stale",
+                            "command=./scripts/check.sh",
+                            f"log=.harness/evidence/check/stale-{index}.log",
+                            "",
+                        ]
+                    ),
+                    encoding="utf-8",
+                )
+
+            result = subprocess.run(
+                [str(fixture / "scripts/review-report.sh"), "--require-evidence"],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("validation evidence is stale", result.stderr + result.stdout)
+
+    def test_review_report_require_evidence_rejects_failed_command_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            evidence_dir = fixture / ".harness/evidence/check"
+            evidence_dir.mkdir(parents=True)
+            fingerprint = subprocess.check_output(
+                [sys.executable, str(fixture / "scripts/worktree-fingerprint.py")],
+                cwd=fixture,
+                text=True,
+            ).strip()
+            (evidence_dir / "failed.log").write_text("failed evidence\n", encoding="utf-8")
+            (evidence_dir / "failed.meta").write_text(
+                "\n".join(
+                    [
+                        "step=failed",
+                        "exit_code=1",
+                        f"worktree_fingerprint={fingerprint}",
+                        "command=./scripts/check.sh",
+                        "log=.harness/evidence/check/failed.log",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [str(fixture / "scripts/review-report.sh"), "--require-evidence"],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("validation evidence contains failed commands", result.stderr + result.stdout)
+
+    def test_review_report_require_evidence_rejects_partial_check_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            evidence_dir = fixture / ".harness/evidence/check"
+            evidence_dir.mkdir(parents=True)
+            fingerprint = subprocess.check_output(
+                [sys.executable, str(fixture / "scripts/worktree-fingerprint.py")],
+                cwd=fixture,
+                text=True,
+            ).strip()
+            (evidence_dir / "lint.log").write_text("lint passed\n", encoding="utf-8")
+            (evidence_dir / "lint.meta").write_text(
+                "\n".join(
+                    [
+                        "step=lint",
+                        "exit_code=0",
+                        f"worktree_fingerprint={fingerprint}",
+                        "command=./scripts/lint.sh",
+                        "log=.harness/evidence/check/lint.log",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [str(fixture / "scripts/review-report.sh"), "--require-evidence"],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("missing required validation evidence step docs-check", result.stderr + result.stdout)
+
+    def test_review_report_require_evidence_rejects_bundle_without_harness_self_test(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            evidence_dir = fixture / ".harness/evidence/check"
+            evidence_dir.mkdir(parents=True)
+            fingerprint = subprocess.check_output(
+                [sys.executable, str(fixture / "scripts/worktree-fingerprint.py")],
+                cwd=fixture,
+                text=True,
+            ).strip()
+            for step in (
+                "docs-check",
+                "adoption",
+                "manifest",
+                "compose",
+                "workflow",
+                "prod-config",
+                "architecture",
+                "security",
+                "supply-chain",
+                "migration",
+                "lint",
+                "test",
+                "build",
+            ):
+                (evidence_dir / f"{step}.log").write_text(f"{step} passed\n", encoding="utf-8")
+                (evidence_dir / f"{step}.meta").write_text(
+                    "\n".join(
+                        [
+                            f"step={step}",
+                            "exit_code=0",
+                            f"worktree_fingerprint={fingerprint}",
+                            f"command=./scripts/{step}.sh",
+                            f"log=.harness/evidence/check/{step}.log",
+                            "",
+                        ]
+                    ),
+                    encoding="utf-8",
+                )
+
+            result = subprocess.run(
+                [str(fixture / "scripts/review-report.sh"), "--require-evidence"],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("missing required validation evidence step harness-self-test", result.stderr + result.stdout)
+
     def test_insecure_agent_network_policy_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
