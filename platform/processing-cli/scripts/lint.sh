@@ -20,17 +20,23 @@ required = [
     "src/meeting_assistant_cli/__main__.py",
     "src/meeting_assistant_cli/audio_processing.py",
     "src/meeting_assistant_cli/cli.py",
+    "src/meeting_assistant_cli/delete_session.py",
     "src/meeting_assistant_cli/dependency_check.py",
+    "src/meeting_assistant_cli/export_transcript.py",
     "src/meeting_assistant_cli/import_media.py",
     "src/meeting_assistant_cli/settings.py",
+    "src/meeting_assistant_cli/speaker_labeling.py",
     "src/meeting_assistant_cli/transcript_processing.py",
     "src/meeting_assistant_cli/transcription_runtime_config.py",
     "src/meeting_assistant_cli/whisper_cpp_adapter.py",
     "src/meeting_assistant_cli/workspace_contract.py",
     "tests/ArchitectureTest.md",
     "tests/test_audio_processing.py",
+    "tests/test_delete_session.py",
     "tests/test_dependency_check.py",
+    "tests/test_export_transcript.py",
     "tests/test_import_media.py",
+    "tests/test_speaker_labeling.py",
     "tests/test_transcript_processing.py",
     "tests/test_workspace_contract.py",
     "sbom/processing-cli.cdx.json",
@@ -42,8 +48,9 @@ if missing:
 metadata = json.loads((root / "component.json").read_text(encoding="utf-8"))
 if metadata.get("id") != "processing-cli":
     raise SystemExit("processing-cli lint failed: component id mismatch")
-if metadata.get("business_behavior") != "dependency_check_artifact_contract_import_media_audio_normalization_transcript_fake_whisper_cpp":
-    raise SystemExit("processing-cli lint failed: business behavior must be dependency_check_artifact_contract_import_media_audio_normalization_transcript_fake_whisper_cpp")
+expected_behavior = "dependency_check_artifact_contract_import_media_audio_normalization_transcript_whisper_cpp_speaker_fallback_export_delete"
+if metadata.get("business_behavior") != expected_behavior:
+    raise SystemExit(f"processing-cli lint failed: business behavior must be {expected_behavior}")
 implemented_contracts = set(metadata.get("implemented_contracts", []))
 if {
     "check_dependencies",
@@ -54,12 +61,18 @@ if {
     "generate_transcript",
     "transcription_fake_adapter",
     "transcription_whisper_cpp_adapter",
+    "generate_speaker_labels",
+    "speaker_labeling_transcript_only_fallback",
+    "speaker_labeling_adapter_boundary",
+    "export_transcript",
+    "delete_session",
 } - implemented_contracts:
     raise SystemExit("processing-cli lint failed: implemented contract list is incomplete")
 required_forbidden = {
     "production_grade_transcoding",
     "production_grade_transcription_quality",
-    "speaker_labeling",
+    "production_grade_speaker_labeling",
+    "external_speaker_labeling_runtime",
     "external_model_api",
     "automatic_downloads",
 }

@@ -54,7 +54,7 @@ MVP 默认 workspace 位于用户本地目录下：
 
 | 文件 | 所属对象 | 必填字段 | 说明 |
 |---|---|---|---|
-| `session.json` | `MeetingSession` | `id`, `source_type`, `status`, `started_at`, `workspace_dir`, `artifacts` | 会话主元数据 |
+| `session.json` | `MeetingSession` | `id`, `source_type`, `status`, `started_at`, `workspace_dir`, `artifacts` | 会话主元数据；可包含 `exports` 导出包摘要，用于记录用户主动导出的本地路径 |
 | `transcript.json` | `Transcript` | `id`, `session_id`, `source_artifact_id`, `segments` | 结构化 transcript |
 | `speaker_labels.json` | `SpeakerLabel` | `session_id`, `labels`, `segment_mapping` | 匿名 speaker labels |
 | `transcript.md` | `ExportPackage` | n/a | 用户可读 Markdown 导出 |
@@ -65,7 +65,7 @@ MVP 默认 workspace 位于用户本地目录下：
 
 | 对象或文件 | 最小可测试字段 | 必须断言的边界 |
 |---|---|---|
-| `session.json` | `id`, `source_type`, `status`, `started_at`, `workspace_dir`, `created_at`, `updated_at`, `artifacts` | `id` 与会话目录一致；`workspace_dir` 解析后位于当前 workspace；`artifacts` 中每个条目能回指同一 `session_id` |
+| `session.json` | `id`, `source_type`, `status`, `started_at`, `workspace_dir`, `created_at`, `updated_at`, `artifacts`；如存在 `exports[]`，每项至少包含 `id`, `session_id`, `export_type`, `created_at`，落盘导出还包含 `path` | `id` 与会话目录一致；`workspace_dir` 解析后位于当前 workspace；`artifacts` 中每个条目能回指同一 `session_id`；`exports[].path` 只记录用户主动导出的本地路径摘要，workspace 外路径由用户管理，删除会话时不得被删除 |
 | artifact registry entry | `id`, `session_id`, `artifact_type`, `path`, `format`, `capture_status`, `created_at`；可用文件还应有 `checksum` | `artifact_type` 属于 `RecordingArtifactType`；`path` 解析后位于当前会话目录的应用管理范围；`capture_status` 为 `degraded`、`missing` 或 `failed` 时必须有 `degradation_reason` |
 | `transcript.json` | `id`, `session_id`, `source_artifact_id`, `status`, `segments`, `created_at` | `segments` 按 `start_ms` 升序；每段包含 `segment_id`, `start_ms`, `end_ms`, `text`，且 `start_ms < end_ms`；生成失败不得覆盖已有有效 transcript |
 | `speaker_labels.json` | `session_id`, `labels`, `segment_mapping`；transcript-only 降级时通过对应 `speaker_labels` artifact 的 `capture_status` 和 `degradation_reason` 记录原因 | `labels[].is_verified_identity` 在 MVP 中必须为 `false`；`segment_mapping` 只能引用当前 transcript 的 segment；降级时不得修改 transcript 文本 |

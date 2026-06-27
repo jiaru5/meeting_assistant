@@ -11,8 +11,9 @@ import json
 from pathlib import Path
 
 metadata = json.loads(Path("component.json").read_text(encoding="utf-8"))
-if metadata.get("business_behavior") != "dependency_check_artifact_contract_import_media_audio_normalization_transcript_fake_whisper_cpp":
-    raise SystemExit("processing-cli test failed: dependency_check_artifact_contract_import_media_audio_normalization_transcript_fake_whisper_cpp behavior is missing")
+expected_behavior = "dependency_check_artifact_contract_import_media_audio_normalization_transcript_whisper_cpp_speaker_fallback_export_delete"
+if metadata.get("business_behavior") != expected_behavior:
+    raise SystemExit(f"processing-cli test failed: {expected_behavior} behavior is missing")
 implemented_contracts = set(metadata.get("implemented_contracts", []))
 required_contracts = {
     "check_dependencies",
@@ -23,6 +24,11 @@ required_contracts = {
     "generate_transcript",
     "transcription_fake_adapter",
     "transcription_whisper_cpp_adapter",
+    "generate_speaker_labels",
+    "speaker_labeling_transcript_only_fallback",
+    "speaker_labeling_adapter_boundary",
+    "export_transcript",
+    "delete_session",
 }
 if not required_contracts.issubset(implemented_contracts):
     raise SystemExit("processing-cli test failed: implemented contracts are incomplete")
@@ -31,7 +37,8 @@ if metadata.get("allowed_before_project_mode") is not False:
 required_forbidden = {
     "production_grade_transcoding",
     "production_grade_transcription_quality",
-    "speaker_labeling",
+    "production_grade_speaker_labeling",
+    "external_speaker_labeling_runtime",
     "external_model_api",
     "automatic_downloads",
 }
@@ -50,6 +57,9 @@ required_phrases = (
     "implements the internal normalized audio stage",
     "must not expose `normalize_audio` as a public command",
     "implements the `generate_transcript` command contract with a deterministic fake transcription adapter and a minimal `whisper.cpp` runtime adapter",
+    "implements the `generate_speaker_labels` command contract with transcript-only fallback and an injectable local adapter boundary",
+    "implements the `export_transcript` command contract for `plain_text`, `markdown` and `json`",
+    "implements the `delete_session` command contract for confirmed deletion",
     "must not implement production-grade media transcoding, production-grade transcription quality gates",
     "must not implement production-grade media transcoding",
     "Missing required dependencies must be reported as `ok: false`",
@@ -69,7 +79,14 @@ subparsers = [action for action in parser._actions if isinstance(action, argpars
 if len(subparsers) != 1:
     raise SystemExit("processing-cli test failed: CLI parser must define exactly one subparser group")
 commands = set(subparsers[0].choices)
-expected = {"check_dependencies", "import_media", "generate_transcript"}
+expected = {
+    "check_dependencies",
+    "import_media",
+    "generate_transcript",
+    "generate_speaker_labels",
+    "export_transcript",
+    "delete_session",
+}
 if commands != expected:
     raise SystemExit(f"processing-cli test failed: public CLI commands drifted: {sorted(commands)}")
 PY

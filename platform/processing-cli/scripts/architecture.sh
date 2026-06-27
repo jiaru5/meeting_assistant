@@ -12,6 +12,9 @@ grep -q "implements the \`import_media\` command contract" tests/ArchitectureTes
 grep -q "implements the internal normalized audio stage" tests/ArchitectureTest.md
 grep -q "must not expose \`normalize_audio\` as a public command" tests/ArchitectureTest.md
 grep -q "implements the \`generate_transcript\` command contract with a deterministic fake transcription adapter and a minimal \`whisper.cpp\` runtime adapter" tests/ArchitectureTest.md
+grep -q "implements the \`generate_speaker_labels\` command contract with transcript-only fallback and an injectable local adapter boundary" tests/ArchitectureTest.md
+grep -q "implements the \`export_transcript\` command contract for \`plain_text\`, \`markdown\` and \`json\`" tests/ArchitectureTest.md
+grep -q "implements the \`delete_session\` command contract for confirmed deletion" tests/ArchitectureTest.md
 grep -q "must not implement production-grade media transcoding, production-grade transcription quality gates" tests/ArchitectureTest.md
 
 PYTHONPATH=src python3 - <<'PY'
@@ -24,7 +27,14 @@ subparsers = [action for action in parser._actions if isinstance(action, argpars
 if len(subparsers) != 1:
     raise SystemExit("processing-cli architecture check failed: CLI parser must define exactly one subparser group")
 commands = set(subparsers[0].choices)
-expected = {"check_dependencies", "import_media", "generate_transcript"}
+expected = {
+    "check_dependencies",
+    "import_media",
+    "generate_transcript",
+    "generate_speaker_labels",
+    "export_transcript",
+    "delete_session",
+}
 if commands != expected:
     raise SystemExit(f"processing-cli architecture check failed: public CLI commands drifted: {sorted(commands)}")
 PY

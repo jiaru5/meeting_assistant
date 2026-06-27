@@ -6,9 +6,12 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from .delete_session import run_delete_session
 from .dependency_check import run_dependency_check
+from .export_transcript import run_export_transcript
 from .import_media import run_import_media
 from .settings import default_workspace
+from .speaker_labeling import run_generate_speaker_labels
 from .transcript_processing import run_generate_transcript
 
 
@@ -54,6 +57,24 @@ def build_parser() -> argparse.ArgumentParser:
     transcript.add_argument("--runtime", default=None)
     transcript.add_argument("--format", choices=("json", "pretty"), default="json")
 
+    speaker = subparsers.add_parser("generate_speaker_labels")
+    speaker.add_argument("--session-id", required=True)
+    speaker.add_argument("--transcript-id", required=True)
+    speaker.add_argument("--allow-transcript-only-fallback", required=True, choices=("true", "false"))
+    speaker.add_argument("--format", choices=("json", "pretty"), default="json")
+
+    export = subparsers.add_parser("export_transcript")
+    export.add_argument("--session-id", required=True)
+    export.add_argument("--export-type", required=True, choices=("plain_text", "markdown", "json"))
+    export.add_argument("--target-path", default=None)
+    export.add_argument("--format", choices=("json", "pretty"), default="json")
+
+    delete = subparsers.add_parser("delete_session")
+    delete.add_argument("--session-id", required=True)
+    delete.add_argument("--workspace-dir", default=None)
+    delete.add_argument("--confirm", required=True, choices=("true", "false"))
+    delete.add_argument("--format", choices=("json", "pretty"), default="json")
+
     return parser
 
 
@@ -74,6 +95,8 @@ def _print_pretty(response: dict) -> None:
             f"- artifact {artifact['id']}: "
             f"{artifact['artifact_type']} {artifact['format']} {artifact['path']}"
         )
+    if response.get("target_path"):
+        print(f"target_path: {response['target_path']}")
     for warning in response.get("warnings", []):
         print(f"warning: {warning}")
 
@@ -125,6 +148,42 @@ def main(argv: Sequence[str] | None = None) -> int:
             source_artifact_id=args.source_artifact_id,
             language=args.language,
             runtime=args.runtime,
+        )
+        if args.format == "json":
+            print(json.dumps(response, ensure_ascii=False, sort_keys=True))
+        else:
+            _print_pretty(response)
+        return _exit_code(response)
+    if args.command == "generate_speaker_labels":
+        response = run_generate_speaker_labels(
+            args.session_id,
+            args.transcript_id,
+            workspace=default_workspace(),
+            allow_transcript_only_fallback=args.allow_transcript_only_fallback == "true",
+        )
+        if args.format == "json":
+            print(json.dumps(response, ensure_ascii=False, sort_keys=True))
+        else:
+            _print_pretty(response)
+        return _exit_code(response)
+    if args.command == "export_transcript":
+        response = run_export_transcript(
+            args.session_id,
+            args.export_type,
+            workspace=default_workspace(),
+            target_path=Path(args.target_path) if args.target_path else None,
+        )
+        if args.format == "json":
+            print(json.dumps(response, ensure_ascii=False, sort_keys=True))
+        else:
+            _print_pretty(response)
+        return _exit_code(response)
+    if args.command == "delete_session":
+        workspace = Path(args.workspace_dir).expanduser() if args.workspace_dir else default_workspace()
+        response = run_delete_session(
+            args.session_id,
+            workspace=workspace,
+            confirm=args.confirm == "true",
         )
         if args.format == "json":
             print(json.dumps(response, ensure_ascii=False, sort_keys=True))

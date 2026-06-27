@@ -12,9 +12,12 @@
 6. 内部 normalized audio stage：默认选择 `mixed_audio`；`mixed_audio` 缺失时仅处理用户显式选择的可用 `system_audio` 或 `microphone_audio`；在当前 fixture-compatible slice 中只接受 WAV/PCM 源，生成并登记 `artifacts/normalized_audio.wav`，且不覆盖原始音频 artifact。
 7. `generate_transcript` 命令契约的 fake adapter，使用可用 `normalized_audio` 或显式/默认音频输入生成 `artifacts/transcript.json` 并登记 `transcript_text` artifact。
 8. `runtime=whisper_cpp` 的最小本地 adapter：显式请求时调用用户配置的本地 `whisper.cpp` CLI，解析 JSON 输出并写入同一 `transcript.json` 契约。
-9. 结构、架构、安全和 SBOM 检查。
+9. `generate_speaker_labels` 命令契约：默认支持 transcript-only fallback，写入 `artifacts/speaker_labels.json` 并登记降级的 `speaker_labels` artifact；可注入本地 fake/best-effort adapter，但不选择真实外部 speaker runtime。
+10. `export_transcript` 命令契约：支持 `plain_text`、`markdown`、`json` 内容返回或用户显式目标路径导出，不修改 transcript 或媒体 artifact。
+11. `delete_session` 命令契约：要求 `confirm=true`，只删除当前 workspace 中目标 session 目录，并保留 workspace 外导出文件。
+12. 结构、架构、安全和 SBOM 检查。
 
-当前目录没有公开 `normalize_audio` 命令；标准化音频是 `generate_transcript` 或原生处理流程可复用的内部 stage。当前 normalized audio stage 使用 fixture-compatible WAV/PCM adapter 边界。当前 transcript adapter 包含 deterministic fake 和最小 `whisper.cpp` 调用路径，但不承诺生产级转码、生产级识别质量、真实 speaker labeling、外部模型调用或自动依赖下载。真实 `PV-MA-007` covered 仍需要本机 `whisper.cpp` CLI、multilingual 模型和中英混合小样例 smoke 进入标准门禁。
+当前目录没有公开 `normalize_audio` 命令；标准化音频是 `generate_transcript` 或原生处理流程可复用的内部 stage。当前 normalized audio stage 使用 fixture-compatible WAV/PCM adapter 边界。当前 transcript adapter 包含 deterministic fake 和最小 `whisper.cpp` 调用路径；speaker labeling 只提供 transcript-only fallback 和可注入 adapter 边界，不选择 WhisperX、pyannote.audio 或其他真实 speaker runtime。当前组件不承诺生产级转码、生产级识别质量、生产级 speaker labeling、外部模型调用或自动依赖下载。真实 `PV-MA-007` covered 仍需要本机 `whisper.cpp` CLI、multilingual 模型和中英混合小样例 smoke 进入标准门禁。
 
 本机共享资产约定：
 
