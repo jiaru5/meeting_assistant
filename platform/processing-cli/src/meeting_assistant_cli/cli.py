@@ -9,6 +9,7 @@ from typing import Sequence
 from .dependency_check import run_dependency_check
 from .import_media import run_import_media
 from .settings import default_workspace
+from .transcript_processing import run_generate_transcript
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -23,6 +24,13 @@ def build_parser() -> argparse.ArgumentParser:
     import_media_parser.add_argument("--path", required=True)
     import_media_parser.add_argument("--title", default=None)
     import_media_parser.add_argument("--format", choices=("json", "pretty"), default="json")
+
+    transcript = subparsers.add_parser("generate_transcript")
+    transcript.add_argument("--session-id", required=True)
+    transcript.add_argument("--source-artifact-id", default=None)
+    transcript.add_argument("--language", default=None)
+    transcript.add_argument("--runtime", default=None)
+    transcript.add_argument("--format", choices=("json", "pretty"), default="json")
 
     return parser
 
@@ -60,6 +68,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0 if response["ok"] else 1
     if args.command == "import_media":
         response = run_import_media(Path(args.path), workspace=default_workspace(), title=args.title)
+        if args.format == "json":
+            print(json.dumps(response, ensure_ascii=False, sort_keys=True))
+        else:
+            _print_pretty(response)
+        return 0 if response["ok"] else 1
+    if args.command == "generate_transcript":
+        response = run_generate_transcript(
+            args.session_id,
+            workspace=default_workspace(),
+            source_artifact_id=args.source_artifact_id,
+            language=args.language,
+            runtime=args.runtime,
+        )
         if args.format == "json":
             print(json.dumps(response, ensure_ascii=False, sort_keys=True))
         else:

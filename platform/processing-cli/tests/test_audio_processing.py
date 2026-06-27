@@ -48,10 +48,12 @@ def non_pcm_wav_bytes(payload: bytes = b"\x00\x01") -> bytes:
     )
 
 
-def create_audio_session(workspace: Path, artifacts: list[tuple[str, str, bytes]]) -> Path:
+def create_audio_session(workspace: Path, artifacts: list[tuple[str, str, bytes] | tuple[str, str, bytes, str]]) -> Path:
     create_session(workspace, source_type="native_recording", session_id="session-1")
     session_dir = session_directory(workspace, "session-1")
-    for artifact_type, file_name, payload in artifacts:
+    for item in artifacts:
+        artifact_type, file_name, payload = item[:3]
+        capture_status = item[3] if len(item) == 4 else "available"
         path = session_dir / "artifacts" / file_name
         path.write_bytes(payload)
         register_artifact(
@@ -59,6 +61,8 @@ def create_audio_session(workspace: Path, artifacts: list[tuple[str, str, bytes]
             artifact_type=artifact_type,
             path=Path("artifacts") / file_name,
             file_format=path.suffix.removeprefix("."),
+            capture_status=capture_status,
+            degradation_reason="fixture unavailable" if capture_status != "available" else None,
             artifact_id=f"artifact-{artifact_type}",
         )
     return session_dir
@@ -255,6 +259,125 @@ class AudioProcessingTests(unittest.TestCase):
         self.assertTrue(second["ok"])
         self.assertTrue(second["reused"])
 
+    def test_existing_normalized_reuses_same_explicit_source_with_multiple_fallback_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_audio_session(
+                workspace,
+                [
+                    ("system_audio", "system_audio.wav", wav_bytes(b"system")),
+                    ("microphone_audio", "microphone_audio.wav", wav_bytes(b"microphone")),
+                ],
+            )
+
+            first = run_audio_normalization("session-1", workspace=workspace, source_artifact_id="artifact-system_audio")
+            second = run_audio_normalization("session-1", workspace=workspace, source_artifact_id="artifact-system_audio")
+
+            indexed = artifacts_by_type(session_dir)
+
+        self.assertTrue(first["ok"])
+        self.assertTrue(second["ok"])
+        self.assertTrue(second["reused"])
+        self.assertEqual(second["source_artifact_id"], "artifact-system_audio")
+        self.assertEqual(len(indexed["normalized_audio"]), 1)
+
+    def test_existing_normalized_rejects_different_explicit_fallback_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_audio_session(
+                workspace,
+                [
+                    ("system_audio", "system_audio.wav", wav_bytes(b"system")),
+                    ("microphone_audio", "microphone_audio.wav", wav_bytes(b"microphone")),
+                ],
+            )
+
+            first = run_audio_normalization("session-1", workspace=workspace, source_artifact_id="artifact-system_audio")
+            second = run_audio_normalization("session-1", workspace=workspace, source_artifact_id="artifact-microphone_audio")
+
+            indexed = artifacts_by_type(session_dir)
+
+        self.assertTrue(first["ok"])
+        self.assertFalse(second["ok"])
+        self.assertEqual(second["code"], "path_conflict")
+        self.assertEqual(len(indexed["normalized_audio"]), 1)
+
+    def test_existing_normalized_rejects_different_explicit_fallback_source_with_same_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            shared_audio = wav_bytes(b"same")
+            session_dir = create_audio_session(
+                workspace,
+                [
+                    ("system_audio", "system_audio.wav", shared_audio),
+                    ("microphone_audio", "microphone_audio.wav", shared_audio),
+                ],
+            )
+
+            first = run_audio_normalization("session-1", workspace=workspace, source_artifact_id="artifact-system_audio")
+            second = run_audio_normalization("session-1", workspace=workspace, source_artifact_id="artifact-microphone_audio")
+
+            indexed = artifacts_by_type(session_dir)
+
+        self.assertTrue(first["ok"])
+        self.assertFalse(second["ok"])
+        self.assertEqual(second["code"], "path_conflict")
+        self.assertEqual(len(indexed["normalized_audio"]), 1)
+
+    def test_existing_normalized_from_fallback_still_requires_explicit_source_when_mixed_audio_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            create_audio_session(workspace, [("system_audio", "system_audio.wav", wav_bytes(b"system"))])
+
+            first = run_audio_normalization("session-1", workspace=workspace, source_artifact_id="artifact-system_audio")
+            second = run_audio_normalization("session-1", workspace=workspace)
+
+        self.assertTrue(first["ok"])
+        self.assertFalse(second["ok"])
+        self.assertEqual(second["code"], "artifact_missing")
+
+    def test_explicit_unusable_source_type_returns_artifact_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_audio_session(workspace, [("screen_video", "screen_video.mp4", b"video")])
+
+            response = run_audio_normalization("session-1", workspace=workspace, source_artifact_id="artifact-screen_video")
+
+            normalized_exists = (session_dir / "artifacts" / "normalized_audio.wav").exists()
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "artifact_missing")
+        self.assertFalse(normalized_exists)
+
+    def test_explicit_unavailable_audio_source_returns_artifact_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_audio_session(workspace, [("system_audio", "system_audio.wav", wav_bytes(b"system"), "failed")])
+
+            response = run_audio_normalization("session-1", workspace=workspace, source_artifact_id="artifact-system_audio")
+
+            normalized_exists = (session_dir / "artifacts" / "normalized_audio.wav").exists()
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "artifact_missing")
+        self.assertFalse(normalized_exists)
+
+    def test_registered_audio_file_missing_returns_artifact_missing_with_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+            (session_dir / "artifacts" / "mixed_audio.wav").unlink()
+
+            response = run_audio_normalization("session-1", workspace=workspace, request_id="local-missing-file")
+
+            log_text = (session_dir / "logs" / "processing.log").read_text(encoding="utf-8")
+            normalized_exists = (session_dir / "artifacts" / "normalized_audio.wav").exists()
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "artifact_missing")
+        self.assertFalse(normalized_exists)
+        self.assertIn("local-missing-file", log_text)
+
     def test_non_wav_source_fails_without_registering_normalized_audio(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -358,6 +481,93 @@ class AudioProcessingTests(unittest.TestCase):
         self.assertFalse(temp_exists)
         self.assertIn("unexpected adapter failure", response["message"])
         self.assertIn("local-unexpected", log_text)
+
+    def test_adapter_contract_error_removes_temp_file_and_writes_processing_evidence(self) -> None:
+        def failing_normalizer(source: Path, destination: Path) -> None:
+            destination.write_bytes(wav_bytes(b"partial"))
+            raise ContractError("processing_failed", "adapter contract failure")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+
+            response = run_audio_normalization(
+                "session-1",
+                workspace=workspace,
+                request_id="local-contract-error",
+                normalizer=failing_normalizer,
+            )
+
+            temp_exists = (session_dir / "artifacts" / ".normalized_audio.wav.tmp").exists()
+            normalized_exists = (session_dir / "artifacts" / "normalized_audio.wav").exists()
+            log_text = (session_dir / "logs" / "processing.log").read_text(encoding="utf-8")
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "processing_failed")
+        self.assertFalse(temp_exists)
+        self.assertFalse(normalized_exists)
+        self.assertIn("adapter contract failure", log_text)
+
+    def test_adapter_no_output_fails_without_workspace_pollution(self) -> None:
+        def missing_output_normalizer(source: Path, destination: Path) -> None:
+            return None
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+
+            response = run_audio_normalization("session-1", workspace=workspace, normalizer=missing_output_normalizer)
+
+            temp_exists = (session_dir / "artifacts" / ".normalized_audio.wav.tmp").exists()
+            normalized_exists = (session_dir / "artifacts" / "normalized_audio.wav").exists()
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "processing_failed")
+        self.assertFalse(temp_exists)
+        self.assertFalse(normalized_exists)
+        self.assertNotIn("normalized_audio", artifact_types)
+
+    def test_adapter_invalid_output_fails_without_workspace_pollution(self) -> None:
+        def invalid_output_normalizer(source: Path, destination: Path) -> None:
+            destination.write_bytes(b"not-a-wav")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+
+            response = run_audio_normalization("session-1", workspace=workspace, normalizer=invalid_output_normalizer)
+
+            temp_exists = (session_dir / "artifacts" / ".normalized_audio.wav.tmp").exists()
+            normalized_exists = (session_dir / "artifacts" / "normalized_audio.wav").exists()
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "processing_failed")
+        self.assertFalse(temp_exists)
+        self.assertFalse(normalized_exists)
+        self.assertNotIn("normalized_audio", artifact_types)
+
+    def test_registration_failure_after_output_rolls_back_normalized_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+
+            with mock.patch(
+                "meeting_assistant_cli.audio_processing.register_artifact",
+                side_effect=ContractError("path_conflict", "registration failed"),
+            ):
+                response = run_audio_normalization("session-1", workspace=workspace)
+
+            normalized_exists = (session_dir / "artifacts" / "normalized_audio.wav").exists()
+            temp_exists = (session_dir / "artifacts" / ".normalized_audio.wav.tmp").exists()
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertFalse(normalized_exists)
+        self.assertFalse(temp_exists)
+        self.assertNotIn("normalized_audio", artifact_types)
 
     def test_post_registration_original_drift_rolls_back_normalized_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

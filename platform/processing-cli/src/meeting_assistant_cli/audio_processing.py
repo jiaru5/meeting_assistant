@@ -17,6 +17,7 @@ from .workspace_contract import (
     load_session,
     register_artifact,
     session_directory,
+    sha256_file,
     utc_timestamp,
     verify_registered_artifacts,
     write_session,
@@ -182,6 +183,32 @@ def _existing_normalized_audio(session_dir: Path) -> dict | None:
     return None
 
 
+def _normalized_artifact_id(source_artifact_id: str) -> str:
+    source_key = f"meeting-assistant:normalized_audio:{source_artifact_id}"
+    return f"artifact-normalized_audio-{uuid.uuid5(uuid.NAMESPACE_URL, source_key)}"
+
+
+def _ensure_existing_normalized_matches_source(session_dir: Path, existing: dict, source: AudioSource) -> None:
+    normalized_path = artifact_file_path(session_dir, existing)
+    normalized_checksum = existing.get("checksum") or sha256_file(normalized_path)
+    source_checksum = source.artifact.get("checksum") or sha256_file(source.path)
+    source_artifact_id = str(source.artifact.get("id"))
+    expected_artifact_id = _normalized_artifact_id(source_artifact_id)
+    available_audio_ids = _available_audio_artifact_ids(session_dir, list(load_session(session_dir).get("artifacts", [])))
+    source_identity_mismatch = (
+        existing.get("id") != expected_artifact_id
+        and source.artifact.get("artifact_type") != "mixed_audio"
+        and len(available_audio_ids) > 1
+    )
+    if normalized_checksum != source_checksum or source_identity_mismatch:
+        raise ContractError(
+            "path_conflict",
+            "normalized_audio already exists for a different audio source; changing the source artifact requires an explicit replace policy.",
+            source_artifact_id=source_artifact_id,
+            existing_artifact_id=existing.get("id"),
+        )
+
+
 def _ensure_wav_pcm(path: Path) -> None:
     try:
         with wave.open(str(path), "rb") as handle:
@@ -231,60 +258,68 @@ def run_audio_normalization(
     temp_path: Path | None = None
     destination: Path | None = None
     registered_artifact_id: str | None = None
+    destination_written = False
 
     try:
         session_dir = session_directory(workspace_path, session_id)
         load_session(session_dir)
         with acquire_session_lock(session_dir):
-            verify_registered_artifacts(session_dir, ORIGINAL_MEDIA_ARTIFACT_TYPES)
-            existing = _existing_normalized_audio(session_dir)
-            if existing is not None:
-                if source_artifact_id is not None:
+            try:
+                verify_registered_artifacts(session_dir, ORIGINAL_MEDIA_ARTIFACT_TYPES)
+                existing = _existing_normalized_audio(session_dir)
+                if existing is not None:
                     source = select_audio_source(session_dir, source_artifact_id)
-                    usable_ids = _available_audio_artifact_ids(session_dir, list(load_session(session_dir).get("artifacts", [])))
-                    if source.artifact.get("artifact_type") != "mixed_audio" and usable_ids != [source_artifact_id]:
-                        raise ContractError(
-                            "path_conflict",
-                            "normalized_audio already exists; changing the source artifact requires an explicit replace policy.",
-                            source_artifact_id=source_artifact_id,
-                            existing_artifact_id=existing.get("id"),
-                        )
-                return _success_response(
-                    request_id=assigned_request_id,
-                    session_id=session_id,
-                    artifact=existing,
-                    source_artifact_id=source_artifact_id,
-                    reused=True,
+                    _ensure_existing_normalized_matches_source(session_dir, existing, source)
+                    return _success_response(
+                        request_id=assigned_request_id,
+                        session_id=session_id,
+                        artifact=existing,
+                        source_artifact_id=str(source.artifact.get("id")),
+                        reused=True,
+                    )
+
+                source = select_audio_source(session_dir, source_artifact_id)
+
+                artifacts_dir = session_dir / "artifacts"
+                destination = artifacts_dir / "normalized_audio.wav"
+                temp_path = artifacts_dir / ".normalized_audio.wav.tmp"
+                if temp_path.exists():
+                    temp_path.unlink()
+
+                (normalizer or _copy_normalizer)(source.path, temp_path)
+                if not temp_path.is_file():
+                    raise ContractError(
+                        "processing_failed",
+                        "Audio normalization did not produce an output file.",
+                        source_artifact_id=source.artifact.get("id"),
+                    )
+                _ensure_wav_pcm(temp_path)
+
+                os.replace(temp_path, destination)
+                temp_path = None
+                destination_written = True
+                artifact = register_artifact(
+                    session_dir,
+                    artifact_type="normalized_audio",
+                    path=Path("artifacts/normalized_audio.wav"),
+                    file_format="wav",
+                    artifact_id=_normalized_artifact_id(str(source.artifact.get("id"))),
+                    clock=clock,
                 )
-
-            source = select_audio_source(session_dir, source_artifact_id)
-
-            artifacts_dir = session_dir / "artifacts"
-            destination = artifacts_dir / "normalized_audio.wav"
-            temp_path = artifacts_dir / ".normalized_audio.wav.tmp"
-            if temp_path.exists():
-                temp_path.unlink()
-
-            (normalizer or _copy_normalizer)(source.path, temp_path)
-            if not temp_path.is_file():
-                raise ContractError(
-                    "processing_failed",
-                    "Audio normalization did not produce an output file.",
-                    source_artifact_id=source.artifact.get("id"),
-                )
-            _ensure_wav_pcm(temp_path)
-
-            os.replace(temp_path, destination)
-            artifact = register_artifact(
-                session_dir,
-                artifact_type="normalized_audio",
-                path=Path("artifacts/normalized_audio.wav"),
-                file_format="wav",
-                artifact_id=f"artifact-{uuid.uuid4()}",
-                clock=clock,
-            )
-            registered_artifact_id = str(artifact["id"])
-            verify_registered_artifacts(session_dir, ORIGINAL_MEDIA_ARTIFACT_TYPES)
+                registered_artifact_id = str(artifact["id"])
+                verify_registered_artifacts(session_dir, ORIGINAL_MEDIA_ARTIFACT_TYPES)
+                destination_written = False
+            except Exception:
+                if registered_artifact_id is not None:
+                    _remove_registered_artifact(session_dir, registered_artifact_id)
+                    registered_artifact_id = None
+                if destination is not None and destination_written:
+                    destination.unlink(missing_ok=True)
+                    destination_written = False
+                if temp_path is not None:
+                    temp_path.unlink(missing_ok=True)
+                    temp_path = None
+                raise
 
         return _success_response(
             request_id=assigned_request_id,
@@ -299,7 +334,7 @@ def run_audio_normalization(
             details["log_path"] = str(log_path)
             if registered_artifact_id is not None:
                 _remove_registered_artifact(session_dir, registered_artifact_id)
-            if destination is not None and registered_artifact_id is not None:
+            if destination is not None and destination_written:
                 destination.unlink(missing_ok=True)
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)
@@ -312,7 +347,7 @@ def run_audio_normalization(
         if session_dir is not None:
             if registered_artifact_id is not None:
                 _remove_registered_artifact(session_dir, registered_artifact_id)
-            if destination is not None and registered_artifact_id is not None:
+            if destination is not None and destination_written:
                 destination.unlink(missing_ok=True)
             log_path = _append_processing_log(
                 session_dir,

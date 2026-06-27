@@ -22,11 +22,13 @@ required = [
     "src/meeting_assistant_cli/dependency_check.py",
     "src/meeting_assistant_cli/import_media.py",
     "src/meeting_assistant_cli/settings.py",
+    "src/meeting_assistant_cli/transcript_processing.py",
     "src/meeting_assistant_cli/workspace_contract.py",
     "tests/ArchitectureTest.md",
     "tests/test_audio_processing.py",
     "tests/test_dependency_check.py",
     "tests/test_import_media.py",
+    "tests/test_transcript_processing.py",
     "tests/test_workspace_contract.py",
     "sbom/processing-cli.cdx.json",
 ]
@@ -37,8 +39,8 @@ if missing:
 metadata = json.loads((root / "component.json").read_text(encoding="utf-8"))
 if metadata.get("id") != "processing-cli":
     raise SystemExit("processing-cli lint failed: component id mismatch")
-if metadata.get("business_behavior") != "dependency_check_artifact_contract_import_media_audio_normalization":
-    raise SystemExit("processing-cli lint failed: business behavior must be dependency_check_artifact_contract_import_media_audio_normalization")
+if metadata.get("business_behavior") != "dependency_check_artifact_contract_import_media_audio_normalization_transcript_fake":
+    raise SystemExit("processing-cli lint failed: business behavior must be dependency_check_artifact_contract_import_media_audio_normalization_transcript_fake")
 implemented_contracts = set(metadata.get("implemented_contracts", []))
 if {
     "check_dependencies",
@@ -46,8 +48,22 @@ if {
     "import_media",
     "audio_source_selection",
     "normalized_audio_stage",
+    "generate_transcript",
+    "transcription_fake_adapter",
 } - implemented_contracts:
     raise SystemExit("processing-cli lint failed: implemented contract list is incomplete")
+required_forbidden = {
+    "production_grade_transcoding",
+    "real_transcription_runtime",
+    "speaker_labeling",
+    "external_model_api",
+    "automatic_downloads",
+}
+forbidden = set(metadata.get("forbidden_capabilities", []))
+if required_forbidden - forbidden:
+    raise SystemExit("processing-cli lint failed: forbidden capability list is incomplete")
+if implemented_contracts & required_forbidden:
+    raise SystemExit("processing-cli lint failed: forbidden capabilities cannot be implemented contracts")
 PY
 
 python3 -m py_compile src/meeting_assistant_cli/*.py tests/*.py
