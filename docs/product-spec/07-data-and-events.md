@@ -59,6 +59,20 @@ MVP 默认 workspace 位于用户本地目录下：
 | `speaker_labels.json` | `SpeakerLabel` | `session_id`, `labels`, `segment_mapping` | 匿名 speaker labels |
 | `transcript.md` | `ExportPackage` | n/a | 用户可读 Markdown 导出 |
 
+## 元数据可测试 schema 要求
+
+本节只定义文件和命令测试必须能断言的最小字段集合；字段语义仍以 `02-domain-model.md` 为准。
+
+| 对象或文件 | 最小可测试字段 | 必须断言的边界 |
+|---|---|---|
+| `session.json` | `id`, `source_type`, `status`, `started_at`, `workspace_dir`, `created_at`, `updated_at`, `artifacts` | `id` 与会话目录一致；`workspace_dir` 解析后位于当前 workspace；`artifacts` 中每个条目能回指同一 `session_id` |
+| artifact registry entry | `id`, `session_id`, `artifact_type`, `path`, `format`, `capture_status`, `created_at`；可用文件还应有 `checksum` | `artifact_type` 属于 `RecordingArtifactType`；`path` 解析后位于当前会话目录的应用管理范围；`capture_status` 为 `degraded`、`missing` 或 `failed` 时必须有 `degradation_reason` |
+| `transcript.json` | `id`, `session_id`, `source_artifact_id`, `status`, `segments`, `created_at` | `segments` 按 `start_ms` 升序；每段包含 `segment_id`, `start_ms`, `end_ms`, `text`，且 `start_ms < end_ms`；生成失败不得覆盖已有有效 transcript |
+| `speaker_labels.json` | `session_id`, `labels`, `segment_mapping`；transcript-only 降级时通过对应 `speaker_labels` artifact 的 `capture_status` 和 `degradation_reason` 记录原因 | `labels[].is_verified_identity` 在 MVP 中必须为 `false`；`segment_mapping` 只能引用当前 transcript 的 segment；降级时不得修改 transcript 文本 |
+| delete summary | `session_id`, `deleted`, `deleted_items`, `retained_external_exports`, `errors` 或 `warnings` | 摘要不得包含被删除文件内容；`deleted_items` 只记录当前会话目录内应用管理文件；workspace 外导出文件必须列入 retained 或不受影响说明 |
+
+命令实现和测试可以使用 JSON Schema、typed fixtures 或等价断言方式；不能只通过字符串包含关系证明字段正确。
+
 ## Artifact 格式策略
 
 | Artifact 类型 | MVP 要求 | 说明 |
@@ -87,6 +101,17 @@ MVP 默认 workspace 位于用户本地目录下：
 | 视频/容器 | `.mp4`, `.mov` | `screen_video` | 在 workspace 会话目录保存一份 artifact 副本，记录实际 `format`，源文件不被覆盖或移动 |
 
 导入媒体不得新增 `imported_media` artifact type。导入登记本身不承诺转码、标准化音频、转写或 speaker labeling；这些派生处理仍按后续 `normalized_audio`、`transcript_text` 和 `speaker_labels` artifact 规则生成。
+
+## 路径、symlink 和删除边界
+
+所有应用管理的会话目录、artifact、transcript、speaker label、导出包和日志都必须在解析真实路径后位于当前 workspace 的目标 session 目录内。以下边界必须有自动化负向用例：
+
+1. 包含 `..` 的相对路径、解析后逃出 workspace 的绝对路径、缺失路径、目录路径和不支持扩展名必须返回 `invalid_input` 或 `path_conflict`，不得产生应用管理 artifact。
+2. `import_media` 的源文件必须是用户显式选择的本地 regular file；如果源路径是 symlink，只能复制其解析后的 regular file 内容，不能在 workspace 内登记指向 workspace 外部的 symlink。
+3. 应用管理 artifact 不得以 symlink 或 hardlink 的形式指向 workspace 外部文件；检测到这类路径时必须 fail closed，并保留可解释错误。
+4. `delete_session` 必须先解析目标 session root，确认它位于当前 workspace 的 `sessions/<session_id>/` 下；路径不存在返回 `not_found`，路径越界或 symlink 逃逸返回 `path_conflict`。
+5. 删除遍历不得 follow symlink 到 workspace 外部；如果会话目录内存在 symlink，只能删除 symlink 条目本身，不能删除其外部目标。
+6. 删除会话不得删除 workspace 外导出文件、用户原始导入源文件、默认 workspace 之外的任意路径或外部工具生成的文件。
 
 ## 本地事件
 

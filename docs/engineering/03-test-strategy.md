@@ -37,6 +37,21 @@ Playwright 只在后续引入 Web UI 时作为 Web mocked/full-stack E2E 工具�
 
 `platform/native-app/Sources/`、`platform/native-app/Tests/`、`platform/native-app/UITests/`、`platform/processing-cli/src/`、`platform/processing-cli/tests/` 和 `platform/e2e/` 是当前产品行为和产品验证的主要代码表面。修改这些路径时，工程门禁必须要求同步检查 `06-product-validation-matrix.md`，并运行对应组件测试、架构检查和 local full-stack smoke。Local full-stack smoke 必须优先使用已缓存或预加载的本地 smoke 镜像，不得在 E2E 执行阶段隐式依赖公网 registry 拉取。
 
+## Meeting Assistant 自动化测试前置条件
+
+任何 `CMD-MA-*`、artifact contract、native UI 状态或 processing pipeline 的产品行为实现开始前，必须先满足以下 testability 前置条件。缺少前置条件时，只能做规范补齐、测试基础设施或 spike，不能把对应产品行为标为实现完成。
+
+| 前置条件 | 最低要求 | 不满足时的处理 |
+|---|---|---|
+| 命令 schema | `06-api-contracts.md` 已定义目标命令的输入、成功响应关键字段、失败响应关键字段、错误码、unknown field fail-fast 和 exit code；测试能断言 JSON object，而不是只看 stdout 字符串 | 先补 API 契约和本地命令契约测试；相关 `PV-MA-*` 保持 `planned` 或 `partial` |
+| Artifact schema | `07-data-and-events.md` 已定义 `session.json`、artifact registry、`transcript.json`、`speaker_labels.json` 或 delete summary 的最小字段和路径边界 | 先补文件契约测试和 fixture；不得通过 ad hoc 文件内容判断产品完成 |
+| 确定性 fixture | 测试使用临时 workspace、受控 clock 或可断言时间格式、小型媒体 fixture、fake adapter 和固定依赖状态；不得依赖用户真实会议数据或本机常驻服务 | 先补 fixture/fake adapter；真实 runtime smoke 只能作为附加证据 |
+| UI locator | SwiftUI 控件和状态有 accessible name、状态文本和稳定 accessibility identifier；测试可定位权限、依赖、录制、处理、回查、导出和删除状态 | 先补 view model、locator 和 XCUITest/Swift Testing 基础；不能只以人工截图作为长期证据 |
+| 负向用例 | 至少覆盖 unknown field、非法 enum、缺失必填字段、权限缺失、依赖缺失、artifact 缺失、路径越界、symlink 逃逸、处理失败、导出冲突、确认缺失、no-auto-upload 和 no-auto-download | 先补负向测试；未覆盖的高风险边界必须写入验证矩阵缺口 |
+| 证据入口 | `06-product-validation-matrix.md` 必须写明目标测试文件或脚本、标准命令入口、当前证据、阻塞缺口和关闭条件 | 不能只写“未来测试”；缺少目标入口时不能标 `covered`，也不应扩大产品实现范围 |
+
+`docs/engineering/07-development-plan.md` 的 `TDG-MA-*` testability gate 是这些前置条件的执行清单。实现 agent 必须在相关 `VS-MA-*` 开始和退出时检查该清单，验证 agent 必须按验证矩阵中的目标入口确认关闭状态。
+
 ## 验收标准映射
 
 | 规范来源 | 必须覆盖的测试 |
@@ -63,6 +78,9 @@ Playwright 只在后续引入 Web UI 时作为 Web mocked/full-stack E2E 工具�
 8. 前端关键页面的 loading、empty、error、forbidden 和 submitting 状态。
 9. 架构边界、禁止依赖和跨服务数据访问。
 10. Agent 权限放宽、门禁绕过、未注册组件和发布假绿灯。
+11. Meeting Assistant 命令 unknown field、非法 enum、缺失必填字段和 CLI exit code。
+12. Meeting Assistant workspace 路径越界、symlink 逃逸、delete session 误删和 workspace 外导出保留。
+13. Meeting Assistant 外部 GPT/API、依赖下载、辅助 capture adapter 静默切换等禁止路径。
 
 ## 测试数据
 

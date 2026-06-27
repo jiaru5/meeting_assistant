@@ -9,6 +9,8 @@
 3. 应用不得在 MVP 中自动调用 GPT 或其他外部模型 API；用户可以主动复制或导出 transcript。
 4. 命令输入、输出和错误结构必须稳定，方便自动化验证和后续 UI 集成。
 5. 未知写入字段或不支持的命令参数必须 fail fast。
+6. 每个 `CMD-MA-*` 在实现前必须定义成功响应关键字段、失败响应关键字段、错误码和 CLI exit code 断言；缺少这些断言时不能把对应 `PV-MA-*` 标为 `covered`。
+7. 命令 schema 测试必须覆盖 unknown field、非法 enum、缺失必填字段和不支持参数；失败时不得产生会话、artifact、导出或删除副作用。
 
 ## 本地命令契约
 
@@ -124,6 +126,7 @@ MVP 首批 `import_media` 只支持用户显式提供的本地文件路径，不
 {
   "ok": true,
   "request_id": "local-...",
+  "command": "start_native_recording",
   "session_id": "session-...",
   "artifacts": [],
   "warnings": []
@@ -138,6 +141,7 @@ MVP 首批 `import_media` 只支持用户显式提供的本地文件路径，不
   "request_id": "local-...",
   "command": "check_dependencies",
   "code": "dependency_missing",
+  "message": "Required dependency is missing",
   "checks": [
     {
       "id": "media_tool.ffmpeg",
@@ -146,6 +150,7 @@ MVP 首批 `import_media` 只支持用户显式提供的本地文件路径，不
       "message": "FFmpeg executable was not found"
     }
   ],
+  "details": [],
   "warnings": []
 }
 ```
@@ -156,11 +161,47 @@ MVP 首批 `import_media` 只支持用户显式提供的本地文件路径，不
 {
   "ok": false,
   "request_id": "local-...",
+  "command": "start_native_recording",
   "code": "permission_denied",
   "message": "可读错误摘要",
   "details": []
 }
 ```
+
+响应规则：
+
+1. 自动化入口使用 JSON 输出时，命令必须向 stdout 输出单个 JSON object；stderr 只能用于非结构化调试摘要，不能作为产品契约来源。
+2. 每个响应都必须包含 `ok`、`request_id`、`command` 和 `warnings`；失败响应还必须包含 `code`、`message` 和 `details`。
+3. `request_id` 只需在单次命令内可追踪，测试可以断言格式或存在性，不依赖固定值。
+4. 成功响应中新增可选字段是兼容变更；删除、重命名或改变必填字段语义属于破坏性变更。
+5. unknown field、非法 enum、缺失必填字段和不支持参数必须返回 `ok=false`、`code=invalid_input`，并使用非零 exit code。
+6. 失败响应不得包含 stack trace、完整 transcript、媒体内容、外部凭据或不必要的本机敏感信息。
+
+CLI exit code 断言：
+
+| exit code | 适用结果 |
+|---|---|
+| `0` | `ok=true` |
+| `1` | `internal_error` 或未归类的未预期错误 |
+| `2` | `invalid_input` |
+| `3` | `not_found`, `artifact_missing`, `path_conflict` |
+| `4` | `permission_denied`, `dependency_missing` |
+| `5` | `capture_failed`, `processing_failed` |
+
+如果同一失败同时匹配多个 code，响应 `code` 和 exit code 必须选择最具体且最接近根因的一项。
+
+### 每个命令的最小响应断言
+
+| 命令 | 成功响应关键字段 | 失败响应关键字段 |
+|---|---|---|
+| `start_native_recording` | `session_id`, `status`, `capture_target`, `artifacts`, `warnings` | `code`, `message`, `details`; 权限或依赖不足时分别使用 `permission_denied` 或 `dependency_missing`，启动失败使用 `capture_failed` |
+| `stop_recording` | `session_id`, `status`, `artifacts`; 不可用目标产物必须在对应 artifact 中给出 `capture_status` 和 `degradation_reason` | `code`, `message`, `details`; 缺失会话使用 `not_found`，重复或冲突使用可解释的当前最终状态或 `path_conflict` |
+| `import_media` | `session_id`, `source_type`, `artifacts`; artifact 至少包含 `id`, `artifact_type`, `format`, `path`, `checksum` | `code`, `message`, `details`; 不支持格式、目录、缺失路径、非法路径和 unknown field 使用 `invalid_input` |
+| `check_dependencies` | `command`, `checks`, `warnings`; 每个 check 至少包含 `id`, `status`, `required`, `message` | `code`, `message`, `checks`, `warnings`; 缺失必需依赖使用 `dependency_missing` |
+| `generate_transcript` | `session_id`, `transcript_id`, `artifact_id`, `segment_count`, `warnings` | `code`, `message`, `details`; 缺失音频或 transcript 输入使用 `artifact_missing`，adapter 失败使用 `processing_failed` |
+| `generate_speaker_labels` | `session_id`, `transcript_id`, `label_status`, `speaker_labels_artifact_id`, `warnings`; transcript-only 降级时 `label_status=transcript_only` 并给出 `degradation_reason` | `code`, `message`, `details`; 缺失 transcript 使用 `artifact_missing`，adapter 失败使用 `processing_failed`，但允许按规则降级为成功的 transcript-only 响应 |
+| `export_transcript` | `session_id`, `export_type`, `export_package_id`, `target_path` 或 `content`, `warnings` | `code`, `message`, `details`; 缺失 transcript 使用 `artifact_missing`，导出路径冲突使用 `path_conflict` |
+| `delete_session` | `session_id`, `deleted`, `deleted_items`, `retained_external_exports`, `warnings`; 删除完成或部分失败必须返回摘要 | `code`, `message`, `details`; `confirm` 非 `true` 使用 `invalid_input`，越界或 symlink 逃逸使用 `path_conflict`，目标不存在使用 `not_found` |
 
 ## 错误响应
 

@@ -24,6 +24,8 @@
 16. 是否遵守 Agent 最小权限、网络 allowlist 和人工审批边界。
 17. 是否通过架构、安全和供应链门禁。
 18. 如果处于 `adoption` 模式，是否只把已确认内容转写到事实源，且没有创建业务实现代码。
+19. 产品行为实现是否检查了 `07-development-plan.md` 中相关 `TDG-MA-*` testability gate，并在验证矩阵记录关闭条件。
+20. `06-product-validation-matrix.md` 是否为 planned/partial 行写明目标测试文件或命令、阻塞缺口和关闭条件，而不是只写“未来测试”。
 
 ## 自动化审查输出
 
@@ -52,6 +54,19 @@ agent 完成非平凡改动后，必须生成可复制到 PR 或交付说明中�
 11. 仅由 `docs/product-spec/PROJECT-STATUS.md` 和 `harness/adoption-state.json` 组成的 activation lifecycle diff 不属于产品行为变更，不要求额外更新 validation matrix；仍必须通过 activation check、manifest check 和 workflow check。
 12. 组件路径、组件命令和 full-stack E2E 入口只能以 `harness/project-manifest.json` 为可执行注册表；工程文档可以定义命令类型和边界，但不能复制一份可独立维护的当前命令表。
 13. `platform/native-app`、`platform/processing-cli` 和 `platform/e2e` 下的产品源码、产品测试、组件元数据和 local E2E 变更必须纳入产品表面、测试覆盖和 review report 推荐验证判断。
+14. 涉及 Meeting Assistant 产品行为的 diff 必须检查相关 `TDG-MA-*`：命令 schema、artifact schema、fixture、UI locator、native capture spike、路径/delete 负向用例和证据入口缺一时，相关 `PV-MA-*` 不能推进到 `covered`。
+
+## Testability Gate 审查规则
+
+产品行为实现、验证矩阵更新或阶段收口时，reviewer 必须执行以下检查：
+
+1. 每个受影响 `VS-MA-*` 都能在 `07-development-plan.md` 找到相关 `TDG-MA-*`，并说明该缺口已关闭、仍阻塞，或本次只做规范/测试基础设施。
+2. 每个新增或修改的 `CMD-MA-*` 都有命令 schema 断言、unknown field fail-fast、错误响应和 exit code 测试。
+3. 每个新增或修改的 artifact、transcript、speaker label、export 或 delete 行为都有结构化 schema 断言和路径边界负向测试。
+4. 每个 native UI 行为都有 Swift Testing 或 XCUITest 入口；短期只有人工证据时，验证矩阵状态只能是 `manual-evidence` 或 `partial`。
+5. 验证矩阵不能只写“未来测试”“后续补充”或“待接入”而没有目标文件/命令、阻塞缺口和关闭条件。
+6. 如果实现依赖真实 runtime、原生 capture 或本机权限状态，必须同时保留 fake/fixture 契约测试；真实环境 smoke 只能补充，不能替代确定性测试。
+7. 如果发现测试入口不足，review 结论应要求先关闭 testability gate，而不是扩大业务代码实现。
 
 ## 本地和 CI 必过项
 

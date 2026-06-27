@@ -85,6 +85,17 @@ flowchart LR
 5. 录制层必须是可替换 adapter，不得和转写、speaker labeling 或导出强耦合。
 6. 如果系统音频或目标 capture 在 MVP 环境中被技术 spike 证明不可行或不稳定，只能先记录证据，并通过 `10-open-decisions.md`、ADR、主责分卷和验证矩阵更新后，才允许把 OBS/BlackHole/FFmpeg 等辅助路径纳入实现范围。
 
+## 原生 capture spike 和可测试性
+
+原生 capture 进入真实实现前，必须先建立可自动化的 adapter 测试边界：
+
+1. `native-app` 必须先有 fake capture adapter 或等价测试替身，用于确定性覆盖权限缺失、开始、录制中、停止、保存失败和降级状态。
+2. 技术 spike 必须记录 macOS 版本、CPU 架构、候选 capture API、录屏/麦克风权限状态、系统音频可用性、目标窗口或屏幕能力、生成 artifact 类型和失败模式。
+3. spike 产物必须能回指 `PV-MA-002`、`PV-MA-003` 和 `PV-MA-009`；如果只有人工证据，验证矩阵只能保持 `manual-evidence` 或 `partial`，不能标 `covered`。
+4. 真实 native capture adapter 必须暴露可测试的 adapter identity、capture capability summary、失败 code 和降级原因，便于 XCUITest、Swift Testing 或 local smoke 断言。
+5. 录制失败时不得静默切换到 `import_media`、OBS、BlackHole、FFmpeg 辅助录制或其他 capture adapter；只能返回 `capture_failed`、`permission_denied` 或 `dependency_missing` 等已定义失败。
+6. 辅助 capture adapter 进入产品路径前，必须先完成 spec-change、ADR、验证矩阵更新和对应负向测试，证明代码不会在未授权情况下自动切换。
+
 ## Phase 2 实现顺序
 
 Phase 2 按本地组件纵切推进，不先创建 Web 前端、远程后端服务或数据库：

@@ -65,3 +65,14 @@ Phase 1 控制面已确认为最小 Swift/SwiftUI app + local helper / processin
 只有无法表达业务语义时，才使用 `data-testid`，并在测试中说明原因。
 
 对于 SwiftUI 原生界面，等价规则是使用可访问标题、button accessible name、label、状态文本和 XCUITest 可查询的 accessibility identifier。accessibility identifier 只能辅助稳定定位，不能替代用户可见或屏幕阅读器可理解的状态表达。
+
+## SwiftUI 和 XCUITest 可测试性
+
+原生 UI 状态必须能被 Swift Testing 和 XCUITest 稳定断言：
+
+1. 每个核心操作控件必须同时具备用户可理解的 accessible name 和稳定 accessibility identifier；identifier 使用 `ma.<surface>.<role>` 形式，例如 `ma.record.startButton`。
+2. 每个关键状态必须有稳定可见文案或状态 label，至少覆盖 ready、permission missing、dependency missing、recording、saving、processing、degraded、failed、transcript available、export success/failure 和 delete confirm/success/failure。
+3. 状态文案可以随产品语言润色，但同一状态的语义 code、accessible label 和测试 locator 必须稳定；修改时必须同步更新 XCUITest 或 Swift Testing。
+4. 权限缺失、依赖缺失、speaker-label transcript-only 降级、导出失败和删除失败不得只通过 transient toast 表达；必须有测试可查询的持久状态或结果区域。
+5. 时间、路径和会话标题在 UI 测试中必须可注入 fixture 或稳定格式；测试不得依赖当前真实时间、用户主目录绝对路径或本机已有会议数据。
+6. 删除确认 UI 必须在可访问文本中包含目标会话标识或标题和影响范围，并提供可测试的 confirm 与 cancel 控件。
