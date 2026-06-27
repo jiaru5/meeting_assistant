@@ -17,12 +17,14 @@ required = [
     "README.md",
     "component.json",
     "src/meeting_assistant_cli/__main__.py",
+    "src/meeting_assistant_cli/audio_processing.py",
     "src/meeting_assistant_cli/cli.py",
     "src/meeting_assistant_cli/dependency_check.py",
     "src/meeting_assistant_cli/import_media.py",
     "src/meeting_assistant_cli/settings.py",
     "src/meeting_assistant_cli/workspace_contract.py",
     "tests/ArchitectureTest.md",
+    "tests/test_audio_processing.py",
     "tests/test_dependency_check.py",
     "tests/test_import_media.py",
     "tests/test_workspace_contract.py",
@@ -35,10 +37,16 @@ if missing:
 metadata = json.loads((root / "component.json").read_text(encoding="utf-8"))
 if metadata.get("id") != "processing-cli":
     raise SystemExit("processing-cli lint failed: component id mismatch")
-if metadata.get("business_behavior") != "dependency_check_artifact_contract_import_media":
-    raise SystemExit("processing-cli lint failed: business behavior must be dependency_check_artifact_contract_import_media")
+if metadata.get("business_behavior") != "dependency_check_artifact_contract_import_media_audio_normalization":
+    raise SystemExit("processing-cli lint failed: business behavior must be dependency_check_artifact_contract_import_media_audio_normalization")
 implemented_contracts = set(metadata.get("implemented_contracts", []))
-if {"check_dependencies", "workspace_artifact_contract", "import_media"} - implemented_contracts:
+if {
+    "check_dependencies",
+    "workspace_artifact_contract",
+    "import_media",
+    "audio_source_selection",
+    "normalized_audio_stage",
+} - implemented_contracts:
     raise SystemExit("processing-cli lint failed: implemented contract list is incomplete")
 PY
 

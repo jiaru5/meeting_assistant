@@ -85,6 +85,10 @@ def session_json_path(session_dir: Path) -> Path:
     return session_dir / "session.json"
 
 
+def write_session(session_dir: Path, payload: dict) -> None:
+    _write_session(session_dir, payload)
+
+
 def _write_session(session_dir: Path, payload: dict) -> None:
     session_path = session_json_path(session_dir)
     _ensure_within(session_dir, session_path)
@@ -142,6 +146,13 @@ def create_session(
 def _artifact_path(session_dir: Path, path: Path) -> Path:
     candidate = path if path.is_absolute() else session_dir / path
     return _ensure_within(session_dir, candidate, "Artifact path escapes the session boundary.")
+
+
+def artifact_file_path(session_dir: Path, artifact: dict) -> Path:
+    path = artifact.get("path")
+    if not path:
+        raise ContractError("artifact_missing", "Artifact metadata does not include a path.", artifact_id=artifact.get("id"))
+    return _artifact_path(session_dir, Path(str(path)))
 
 
 def _existing_original_artifact(session: dict, artifact_type: str) -> dict | None:

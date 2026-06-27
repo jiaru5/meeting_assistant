@@ -9,7 +9,8 @@ grep -q "Component: \`processing-cli\`" tests/ArchitectureTest.md
 grep -q "implements the \`check_dependencies\` command contract" tests/ArchitectureTest.md
 grep -q "implements the workspace artifact contract kernel" tests/ArchitectureTest.md
 grep -q "implements the \`import_media\` command contract" tests/ArchitectureTest.md
-grep -q "must not implement media processing" tests/ArchitectureTest.md
-grep -q "must not transcode" tests/ArchitectureTest.md
+grep -q "implements the internal normalized audio stage" tests/ArchitectureTest.md
+grep -q "must not expose \`normalize_audio\` as a public command" tests/ArchitectureTest.md
+grep -q "must not implement production-grade media transcoding" tests/ArchitectureTest.md
 
 echo "processing-cli architecture check passed."
