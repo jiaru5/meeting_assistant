@@ -135,6 +135,12 @@ def run_export_transcript(
     destination_written = False
     export_package_id = f"export-{uuid.uuid4()}"
 
+    def cleanup_written_outputs() -> None:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+        if destination is not None and destination_written:
+            destination.unlink(missing_ok=True)
+
     try:
         if export_type not in SUPPORTED_EXPORT_TYPES:
             raise ContractError("invalid_input", "Unsupported transcript export type.", export_type=export_type)
@@ -179,14 +185,10 @@ def run_export_transcript(
             response["target_path"] = str(destination)
         return response
     except ContractError as exc:
-        if temp_path is not None:
-            temp_path.unlink(missing_ok=True)
-        if destination is not None and destination_written:
-            destination.unlink(missing_ok=True)
+        cleanup_written_outputs()
         return _failure_response(exc.code, exc.message, request_id=assigned_request_id, details=exc.details or None)
     except PermissionError as exc:
-        if temp_path is not None:
-            temp_path.unlink(missing_ok=True)
+        cleanup_written_outputs()
         return _failure_response(
             "permission_denied",
             "Transcript export target could not be written.",
@@ -194,11 +196,18 @@ def run_export_transcript(
             details={"error": exc.__class__.__name__},
         )
     except OSError as exc:
-        if temp_path is not None:
-            temp_path.unlink(missing_ok=True)
+        cleanup_written_outputs()
         return _failure_response(
             "internal_error",
             "Transcript export failed while writing the target file.",
+            request_id=assigned_request_id,
+            details={"error": exc.__class__.__name__},
+        )
+    except Exception as exc:
+        cleanup_written_outputs()
+        return _failure_response(
+            "internal_error",
+            "Transcript export failed.",
             request_id=assigned_request_id,
             details={"error": exc.__class__.__name__},
         )

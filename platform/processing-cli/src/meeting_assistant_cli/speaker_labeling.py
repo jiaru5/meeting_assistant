@@ -144,14 +144,22 @@ def _normalized_audio_path(session_dir: Path) -> Path | None:
     return None
 
 
-def _existing_speaker_labels(session_dir: Path, transcript_id: str) -> tuple[dict, dict] | None:
+def _validate_segment_mapping_segments(payload: dict, transcript: dict) -> None:
+    segment_ids = {str(segment["segment_id"]) for segment in transcript["segments"]}
+    for mapping in payload["segment_mapping"]:
+        if str(mapping.get("segment_id", "")) not in segment_ids:
+            raise ContractError("processing_failed", "Speaker segment mapping references an unknown transcript segment.")
+
+
+def _existing_speaker_labels(session_dir: Path, transcript: dict) -> tuple[dict, dict] | None:
     session = load_session(session_dir)
     for artifact in session.get("artifacts", []):
         if artifact.get("artifact_type") != "speaker_labels":
             continue
         verify_registered_artifacts(session_dir, {"speaker_labels"})
         payload = _load_json(artifact_file_path(session_dir, artifact))
-        _validate_speaker_payload(payload, transcript_id=transcript_id)
+        _validate_speaker_payload(payload, transcript_id=str(transcript["id"]))
+        _validate_segment_mapping_segments(payload, transcript)
         return artifact, payload
     return None
 
@@ -218,7 +226,6 @@ def _payload_from_adapter(
     transcript: dict,
     clock: Callable[[], datetime] | None,
 ) -> dict:
-    segment_ids = {str(segment["segment_id"]) for segment in transcript["segments"]}
     payload = {
         "session_id": transcript["session_id"],
         "transcript_id": transcript["id"],
@@ -231,9 +238,7 @@ def _payload_from_adapter(
     if adapter_result.get("degradation_reason"):
         payload["degradation_reason"] = adapter_result["degradation_reason"]
     _validate_speaker_payload(payload, transcript_id=str(transcript["id"]))
-    for mapping in payload["segment_mapping"]:
-        if str(mapping.get("segment_id", "")) not in segment_ids:
-            raise ContractError("processing_failed", "Speaker segment mapping references an unknown transcript segment.")
+    _validate_segment_mapping_segments(payload, transcript)
     if payload["label_status"] == "labeled" and not payload["labels"]:
         raise ContractError("processing_failed", "Labeled speaker payload must include at least one anonymous label.")
     if payload["label_status"] == "transcript_only" and not payload.get("degradation_reason"):
@@ -274,7 +279,7 @@ def run_generate_speaker_labels(
         session_dir = session_directory(workspace_path, session_id)
         _, transcript, _ = _find_transcript(session_dir, transcript_id)
         with acquire_session_lock(session_dir):
-            existing = _existing_speaker_labels(session_dir, transcript_id)
+            existing = _existing_speaker_labels(session_dir, transcript)
             if existing is not None:
                 artifact, payload = existing
                 return _success_response(

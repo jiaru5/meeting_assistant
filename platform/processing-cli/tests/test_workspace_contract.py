@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -107,6 +108,25 @@ class WorkspaceContractTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, "path_conflict")
 
+    def test_register_artifact_rejects_hardlink_to_external_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            root = Path(tmp)
+            create_session(workspace, source_type="native_recording", session_id="session-1")
+            session_dir = workspace / "sessions" / "session-1"
+            outside = root / "outside.wav"
+            outside.write_bytes(b"outside")
+            hardlink = session_dir / "artifacts" / "mixed_audio.wav"
+            os.link(outside, hardlink)
+
+            with self.assertRaises(ContractError) as raised:
+                register_artifact(session_dir, "mixed_audio", Path("artifacts/mixed_audio.wav"), "wav")
+
+            outside_text = outside.read_bytes()
+
+        self.assertEqual(raised.exception.code, "path_conflict")
+        self.assertEqual(outside_text, b"outside")
+
     def test_original_media_artifacts_are_append_only_per_type(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -166,6 +186,18 @@ class WorkspaceContractTests(unittest.TestCase):
                 verify_registered_artifacts(session_dir)
 
         self.assertEqual(raised.exception.code, "path_conflict")
+
+    def test_load_session_returns_contract_error_for_invalid_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            create_session(workspace, source_type="native_recording", session_id="session-1")
+            session_dir = workspace / "sessions" / "session-1"
+            (session_dir / "session.json").write_text("{not json", encoding="utf-8")
+
+            with self.assertRaises(ContractError) as raised:
+                load_session(session_dir)
+
+        self.assertEqual(raised.exception.code, "processing_failed")
 
     def test_session_lock_rejects_concurrent_writer_and_releases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

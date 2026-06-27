@@ -10,7 +10,14 @@ from pathlib import Path
 
 from meeting_assistant_cli.cli import main
 from meeting_assistant_cli.speaker_labeling import run_generate_speaker_labels
-from meeting_assistant_cli.workspace_contract import create_session, load_session, register_artifact, session_directory
+from meeting_assistant_cli.workspace_contract import (
+    create_session,
+    load_session,
+    register_artifact,
+    session_directory,
+    sha256_file,
+    write_session,
+)
 
 
 def create_transcript_session(workspace: Path) -> Path:
@@ -251,6 +258,46 @@ class SpeakerLabelingTests(unittest.TestCase):
         self.assertTrue(second["reused"])
         self.assertEqual(len(speaker_artifacts), 1)
 
+    def test_existing_speaker_labels_are_revalidated_against_current_transcript_segments(self) -> None:
+        def fake_adapter(transcript: dict, audio_path: Path | None) -> dict:
+            return {
+                "label_status": "labeled",
+                "labels": [{"label": "SPEAKER_01", "session_id": transcript["session_id"], "is_verified_identity": False}],
+                "segment_mapping": [{"segment_id": "segment-0001", "label": "SPEAKER_01"}],
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_transcript_session(workspace)
+            first = run_generate_speaker_labels(
+                "session-1",
+                "transcript-1",
+                workspace=workspace,
+                allow_transcript_only_fallback=True,
+                adapter=fake_adapter,
+            )
+            speaker_path = Path(str(first["artifacts"][0]["path"]))
+            payload = json.loads(speaker_path.read_text(encoding="utf-8"))
+            payload["segment_mapping"] = [{"segment_id": "segment-outside", "label": "SPEAKER_01"}]
+            speaker_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            session = load_session(session_dir)
+            for artifact in session["artifacts"]:
+                if artifact["artifact_type"] == "speaker_labels":
+                    artifact["checksum"] = sha256_file(speaker_path)
+            write_session(session_dir, session)
+
+            second = run_generate_speaker_labels(
+                "session-1",
+                "transcript-1",
+                workspace=workspace,
+                allow_transcript_only_fallback=True,
+            )
+
+        self.assertTrue(first["ok"])
+        self.assertFalse(second["ok"])
+        self.assertEqual(second["code"], "processing_failed")
+        self.assertIn("unknown transcript segment", second["message"])
+
     def test_cli_generate_speaker_labels_success_and_exit_code(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -296,6 +343,31 @@ class SpeakerLabelingTests(unittest.TestCase):
         self.assertEqual(payload["command"], "generate_speaker_labels")
         self.assertEqual(payload["code"], "invalid_input")
         self.assertIn("--transcript-id", payload["details"]["error"])
+
+    def test_cli_unknown_argument_emits_contract_json(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "generate_speaker_labels",
+                    "--session-id",
+                    "session-1",
+                    "--transcript-id",
+                    "transcript-1",
+                    "--allow-transcript-only-fallback",
+                    "true",
+                    "--unknown-field",
+                    "value",
+                ]
+            )
+
+        payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 2)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["command"], "generate_speaker_labels")
+        self.assertEqual(payload["code"], "invalid_input")
+        self.assertIn("unrecognized arguments", payload["details"]["error"])
 
     def test_cli_invalid_fallback_enum_emits_contract_json(self) -> None:
         stdout = io.StringIO()

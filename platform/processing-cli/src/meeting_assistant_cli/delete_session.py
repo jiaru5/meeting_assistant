@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import uuid
 from pathlib import Path
+from typing import TextIO
 
 from .settings import default_workspace
-from .workspace_contract import ContractError, load_session, session_directory
+from .workspace_contract import ContractError, acquire_session_lock, load_session, session_directory, utc_timestamp
 
 
 def _request_id() -> str:
@@ -36,6 +38,8 @@ def _collect_managed_items(session_dir: Path) -> list[str]:
     for root, dirs, files in os.walk(session_dir, topdown=True, followlinks=False):
         root_path = Path(root)
         for name in files:
+            if name == ".session.lock":
+                continue
             items.append(str((root_path / name).relative_to(session_dir)))
         for name in dirs:
             items.append(str((root_path / name).relative_to(session_dir)))
@@ -68,6 +72,35 @@ def _ensure_real_session_root(workspace: Path, session_dir: Path) -> None:
         raise ContractError("path_conflict", "Session directory resolves outside the workspace.", path=str(session_dir)) from exc
 
 
+def _open_delete_event_log(workspace: Path) -> tuple[Path, TextIO]:
+    event_dir = workspace.expanduser().resolve(strict=False) / "events"
+    event_dir.mkdir(parents=True, exist_ok=True)
+    event_path = event_dir / "meeting_session.deleted.v1.jsonl"
+    return event_path, event_path.open("a", encoding="utf-8")
+
+
+def _write_delete_event(
+    handle: TextIO,
+    *,
+    session_id: str,
+    deleted_items: list[str],
+    retained_external_exports: list[str],
+) -> None:
+    event = {
+        "event_id": f"event-{uuid.uuid4()}",
+        "event_name": "meeting_session.deleted.v1",
+        "session_id": session_id,
+        "occurred_at": utc_timestamp(),
+        "result": {
+            "deleted": True,
+            "deleted_items": deleted_items,
+            "retained_external_exports": retained_external_exports,
+        },
+    }
+    handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+    handle.flush()
+
+
 def run_delete_session(
     session_id: str,
     *,
@@ -86,10 +119,21 @@ def run_delete_session(
         if not session_dir.is_dir():
             raise ContractError("path_conflict", "Session path is not a directory.", session_id=session_id, path=str(session_dir))
         _ensure_real_session_root(workspace_path, session_dir)
-        session = load_session(session_dir)
-        deleted_items = _collect_managed_items(session_dir)
-        retained_external_exports = _retained_external_exports(session_dir, session)
-        shutil.rmtree(session_dir)
+        with acquire_session_lock(session_dir):
+            session = load_session(session_dir)
+            deleted_items = _collect_managed_items(session_dir)
+            retained_external_exports = _retained_external_exports(session_dir, session)
+            _, event_log = _open_delete_event_log(workspace_path)
+            try:
+                shutil.rmtree(session_dir)
+                _write_delete_event(
+                    event_log,
+                    session_id=session_id,
+                    deleted_items=deleted_items,
+                    retained_external_exports=retained_external_exports,
+                )
+            finally:
+                event_log.close()
         return {
             "ok": True,
             "request_id": assigned_request_id,

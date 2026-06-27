@@ -7,6 +7,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from meeting_assistant_cli.cli import main
 from meeting_assistant_cli.export_transcript import run_export_transcript
@@ -119,6 +120,22 @@ class TranscriptExportTests(unittest.TestCase):
         self.assertEqual(response["code"], "path_conflict")
         self.assertEqual(target_text, "keep me")
 
+    def test_target_export_is_removed_when_session_metadata_recording_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            create_transcript_session(workspace)
+            target = root / "transcript.txt"
+
+            with mock.patch("meeting_assistant_cli.export_transcript.write_session", side_effect=OSError("metadata failed")):
+                response = run_export_transcript("session-1", "plain_text", workspace=workspace, target_path=target)
+
+            target_exists = target.exists()
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "internal_error")
+        self.assertFalse(target_exists)
+
     def test_missing_transcript_returns_artifact_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -188,6 +205,29 @@ class TranscriptExportTests(unittest.TestCase):
         self.assertEqual(payload["command"], "export_transcript")
         self.assertEqual(payload["code"], "invalid_input")
         self.assertIn("invalid choice", payload["details"]["error"])
+
+    def test_cli_unknown_argument_emits_contract_json(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "export_transcript",
+                    "--session-id",
+                    "session-1",
+                    "--export-type",
+                    "plain_text",
+                    "--unknown-field",
+                    "value",
+                ]
+            )
+
+        payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 2)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["command"], "export_transcript")
+        self.assertEqual(payload["code"], "invalid_input")
+        self.assertIn("unrecognized arguments", payload["details"]["error"])
 
 
 if __name__ == "__main__":

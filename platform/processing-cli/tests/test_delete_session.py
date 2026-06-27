@@ -12,7 +12,7 @@ from unittest import mock
 from meeting_assistant_cli.cli import main
 from meeting_assistant_cli.delete_session import run_delete_session
 from meeting_assistant_cli.export_transcript import run_export_transcript
-from meeting_assistant_cli.workspace_contract import create_session, register_artifact, session_directory
+from meeting_assistant_cli.workspace_contract import acquire_session_lock, create_session, register_artifact, session_directory
 
 
 def create_session_with_transcript(workspace: Path) -> Path:
@@ -56,6 +56,8 @@ class DeleteSessionTests(unittest.TestCase):
 
             session_exists = session_dir.exists()
             external_exists = external_export.exists()
+            event_path = workspace.resolve(strict=False) / "events" / "meeting_session.deleted.v1.jsonl"
+            event = json.loads(event_path.read_text(encoding="utf-8").splitlines()[-1])
 
         self.assertTrue(export_response["ok"])
         self.assertTrue(response["ok"])
@@ -65,6 +67,10 @@ class DeleteSessionTests(unittest.TestCase):
         self.assertIn("session.json", response["deleted_items"])
         self.assertIn("artifacts/transcript.json", response["deleted_items"])
         self.assertEqual(response["retained_external_exports"], [str(external_export.resolve(strict=False))])
+        self.assertEqual(event["event_name"], "meeting_session.deleted.v1")
+        self.assertEqual(event["session_id"], "session-1")
+        self.assertTrue(event["result"]["deleted"])
+        self.assertEqual(event["result"]["retained_external_exports"], [str(external_export.resolve(strict=False))])
 
     def test_confirm_false_returns_invalid_input_without_deleting(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -87,6 +93,34 @@ class DeleteSessionTests(unittest.TestCase):
 
         self.assertFalse(response["ok"])
         self.assertEqual(response["code"], "not_found")
+
+    def test_locked_session_returns_path_conflict_without_deleting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_session_with_transcript(workspace)
+
+            with acquire_session_lock(session_dir):
+                response = run_delete_session("session-1", workspace=workspace, confirm=True)
+
+            session_exists = session_dir.exists()
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertTrue(session_exists)
+
+    def test_invalid_session_json_returns_stable_processing_error_without_deleting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_session_with_transcript(workspace)
+            (session_dir / "session.json").write_text("{invalid json", encoding="utf-8")
+
+            response = run_delete_session("session-1", workspace=workspace, confirm=True)
+
+            session_exists = session_dir.exists()
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "processing_failed")
+        self.assertTrue(session_exists)
 
     def test_session_root_symlink_escape_returns_path_conflict_without_deleting_target(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

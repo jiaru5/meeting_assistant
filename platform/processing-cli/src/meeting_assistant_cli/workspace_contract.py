@@ -101,7 +101,13 @@ def load_session(session_dir: Path) -> dict:
     session_path = session_json_path(session_dir)
     if not session_path.is_file():
         raise ContractError("not_found", "Session metadata file was not found.", path=str(session_path))
-    return json.loads(session_path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(session_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ContractError("processing_failed", "Session metadata file could not be parsed.", path=str(session_path)) from exc
+    if not isinstance(payload, dict):
+        raise ContractError("processing_failed", "Session metadata file must contain a JSON object.", path=str(session_path))
+    return payload
 
 
 def create_session(
@@ -148,6 +154,25 @@ def _artifact_path(session_dir: Path, path: Path) -> Path:
     return _ensure_within(session_dir, candidate, "Artifact path escapes the session boundary.")
 
 
+def _requested_artifact_path(session_dir: Path, path: Path) -> Path:
+    candidate = path if path.is_absolute() else session_dir / path
+    _ensure_within(session_dir, candidate, "Artifact path escapes the session boundary.")
+    return candidate
+
+
+def _reject_linked_artifact_path(session_dir: Path, path: Path) -> None:
+    requested_path = _requested_artifact_path(session_dir, path)
+    if requested_path.is_symlink():
+        raise ContractError("path_conflict", "Application-managed artifacts must not be symlinks.", path=str(requested_path))
+    artifact_path = _artifact_path(session_dir, path)
+    try:
+        stat_result = artifact_path.stat()
+    except FileNotFoundError:
+        return
+    if stat_result.st_nlink > 1:
+        raise ContractError("path_conflict", "Application-managed artifacts must not be hardlinks.", path=str(artifact_path))
+
+
 def artifact_file_path(session_dir: Path, artifact: dict) -> Path:
     path = artifact.get("path")
     if not path:
@@ -188,6 +213,7 @@ def register_artifact(
 
     session = load_session(session_dir)
     artifact_path = _artifact_path(session_dir, path)
+    _reject_linked_artifact_path(session_dir, path)
     if capture_status in {"available", "degraded"} and not artifact_path.is_file():
         raise ContractError("artifact_missing", "Available or degraded artifacts must point to an existing file.", path=str(artifact_path))
 
@@ -242,7 +268,9 @@ def verify_registered_artifacts(session_dir: Path, artifact_types: Iterable[str]
         checksum = artifact.get("checksum")
         if not checksum:
             continue
-        artifact_path = _artifact_path(session_dir, Path(str(artifact.get("path", ""))))
+        artifact_metadata_path = Path(str(artifact.get("path", "")))
+        _reject_linked_artifact_path(session_dir, artifact_metadata_path)
+        artifact_path = _artifact_path(session_dir, artifact_metadata_path)
         if not artifact_path.is_file():
             raise ContractError("artifact_missing", "Registered artifact file was not found.", artifact_id=artifact.get("id"))
         if sha256_file(artifact_path) != checksum:
