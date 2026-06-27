@@ -79,6 +79,49 @@ agent 必须停下来确认：
 
 多 agent 适用于范围大、风险高或需要并行审查的任务，例如权限体系改造、数据库模型调整、跨页面 UI 系统改造、服务拆分、消息链路和生产发布前审计。普通小修复、小范围文案或单文件改动默认不使用多 agent。用户明确要求多 agent、并行分工或 PM/Main Agent 收口时，必须进入完整多 agent 协同。
 
+### PM/Agent Team 触发协议
+
+当用户使用 `subagent`、`subagents`、`agent team`、`多 agent`、`你是 PM`、`组织团队`、`PM 统一收口` 或明确指定多角色协同时，主 Agent 必须进入 PM/Main Agent 模式，不能只按运行时工具的 `worker` / `explorer` 自由发挥。
+
+进入 PM/Main Agent 模式后，主 Agent 必须先输出 `Multi-Agent Dispatch Plan`，再 spawn subagent。计划必须包含：
+
+1. 本轮目标、非目标和 spec sync 分类。
+2. 采用的项目角色，以及每个角色映射到的运行时 subagent 类型。
+3. 每个角色的读写权限、允许修改范围、禁止修改范围和是否只读。
+4. 每个角色必须读取的 product-spec / engineering 分卷。
+5. 每个角色的输出格式和验证责任。
+6. 哪些结论由 PM/Main Agent 统一整合，哪些验证必须由 PM/Main Agent 最终执行。
+
+如果用户明确要求多 agent，但任务小到不值得并行实现，PM/Main Agent 仍必须使用至少一个只读审查角色或明确说明不 spawn 的原因，并等待用户接受后才能降级为单 agent。
+
+### 项目角色到运行时工具映射
+
+运行时 subagent 工具不提供本项目的业务角色类型，因此 PM/Main Agent 必须在 subagent prompt 中显式声明项目角色，并按下列规则映射：
+
+| 项目角色 | 默认运行时类型 | 默认权限 | 适用场景 |
+|---|---|---|---|
+| Product/spec guard | `explorer` | 只读 | 检查 `docs/product-spec/`、ADR、open decisions、验收标准和验证矩阵是否支持本轮变更 |
+| Architect | `explorer` | 只读 | 审查模块边界、API contract、事件、数据所有权、目录结构和是否需要 ADR |
+| Spec writer | `worker` | 限定事实源文件范围可写 | 在 PM 明确授权时草拟或更新 product-spec、engineering 分卷、ADR、open decisions 或验证矩阵 |
+| Implementer | `worker` | 限定文件范围可写 | 在 PM 明确授权的文件集合内实现小切片 |
+| Tester | `worker` 或 `explorer` | 默认只读；补测试时限定可写 | 判断测试层级是否足够，或在 PM 明确授权时补组件、契约、E2E 测试 |
+| Reviewer | `explorer` | 只读 | 按 `04-review-and-ci-gates.md` 检查回归、权限扩大、数据隔离、临时文件和验证证据 |
+| Risk-checker | `explorer` | 只读 | 独立检查核心链路、接口契约、数据一致性、异步重试、生产配置和安全边界 |
+
+### 标准团队模板
+
+PM/Main Agent 必须按任务类型选择最小但完整的团队模板：
+
+| 任务类型 | 最小团队 |
+|---|---|
+| 架构、计划或范围分析 | PM/Main Agent + Product/spec guard + Architect |
+| `spec-change` | PM/Main Agent + Product/spec guard + Spec writer/Implementer + Read-only Reviewer |
+| `spec-covered` 纵切实现 | PM/Main Agent + Product/spec guard + Architect + Implementer + Tester/Reviewer |
+| 安全、供应链、生产、权限或数据高风险变更 | PM/Main Agent + Product/spec guard + Architect + Risk-checker + Reviewer；需要实现时再加 Implementer |
+| adoption/spec 转写 | 继续使用本文件前文的 PM + Worker + Read-only Governance Reviewer 模板 |
+
+PM/Main Agent 可以增加 Specialist，但不得省略模板中的只读守卫角色，除非用户明确同意降级。
+
 推荐角色：
 
 1. Product/spec guard：只读检查 `docs/product-spec/` 和 ADR，确认事实源没有冲突。
@@ -98,6 +141,9 @@ PM/Main Agent 给 subagent 的输入必须包含：
 6. 禁止修改的文件或目录范围。
 7. 必须运行或建议运行的验证命令。
 8. 期望输出格式：改动摘要、改动文件、验证结果、风险、是否触及产品事实或需要 ADR。
+9. 明确声明“你不是独自工作，不得 revert 或覆盖他人改动，必须适配并行工作产生的变更”。
+
+PM/Main Agent 的最终交付必须列出本轮实际使用的 subagent 角色、读写范围、关键结论、PM 采纳情况、最终验证命令和仍未采纳或未验证的风险。Subagent 的局部结论不能直接作为最终事实，必须由 PM/Main Agent 对照事实源、代码和验证结果收口。
 
 并行约束：
 
