@@ -5,7 +5,7 @@ import re
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 
 from .settings import default_workspace
 from .workspace_contract import (
@@ -21,7 +21,7 @@ from .workspace_contract import (
 
 
 LABEL_PATTERN = re.compile(r"^SPEAKER_\d{2}$")
-SpeakerLabelAdapter = Callable[[dict, Path | None], dict]
+SpeakerLabelAdapter = Callable[[dict, Optional[Path]], dict]
 
 
 def _request_id() -> str:

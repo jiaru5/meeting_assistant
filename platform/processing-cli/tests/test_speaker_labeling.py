@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 from meeting_assistant_cli.cli import main
-from meeting_assistant_cli.speaker_labeling import run_generate_speaker_labels
+from meeting_assistant_cli.speaker_labeling import SpeakerLabelAdapter, run_generate_speaker_labels
 from meeting_assistant_cli.workspace_contract import (
     create_session,
     load_session,
@@ -70,6 +70,9 @@ def speaker_payload(response: dict) -> dict:
 
 
 class SpeakerLabelingTests(unittest.TestCase):
+    def test_speaker_label_adapter_type_alias_imports_on_standard_python(self) -> None:
+        self.assertIsNotNone(SpeakerLabelAdapter)
+
     def test_transcript_only_fallback_writes_degraded_speaker_label_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)

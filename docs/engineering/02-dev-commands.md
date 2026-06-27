@@ -89,6 +89,22 @@ full-stack E2E 可在 manifest 中声明可选 `pre_start_command`，用于准�
 
 未来 dependency-check 命令必须只检查允许来源、人工安装状态、模型/runtime 路径、workspace 可写性和 macOS 权限状态，不得自动下载模型、二进制或驱动。
 
+## 本机 Whisper Runtime Smoke 环境
+
+VS-MA-06 的真实 `whisper.cpp` smoke 依赖用户人工准备的本机 runtime、multilingual 模型和中英混合小样例音频。当前本机已采用 shell profile 方式持久化以下环境变量：`~/.zshrc` 中的 `meeting_assistant whisper.cpp smoke runtime` 标记块导出 `MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME`、`MEETING_ASSISTANT_TRANSCRIPTION_MODEL` 和 `MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO`。
+
+当前本机配置如下：
+
+```bash
+export MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$HOME/.local/bin/whisper-cli"
+export MEETING_ASSISTANT_TRANSCRIPTION_MODEL="$HOME/.local/share/ai-models/whisper.cpp/large-v3-turbo/ggml-large-v3-turbo-q5_0.bin"
+export MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$HOME/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav"
+```
+
+这三项只记录本地路径，不包含 secret。它们用于让 `platform/processing-cli/scripts/smoke-whisper-cpp.sh` 和 `./scripts/check.sh` 在本机默认进入真实 smoke，而不是报告 `runtime/model env is not configured`。该配置不改变 `06-api-contracts.md` 的边界：应用和脚本仍不得自动下载模型、二进制或驱动，也不得把推荐目录当成自动发现机制；真实 runtime 仍由上述 env 显式指定。
+
+如果后续改用 `direnv`，项目根目录的等价 `.envrc` 内容应保持为同一组三个 export，并在执行 `direnv allow` 前由开发者人工确认路径存在。未安装 `direnv` 的环境继续使用 shell profile 方案。
+
 ## 项目清单
 
 每个真实组件在 `harness/project-manifest.json` 中注册。命令必须是 argv 数组，不接受 shell 字符串：

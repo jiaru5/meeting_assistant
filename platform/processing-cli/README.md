@@ -27,6 +27,8 @@ export MEETING_ASSISTANT_TRANSCRIPTION_MODEL="$HOME/.local/share/ai-models/whisp
 export MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$HOME/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav"
 ```
 
+当前本机已在 `~/.zshrc` 的 `meeting_assistant whisper.cpp smoke runtime` 标记块中持久化上述三项环境变量，因此新开的 zsh 终端从项目根目录运行 `./scripts/check.sh` 时会执行真实 `whisper.cpp` smoke。未安装 `direnv` 的环境继续使用 shell profile；若后续改用 `direnv`，`.envrc` 应只包含同一组三个 export，并由开发者手动 `direnv allow`。该持久化只记录本地路径，不包含 secret，也不代表自动下载、自动发现或自动安装 runtime/model。
+
 当前本机已验证的 shared runtime 和模型：
 
 | 资产 | 当前值 |
