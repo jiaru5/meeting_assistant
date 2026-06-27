@@ -154,6 +154,33 @@ PM/Main Agent 的最终交付必须列出本轮实际使用的 subagent 角色�
 5. Subagent 的局部验证不能替代最终门禁。
 6. 子 Agent 默认不继承生产凭据、外部写权限或主 Agent 的全部工具。
 
+### Worktree 并行开发和契约 Freeze
+
+当用户要求多个 worktree、多人或多个 agent 并行实现同一阶段时，PM/Main Agent 必须先完成契约 freeze，再分发实现任务。freeze 不是新事实源；它只是声明本轮并行实现共同依赖的主责分卷和基线。
+
+freeze 声明必须包含：
+
+1. freeze 基线：分支名或 commit hash，以及本轮覆盖的 `VS-MA-*`、`PV-MA-*` 和 `TDG-MA-*`。
+2. frozen source：API 以 `docs/product-spec/06-api-contracts.md` 为准，artifact 以 `02-domain-model.md` 和 `07-data-and-events.md` 为准，模块边界以 `08-implementation-guidance.md` 为准，UI 状态以 `04-user-journeys-and-ui.md` 和 `12-ui-ux-design.md` 为准，验证和合并规则以 `03-test-strategy.md`、`04-review-and-ci-gates.md`、`06-product-validation-matrix.md` 和 `07-development-plan.md` 为准。
+3. worktree 分工：每个 worktree 的 owner、允许修改目录、禁止修改文件、依赖的 frozen contract、必须新增或运行的 unit/contract/component/E2E 测试。
+4. contract-change 通道：只有 PM/Main Agent 或明确授权的 Spec writer 可以修改 frozen source；普通 feature worktree 发现契约缺口时必须停止实现并回报。
+5. 合并顺序：先合并契约测试和 provider fake/fixture，再合并 provider 实现，再合并 consumer/UI，最后由 PM/Main Agent 在集成 worktree 运行跨模块门禁。
+
+feature worktree 必须遵守：
+
+1. 开始时读取 `AGENTS.md`、本文件、本轮 frozen source 和对应 `VS-MA-*` 行，并在交付说明中声明 freeze 基线。
+2. 调用方只能依赖已 freeze 的字段、错误码、exit code、artifact type 和 UI state；不得读取 provider 内部实现细节。
+3. 被调用方必须先补边界契约测试、fake adapter 或 fixture，再实现内部逻辑。
+4. 普通 feature worktree 不得修改 `docs/product-spec/06-api-contracts.md`、`07-data-and-events.md`、`08-implementation-guidance.md`、`docs/engineering/05-agent-operating-model.md`、`04-review-and-ci-gates.md` 或验证矩阵中的冻结边界，除非任务被升级为 contract-change。
+5. 如果后续新增 Cursor、IDE、editor rules 或其他 agent rules 文件，这些文件只能做导航和执行提醒，必须引用本节和主责分卷，不能复制产品事实、命令字段或边界规则。
+
+集成 worktree 必须验证：
+
+1. 所有 feature worktree 的契约测试在同一 freeze 基线上通过。
+2. provider 和 consumer 没有各自发明同名字段、error code、artifact type 或 UI state。
+3. `./scripts/project-manifest-check.sh current`、`./scripts/agent-workflow-check.sh` 和 `./scripts/review-report.sh` 通过；跨模块或阶段收口时运行 `./scripts/check.sh`。
+4. 未接入标准门禁的手工或局部证据只能让验证矩阵保持 `manual-evidence` 或 `partial`，不能推进到 `covered`。
+
 ## Agent 安全
 
 1. 默认权限由 `harness/agent-policy.json` 定义。

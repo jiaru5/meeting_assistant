@@ -77,6 +77,16 @@ Phase 2 以后按“大阶段管理、纵切交付、契约验收”的方式推
 
 模块开发顺序应遵守依赖方向：`native-app` 只调用 command/helper 边界，不直接解释 processing artifact 之外的内部状态；`processing-cli` 只通过 workspace files 和 command responses 暴露结果，不反向依赖 native UI；真实 runtime adapter 必须服从 fake adapter 已验证的契约。
 
+并行 worktree 的推荐拆分：
+
+1. `contract-kernel`：只关闭 `TDG-MA-001`、`TDG-MA-002` 和相关 fixture/fake 测试，提供命令响应和 artifact contract 的可执行断言。
+2. `processing-provider`：实现 `processing-cli` 的命令 provider、adapter 和文件化产物，只通过 `CMD-MA-*` 响应和 workspace artifact 暴露结果。
+3. `native-consumer`：实现 `native-app` 调用方、UI state 和 CLI/helper bridge，只依赖冻结命令响应和 artifact read model。
+4. `runtime-adapter`：实现或接入已确认的真实 transcription runtime，但必须保持 fake adapter 已验证的 transcript contract。
+5. `integration-e2e`：在上述分支合并后验证 import/capture -> processing -> transcript -> export/delete 的集成链路，并把证据回填验证矩阵。
+
+这些 worktree 可以并行开发内部实现和边缘测试，但不得并行修改同一 frozen source。需要改变命令字段、artifact 语义、UI state 或 validation 关闭条件时，先回到 `05-agent-operating-model.md` 的 contract-change 通道。
+
 ## MVP 纵切计划
 
 下表是面向当前 Phase 1 MVP 的最小开发粒度。每一行都应能独立形成“实现 + 测试 + 验证矩阵证据 + 门禁”的交付单元。

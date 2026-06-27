@@ -12,6 +12,20 @@
 6. 每个 `CMD-MA-*` 在实现前必须定义成功响应关键字段、失败响应关键字段、错误码和 CLI exit code 断言；缺少这些断言时不能把对应 `PV-MA-*` 标为 `covered`。
 7. 命令 schema 测试必须覆盖 unknown field、非法 enum、缺失必填字段和不支持参数；失败时不得产生会话、artifact、导出或删除副作用。
 
+## 契约 Freeze 和变更条件
+
+并行 worktree 开发时，command contract 的 frozen source 只包括本文件中定义的命令 ID、输入字段、成功响应关键字段、失败响应关键字段、错误码、CLI exit code 和兼容性规则。领域字段和 artifact 语义仍分别以 `02-domain-model.md` 和 `07-data-and-events.md` 为主责来源；UI 状态契约以 `04-user-journeys-and-ui.md` 和 `12-ui-ux-design.md` 为主责来源。
+
+冻结后的 feature worktree 必须把本文件当成调用方和被调用方的共同边界：调用方只能依赖已冻结字段、错误码和 exit code；被调用方必须至少提供对应契约测试、fixture 或 fake adapter 证明边界可用。任何 worktree 发现需要改变冻结契约时，必须停止产品实现，改走 `spec-change`，先更新主责分卷、ADR 或 open decision，再继续实现。
+
+契约变更分级如下：
+
+| 变更级别 | 允许条件 | 必须动作 |
+|---|---|---|
+| 兼容变更 | 新增可选成功响应字段、补充 warning、扩展非必需诊断信息，且调用方忽略未知响应字段仍能工作 | 更新本文件的响应断言或测试说明；补契约测试；验证矩阵只能按实际证据推进 |
+| 契约级变更 | 新增命令、输入字段、错误码、exit code、artifact 语义，或改变既有字段的必填性、枚举、失败副作用 | 暂停相关 worktree；按 `spec-change` 更新本文件及相关主责分卷；必要时追加 ADR；调用方和被调用方基于同一冻结版本重开实现 |
+| 破坏性变更 | 删除、重命名命令/字段/error code，改变既有语义或让旧调用方无法按原契约处理结果 | 必须 ADR；更新验证矩阵、契约测试和集成计划；不得在普通功能 worktree 中夹带合并 |
+
 ## 本地命令契约
 
 命令名是产品契约；实际实现可以是 CLI、原生 UI action 或内部 application service。

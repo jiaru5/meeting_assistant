@@ -22,6 +22,7 @@
 6. 开始实现前，用一句话说明本次依据哪些规范文件。
 7. 如果发现事实源内部矛盾，先列出冲突点并请求确认，不要用代码自行裁决。
 8. 非平凡实现完成前运行 `./scripts/agent-workflow-check.sh`，并用 `./scripts/review-report.sh` 生成交付审查证据。
+9. 涉及 worktree、多 agent 或多人并行开发时，必须读取 `docs/engineering/05-agent-operating-model.md` 的 Worktree freeze 规则，并声明本轮 frozen source、允许修改范围和 contract-change 通道。
 
 ## Starter 模式
 
@@ -51,6 +52,7 @@ adoption 模式下必须使用 `docs/adoption/` 作为转写工作区。`docs/ad
 | 技术栈、模块边界 | `08-implementation-guidance.md`、`docs/engineering/01-repo-structure.md` |
 | 测试、审查、CI | `docs/engineering/03-test-strategy.md`、`04-review-and-ci-gates.md`、`06-product-validation-matrix.md` |
 | Agent 自主执行 | `docs/engineering/05-agent-operating-model.md` |
+| Worktree/多 agent 并行开发 | `docs/engineering/05-agent-operating-model.md`、`docs/engineering/07-development-plan.md`、`06-api-contracts.md`、`07-data-and-events.md`、`08-implementation-guidance.md` |
 | 安全需求、数据分类、威胁模型、合规 | `13-security-and-compliance.md`、`docs/engineering/10-security-and-supply-chain.md` |
 | Agent 权限、工具、MCP、外部输入 | `docs/engineering/12-agent-security.md`、`harness/agent-policy.json` |
 | 生产发布、SLO、恢复、运行手册 | `docs/engineering/11-production-readiness.md`、`harness/project-manifest.json` |

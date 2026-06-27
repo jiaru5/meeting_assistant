@@ -26,6 +26,8 @@
 18. 如果处于 `adoption` 模式，是否只把已确认内容转写到事实源，且没有创建业务实现代码。
 19. 产品行为实现是否检查了 `07-development-plan.md` 中相关 `TDG-MA-*` testability gate，并在验证矩阵记录关闭条件。
 20. `06-product-validation-matrix.md` 是否为 planned/partial 行写明目标测试文件或命令、阻塞缺口和关闭条件，而不是只写“未来测试”。
+21. 如果本次来自并行 worktree，是否声明了 freeze 基线、frozen source、允许修改范围和 contract-change 通道。
+22. 是否有普通 feature worktree 夹带修改 frozen contract；如果有，是否已升级为 `spec-change` 并补充主责分卷、ADR 或验证矩阵。
 
 ## 自动化审查输出
 
@@ -55,6 +57,7 @@ agent 完成非平凡改动后，必须生成可复制到 PR 或交付说明中�
 12. 组件路径、组件命令和 full-stack E2E 入口只能以 `harness/project-manifest.json` 为可执行注册表；工程文档可以定义命令类型和边界，但不能复制一份可独立维护的当前命令表。
 13. `platform/native-app`、`platform/processing-cli` 和 `platform/e2e` 下的产品源码、产品测试、组件元数据和 local E2E 变更必须纳入产品表面、测试覆盖和 review report 推荐验证判断。
 14. 涉及 Meeting Assistant 产品行为的 diff 必须检查相关 `TDG-MA-*`：命令 schema、artifact schema、fixture、UI locator、native capture spike、路径/delete 负向用例和证据入口缺一时，相关 `PV-MA-*` 不能推进到 `covered`。
+15. 并行 worktree 合并前必须能说明 frozen source 是否被修改；被修改时必须有 `spec-change`、ADR 或 open decision 证据，并重新声明 freeze 基线。
 
 ## Testability Gate 审查规则
 

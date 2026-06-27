@@ -53,6 +53,49 @@ flowchart LR
   User -. manual copy .-> External
 ```
 
+Phase 2 允许用多个 worktree 并行推进，但调用方向必须保持单向和文件化边界：
+
+```mermaid
+flowchart LR
+  User["Local macOS User"]
+  Native["native-app\nSwiftUI / ViewModel"]
+  Helper["native-helper\ncapture adapter boundary"]
+  CLI["processing-cli\nCMD-MA-* command surface"]
+  Workspace[("workspace files\nsession/artifact metadata")]
+  Media["media-processing\nnormalized audio"]
+  Transcript["transcription adapter\nfake or local runtime"]
+  Speaker["speaker-labeling adapter\ntranscript-only fallback"]
+  Export["export/delete"]
+  External["External GPT tool\nmanual user action only"]
+
+  User --> Native
+  Native -->|"permission, dependency, recording UI"| Helper
+  Native -->|"CMD-MA-004..008 via CLI bridge"| CLI
+  Helper -->|"screen_video, system_audio,\nmicrophone_audio, mixed_audio"| Workspace
+  CLI -->|"read/write by artifact contract"| Workspace
+  Workspace --> Media
+  Media --> Workspace
+  Workspace --> Transcript
+  Transcript --> Workspace
+  Workspace --> Speaker
+  Speaker --> Workspace
+  Workspace --> Export
+  Export --> Native
+  User -. "copy/export transcript" .-> External
+```
+
+并行模块边界如下：
+
+| 模块 | 可并行实现内容 | 冻结接口 | 禁止跨越的边界 |
+|---|---|---|---|
+| `native-app` | 权限/依赖状态、录制控制、处理状态、回查/导出/删除 UI 和 view model 测试 | `06-api-contracts.md` 的 `CMD-MA-*` 响应；`04-user-journeys-and-ui.md` 和 `12-ui-ux-design.md` 的 UI state contract | 不直接解释 `processing-cli` 内部状态；不绕过 command contract 改写 artifact；不自动调用外部模型 |
+| `native-helper` / capture adapter | macOS capture spike、fake capture adapter、停止录制后的 artifact 登记 | `07-data-and-events.md` 的 artifact contract；`CMD-MA-001`/`CMD-MA-002` 的成功/失败响应 | 不做转写、speaker labeling、导出或业务数据解释；不静默切换到未纳入事实源的辅助 capture |
+| `processing-cli` command surface | 依赖检查、导入媒体、处理、转写、speaker fallback、导出和删除命令 | `06-api-contracts.md` 的命令输入/响应/error/exit code；`07-data-and-events.md` 的文件契约 | 不反向依赖 native UI；不把 stderr、临时日志或内部 Python 对象当产品契约 |
+| `media-processing` | 音频源选择、标准化音频和媒体 fixture | `mixed_audio`、`system_audio`、`microphone_audio`、`normalized_audio` artifact 语义 | 不覆盖原始媒体；不新增未定义 artifact type；不自动下载或上传媒体 |
+| `transcription-adapter` | fake adapter、local transcription adapter、runtime/model preflight 和 transcript artifact | `generate_transcript` 契约；`transcript.json` segment 排序和时间范围语义 | 不生成会议纪要；不调用外部 API；失败不覆盖已有有效 transcript |
+| `speaker-labeling-adapter` | transcript-only fallback 和匿名 speaker label artifact | `generate_speaker_labels` 契约；匿名 label 与降级语义 | 不声称真实身份；不修改 transcript text；不把 diarization 质量当 MVP 强承诺 |
+| `export/delete` | 本地导出、复制、删除摘要和路径边界测试 | `export_transcript`、`delete_session` 契约；workspace 内外路径保留语义 | 不自动上传；删除不得越过当前 workspace；不得删除 workspace 外导出文件 |
+
 ## 组件职责
 
 | 组件 | 职责 | 不负责 |
