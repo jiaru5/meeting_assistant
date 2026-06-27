@@ -21,6 +21,39 @@
 
 默认每个 MVP 产品纵切的 Spec Sync 分类是 `spec-covered`。只有发现需要新增或改变产品能力、命令语义、artifact contract、权限、数据保留、外部依赖来源、录制主路径或 UI 旅程时，才升级为 `spec-change`。
 
+## 阶段化契约交付策略
+
+Phase 2 以后按“大阶段管理、纵切交付、契约验收”的方式推进。大阶段只用于组织上下文、模块边界和验收门槛；实际交付仍以 `VS-MA-*` 纵切为最小单元，避免一次性跨越 `native-app`、`processing-cli`、真实 runtime 和 E2E。
+
+每个阶段必须先明确本阶段要稳定的边界契约，再实现功能。边界契约包括：
+
+1. Command contract：`06-api-contracts.md` 定义的命令输入、输出、错误码和 fail-fast 语义。
+2. Artifact contract：`02-domain-model.md` 和 `07-data-and-events.md` 定义的 `session.json`、artifact registry、checksum、状态、路径和保留语义。
+3. Adapter contract：capture、media processing、transcription 和 speaker labeling 的可替换端口、fake/local 实现、失败与降级语义。
+4. UI state contract：`04-user-journeys-and-ui.md` 和 `12-ui-ux-design.md` 定义的权限、依赖、录制、处理、回查、导出和删除状态。
+5. Evidence contract：`06-product-validation-matrix.md` 中对应 `PV-MA-*` 的状态、证据入口和剩余缺口。
+
+阶段关闭时必须满足以下自验证目标：
+
+1. 本阶段涉及的 `CAP-MA-*`、`AC-MA-*` 和 `PV-MA-*` 均已定位，并且验证矩阵状态与证据一致。
+2. 每个新增或修改的边界契约都有自动化契约测试；如果只能使用 fake 或 manual evidence，验证矩阵必须保持 `partial` 或 `manual-evidence`。
+3. 每个产品命令都有稳定 JSON 响应、错误码和负向测试；不得用脚本跳过或 UI 隐藏代替契约测试。
+4. 本阶段至少运行相关组件测试、`./scripts/project-manifest-check.sh current`、`./scripts/agent-workflow-check.sh` 和 `./scripts/review-report.sh`；阶段收口或跨模块集成时运行 `./scripts/check.sh`。
+5. 涉及 native UI、处理链路或跨组件集成时，补 Swift Testing、XCUITest 或 `platform/e2e` smoke；如果本地 smoke image 不可用，交付说明必须记录未运行原因和恢复条件。
+6. 不因阶段完成而自动把所有相关 `PV-MA-*` 推进到 `covered`；只有被标准门禁长期调用的测试覆盖完整范围时才能标为 `covered`。
+
+| 阶段 | 覆盖纵切 | 稳定边界 | 主要代码表面 | 自动化验证目标 | 验证矩阵目标 |
+|---|---|---|---|---|---|
+| P2-A Contract Kernel | `VS-MA-00`-`VS-MA-02` | dependency check command、workspace/artifact contract、错误码、checksum、lock、路径边界 | `platform/processing-cli/src/meeting_assistant_cli/dependency_check.py`、`workspace_contract.py`、组件脚本 | Processing CLI 单元/契约测试；缺失依赖 `ok=false`；artifact registry、append-only、checksum drift、lock 冲突和路径越界测试；标准门禁生成证据 | `PV-MA-005` 到 `covered`；`PV-MA-001`、`PV-MA-003`、`PV-MA-009` 按实际覆盖到 `partial` 或更高 |
+| P2-B Processing Command Contracts | `VS-MA-03`-`VS-MA-10` | `import_media`、audio source selection、`generate_transcript` fake adapter、speaker fallback、export、delete command contracts | `processing-cli` commands、adapters、contracts、tests | 每条 `CMD-MA-*` 的 JSON 响应、错误码、路径边界、artifact 缺失、格式不支持、失败不覆盖原始媒体、no-auto-upload/no-auto-download 测试 | `PV-MA-004`、`PV-MA-006`、`PV-MA-007`、`PV-MA-008`、`PV-MA-011`、`PV-MA-012` 至少达到 `partial`；fake 或本地 adapter 完整接入标准门禁后才能推进 |
+| P2-C Processing Local E2E | `VS-MA-11` | import -> normalize -> transcript fake -> speaker fallback -> export -> delete 的文件化流水线 | `platform/processing-cli`、`platform/e2e` | 临时 workspace fixture；端到端 smoke；每步保留可解释错误和 artifact 证据；`./scripts/check.sh` 和可运行时的 `./scripts/test-e2e-full-stack.sh` | processing 侧相关 `PV-MA-*` 证据集中更新；仍未接真实 runtime 或 native UI 的行保持 `partial` |
+| P2-D Native Control Plane | `VS-MA-12`-`VS-MA-13` | native permission/dependency state、recording state machine、fake capture adapter、processing bridge | `platform/native-app/Sources`、`Tests`、`UITests` | Swift Testing 覆盖 view model 和状态转换；XCUITest 覆盖权限/依赖缺失、开始、录制中、停止和失败状态；不实现真实 capture 前使用 fake adapter | `PV-MA-001`、`PV-MA-002` 获得 native 可见阻断和状态证据；真实 capture 前不报完整 `covered` |
+| P2-E Native Capture Integration | `VS-MA-14`-`VS-MA-16` | native capture adapter、stop recording artifact registration、native-to-processing invocation | `native-app` capture/helper、`processing-cli` artifact contract、E2E fixture | 受控 native recording smoke；权限缺失、录制中断、保存失败、重复 stop、缺失音轨降级和 checksum 测试；必要时 manual evidence 记录平台限制 | `PV-MA-002`、`PV-MA-003`、`PV-MA-006`-`PV-MA-009` 按真实 capture 和处理联动证据推进 |
+| P2-F Native Review, Export and Delete | `VS-MA-17`-`VS-MA-19` | transcript review UI、copy/export UI、delete confirmation UI、CLI bridge | `native-app` review/export/delete surfaces、`processing-cli` export/delete commands | Swift Testing/XCUITest 覆盖时间戳、文本、匿名 label、降级说明、用户主动导出、确认/取消删除和失败摘要；安全测试确认无 API key 和无自动上传路径 | `PV-MA-010`、`PV-MA-011`、`PV-MA-012` 同时获得命令层和 UI 层证据 |
+| P2-G MVP Smoke and Candidate Gates | `VS-MA-20`-`VS-MA-23` | 本地 MVP smoke、异常/重试硬化、安全供应链、release candidate | `platform/e2e`、组件 scripts、`.harness/evidence`、生产就绪工件 | `./scripts/check.sh`、可运行时 `./scripts/test-e2e-full-stack.sh`、`./scripts/security-check.sh`、`./scripts/supply-chain-check.sh current`、release preflight；失败路径和未运行项必须可解释 | 发布范围内 `PV-MA-*` 必须为 `covered`，或明确标注非发布范围/短期 manual evidence 和剩余风险 |
+
+模块开发顺序应遵守依赖方向：`native-app` 只调用 command/helper 边界，不直接解释 processing artifact 之外的内部状态；`processing-cli` 只通过 workspace files 和 command responses 暴露结果，不反向依赖 native UI；真实 runtime adapter 必须服从 fake adapter 已验证的契约。
+
 ## MVP 纵切计划
 
 下表是面向当前 Phase 1 MVP 的最小开发粒度。每一行都应能独立形成“实现 + 测试 + 验证矩阵证据 + 门禁”的交付单元。

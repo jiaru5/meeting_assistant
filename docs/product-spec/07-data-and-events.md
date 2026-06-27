@@ -77,6 +77,17 @@ MVP 默认 workspace 位于用户本地目录下：
 2. 用于转写和 speaker labeling 的派生音频统一为 `normalized_audio`，文件扩展名为 `.wav`。
 3. `normalized_audio` 是可重建派生产物，不能替代或覆盖 `system_audio`、`microphone_audio` 或 `mixed_audio` 原始/目标产物。
 
+## 导入媒体数据规则
+
+`import_media` 是用户显式选择本地文件后的会话登记路径，只创建 `source_type=imported_media` 的 `MeetingSession`，不自动扫描目录、下载远程媒体或上传源文件。MVP 首批支持格式和 artifact 登记规则如下：
+
+| 类别 | 扩展名 | 登记 artifact type | 数据规则 |
+|---|---|---|---|
+| 音频 | `.wav`, `.m4a`, `.mp3` | `mixed_audio` | 在 workspace 会话目录保存一份 artifact 副本，记录实际 `format`，源文件不被覆盖或移动 |
+| 视频/容器 | `.mp4`, `.mov` | `screen_video` | 在 workspace 会话目录保存一份 artifact 副本，记录实际 `format`，源文件不被覆盖或移动 |
+
+导入媒体不得新增 `imported_media` artifact type。导入登记本身不承诺转码、标准化音频、转写或 speaker labeling；这些派生处理仍按后续 `normalized_audio`、`transcript_text` 和 `speaker_labels` artifact 规则生成。
+
 ## 本地事件
 
 Phase 1 不要求消息队列。可以在元数据或日志中记录本地事件，用于回放和排错。

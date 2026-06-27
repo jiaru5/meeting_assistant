@@ -8,19 +8,16 @@ import uuid
 from pathlib import Path
 from typing import Mapping
 
+from .settings import default_workspace
+
 
 MIN_MACOS_VERSION = "26.5.1"
-DEFAULT_WORKSPACE = Path("~/Movies/MeetingAssistant").expanduser()
 ALLOWED_SOURCE_CATEGORIES = (
     "Apple official Xcode or Command Line Tools",
     "official or well-maintained open-source project releases",
     "user-provided existing local model paths",
     "sources approved by future ADR",
 )
-
-
-def default_workspace() -> Path:
-    return DEFAULT_WORKSPACE
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
@@ -118,8 +115,7 @@ def _permission_check(check_id: str, label: str, env: Mapping[str, str], env_nam
 
 def run_dependency_check(workspace: Path | None = None, env: Mapping[str, str] | None = None) -> dict:
     env_map = dict(os.environ if env is None else env)
-    configured_workspace = _env(env_map, "MEETING_ASSISTANT_WORKSPACE")
-    workspace_path = (workspace or (Path(configured_workspace) if configured_workspace else DEFAULT_WORKSPACE)).expanduser()
+    workspace_path = (workspace or default_workspace(env_map)).expanduser()
 
     os_name = _env(env_map, "MEETING_ASSISTANT_OS_NAME", platform.system())
     macos_version = _env(env_map, "MEETING_ASSISTANT_MACOS_VERSION", platform.mac_ver()[0])

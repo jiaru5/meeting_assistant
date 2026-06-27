@@ -65,6 +65,17 @@
 | `path` | path | yes | 用户显式选择的本地媒体文件 |
 | `title` | string | no | 可选会话标题 |
 
+MVP 首批 `import_media` 只支持用户显式提供的本地文件路径，不自动扫描目录、下载远程媒体或上传源文件。支持格式白名单如下：
+
+| 类别 | 扩展名 | 登记 artifact type |
+|---|---|---|
+| 音频 | `.wav`, `.m4a`, `.mp3` | `mixed_audio` |
+| 视频/容器 | `.mp4`, `.mov` | `screen_video` |
+
+导入成功时创建 `source_type=imported_media` 的 `MeetingSession`，在 workspace 会话目录内保存一份 artifact 副本，并登记实际 `format`；源文件不得被覆盖或移动。`import_media` 不新增 `imported_media` artifact type，也不承诺转码、转写或说话人识别；标准化音频、转写和 speaker labels 仍由后续处理纵切以及 `generate_transcript`、`generate_speaker_labels` 等对应命令能力承担。
+
+不支持格式、目录路径、缺失路径和非法路径必须返回 `invalid_input`。
+
 ### `check_dependencies`
 
 | 字段 | 类型 | 必填 | 说明 |

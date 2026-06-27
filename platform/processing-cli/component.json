@@ -2,7 +2,12 @@
   "id": "processing-cli",
   "kind": "project-component",
   "scope": "platform",
-  "business_behavior": "dependency_check",
+  "business_behavior": "dependency_check_artifact_contract_import_media",
+  "implemented_contracts": [
+    "check_dependencies",
+    "workspace_artifact_contract",
+    "import_media"
+  ],
   "allowed_before_project_mode": false,
   "planned_runtime": "local processing and dependency-check CLI",
   "forbidden_capabilities": [

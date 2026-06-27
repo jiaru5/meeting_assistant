@@ -19,8 +19,13 @@ required = [
     "src/meeting_assistant_cli/__main__.py",
     "src/meeting_assistant_cli/cli.py",
     "src/meeting_assistant_cli/dependency_check.py",
+    "src/meeting_assistant_cli/import_media.py",
+    "src/meeting_assistant_cli/settings.py",
+    "src/meeting_assistant_cli/workspace_contract.py",
     "tests/ArchitectureTest.md",
     "tests/test_dependency_check.py",
+    "tests/test_import_media.py",
+    "tests/test_workspace_contract.py",
     "sbom/processing-cli.cdx.json",
 ]
 missing = [path for path in required if not (root / path).is_file()]
@@ -30,8 +35,11 @@ if missing:
 metadata = json.loads((root / "component.json").read_text(encoding="utf-8"))
 if metadata.get("id") != "processing-cli":
     raise SystemExit("processing-cli lint failed: component id mismatch")
-if metadata.get("business_behavior") != "dependency_check":
-    raise SystemExit("processing-cli lint failed: business behavior must be dependency_check")
+if metadata.get("business_behavior") != "dependency_check_artifact_contract_import_media":
+    raise SystemExit("processing-cli lint failed: business behavior must be dependency_check_artifact_contract_import_media")
+implemented_contracts = set(metadata.get("implemented_contracts", []))
+if {"check_dependencies", "workspace_artifact_contract", "import_media"} - implemented_contracts:
+    raise SystemExit("processing-cli lint failed: implemented contract list is incomplete")
 PY
 
 python3 -m py_compile src/meeting_assistant_cli/*.py tests/*.py
