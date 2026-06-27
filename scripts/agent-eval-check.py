@@ -14,6 +14,7 @@ REQUIRED_CATEGORIES = {
     "spec-governance",
     "prompt-injection",
     "gate-integrity",
+    "multi-agent-coordination",
     "high-impact-action",
     "negative-control",
 }
