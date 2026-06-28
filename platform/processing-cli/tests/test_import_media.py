@@ -52,6 +52,7 @@ class ImportMediaTests(unittest.TestCase):
         self.assertTrue(response["ok"])
         self.assertEqual(response["command"], "import_media")
         self.assertIn("request_id", response)
+        self.assertEqual(response["source_type"], "imported_media")
         self.assertEqual(session["source_type"], "imported_media")
         self.assertEqual(session["title"], "Planning")
         self.assertEqual(artifact["artifact_type"], "mixed_audio")
@@ -88,6 +89,31 @@ class ImportMediaTests(unittest.TestCase):
         self.assertEqual(artifact_bytes, b"mp4-source")
         self.assertEqual(source_bytes, b"mp4-source")
 
+    def test_source_symlink_copies_resolved_regular_file_without_registering_link(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            real_source = root / "real-meeting.wav"
+            real_source.write_bytes(b"real-wav-source")
+            source_link = root / "meeting-link.wav"
+            source_link.symlink_to(real_source)
+
+            response = import_media(source_link, workspace=workspace)
+
+            session_dir = (workspace / "sessions" / response["session_id"]).resolve(strict=False)
+            artifact = response["artifacts"][0]
+            artifact_path = Path(str(artifact["path"]))
+            artifact_bytes = artifact_path.read_bytes()
+            source_bytes = real_source.read_bytes()
+            artifact_is_symlink = artifact_path.is_symlink()
+
+        self.assertTrue(response["ok"])
+        self.assertEqual(artifact["artifact_type"], "mixed_audio")
+        self.assertEqual(artifact_bytes, b"real-wav-source")
+        self.assertEqual(source_bytes, b"real-wav-source")
+        self.assertEqual(artifact_path.parent, session_dir / "artifacts")
+        self.assertFalse(artifact_is_symlink)
+
     def test_cli_import_media_emits_json_success_response(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -114,6 +140,7 @@ class ImportMediaTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["command"], "import_media")
+        self.assertEqual(payload["source_type"], "imported_media")
         self.assertEqual(session["source_type"], "imported_media")
         self.assertEqual(session["title"], "CLI")
         self.assertTrue(artifact_exists)

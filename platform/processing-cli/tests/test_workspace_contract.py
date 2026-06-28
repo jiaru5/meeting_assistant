@@ -127,6 +127,27 @@ class WorkspaceContractTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "path_conflict")
         self.assertEqual(outside_text, b"outside")
 
+    def test_register_artifact_rejects_symlink_to_external_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            root = Path(tmp)
+            create_session(workspace, source_type="native_recording", session_id="session-1")
+            session_dir = workspace / "sessions" / "session-1"
+            outside = root / "outside.wav"
+            outside.write_bytes(b"outside")
+            symlink = session_dir / "artifacts" / "mixed_audio.wav"
+            symlink.symlink_to(outside)
+
+            with self.assertRaises(ContractError) as raised:
+                register_artifact(session_dir, "mixed_audio", Path("artifacts/mixed_audio.wav"), "wav")
+
+            outside_text = outside.read_bytes()
+            link_is_symlink = symlink.is_symlink()
+
+        self.assertEqual(raised.exception.code, "path_conflict")
+        self.assertEqual(outside_text, b"outside")
+        self.assertTrue(link_is_symlink)
+
     def test_original_media_artifacts_are_append_only_per_type(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)

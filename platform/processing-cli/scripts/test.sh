@@ -125,4 +125,6 @@ esac
 
 ./scripts/smoke-whisper-cpp.sh
 
+../e2e/smoke-test.sh
+
 echo "processing-cli tests passed."

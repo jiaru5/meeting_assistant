@@ -143,6 +143,47 @@ class DeleteSessionTests(unittest.TestCase):
         self.assertTrue(outside_exists)
         self.assertTrue(symlink_exists)
 
+    def test_session_root_symlink_to_workspace_sibling_returns_path_conflict_without_deleting_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            target_session = create_session_with_transcript(workspace)
+            sessions_dir = workspace / "sessions"
+            link_path = sessions_dir / "link-session"
+            link_path.symlink_to(target_session, target_is_directory=True)
+
+            response = run_delete_session("link-session", workspace=workspace, confirm=True)
+
+            target_exists = target_session.exists()
+            link_is_symlink = link_path.is_symlink()
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertTrue(target_exists)
+        self.assertTrue(link_is_symlink)
+
+    def test_sessions_directory_symlink_returns_path_conflict_without_deleting_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            real_sessions = root / "real-sessions"
+            real_sessions.mkdir()
+            (workspace).mkdir()
+            (workspace / "sessions").symlink_to(real_sessions, target_is_directory=True)
+            target_session = real_sessions / "session-1"
+            target_session.mkdir()
+            (target_session / "session.json").write_text("{}", encoding="utf-8")
+
+            response = run_delete_session("session-1", workspace=workspace, confirm=True)
+
+            target_exists = target_session.exists()
+            sessions_is_symlink = (workspace / "sessions").is_symlink()
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertTrue(target_exists)
+        self.assertTrue(sessions_is_symlink)
+
     def test_symlink_inside_session_is_unlinked_without_deleting_external_target(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

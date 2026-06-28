@@ -98,6 +98,7 @@ def run_import_media(
             "request_id": assigned_request_id,
             "command": "import_media",
             "session_id": session["id"],
+            "source_type": "imported_media",
             "artifacts": [artifact],
             "warnings": [],
         }

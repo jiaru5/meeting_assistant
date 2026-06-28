@@ -61,9 +61,13 @@ def _retained_external_exports(session_dir: Path, session: dict) -> list[str]:
 
 
 def _ensure_real_session_root(workspace: Path, session_dir: Path) -> None:
+    workspace_root = workspace.expanduser().resolve(strict=False)
+    workspace_sessions_raw = workspace_root / "sessions"
+    if workspace_sessions_raw.is_symlink():
+        raise ContractError("path_conflict", "Workspace sessions directory must not be a symlink.", path=str(workspace_sessions_raw))
     if session_dir.is_symlink():
         raise ContractError("path_conflict", "Session directory must not be a symlink.", path=str(session_dir))
-    workspace_sessions = (workspace.expanduser().resolve(strict=False) / "sessions").resolve(strict=False)
+    workspace_sessions = workspace_sessions_raw.resolve(strict=False)
     try:
         session_dir.resolve(strict=True).relative_to(workspace_sessions)
     except FileNotFoundError as exc:
@@ -113,7 +117,11 @@ def run_delete_session(
         if confirm is not True:
             raise ContractError("invalid_input", "delete_session requires confirm=true.")
         workspace_path = (workspace or default_workspace()).expanduser()
-        session_dir = session_directory(workspace_path, session_id)
+        session_directory(workspace_path, session_id)
+        workspace_root = workspace_path.expanduser().resolve(strict=False)
+        session_dir = workspace_root / "sessions" / session_id
+        if session_dir.is_symlink():
+            raise ContractError("path_conflict", "Session directory must not be a symlink.", path=str(session_dir))
         if not session_dir.exists():
             raise ContractError("not_found", "Session directory was not found.", session_id=session_id)
         if not session_dir.is_dir():
