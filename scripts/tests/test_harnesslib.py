@@ -194,8 +194,28 @@ class HarnessValidationTests(unittest.TestCase):
             )
             failures = validate_manifest(fixture, "release")
             self.assertTrue(any("require mode: project" in failure for failure in failures))
+
+    def test_release_requires_dockerfiles_codeowners_and_pinned_compose(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component.pop("dockerfile", None)
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            (fixture / ".github/CODEOWNERS").unlink()
+            compose_path = fixture / "platform/e2e/docker-compose.smoke.yml"
+            compose_path.write_text(
+                compose_path.read_text(encoding="utf-8").replace(
+                    "meeting-assistant-smoke@sha256:968df39aedcea65eeb078fb336ed7191baf48f972b4479711397108be0966920",
+                    "meeting-assistant-smoke:local",
+                ),
+                encoding="utf-8",
+            )
+            failures = validate_manifest(fixture, "release")
             self.assertTrue(any("dockerfile is required for release" in failure for failure in failures))
             self.assertTrue(any("CODEOWNERS" in failure for failure in failures))
+            self.assertTrue(any("release Compose image must be digest-pinned" in failure for failure in failures))
 
     def test_project_mode_rejects_unregistered_targets(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

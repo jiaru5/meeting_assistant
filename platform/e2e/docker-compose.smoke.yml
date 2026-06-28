@@ -1,6 +1,6 @@
 services:
   meeting-assistant-smoke:
-    image: ${MEETING_ASSISTANT_SMOKE_IMAGE:-meeting-assistant-smoke:local}
+    image: ${MEETING_ASSISTANT_SMOKE_IMAGE:-meeting-assistant-smoke@sha256:968df39aedcea65eeb078fb336ed7191baf48f972b4479711397108be0966920}
     pull_policy: never
     command: ["sh", "-c", "sleep 3600"]
     healthcheck:

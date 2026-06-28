@@ -74,6 +74,8 @@
 
 full-stack E2E 可在 manifest 中声明可选 `pre_start_command`，用于准备本地 smoke runtime、预加载镜像或检查外部依赖。该命令必须是 argv 数组，失败时阻断 E2E；不得在 E2E 执行阶段静默拉取未声明的外部镜像或依赖。
 
+`./scripts/test-e2e-full-stack.sh` 本地默认设置 `MEETING_ASSISTANT_SMOKE_IMAGE=meeting-assistant-smoke:local`，由 `platform/e2e/prepare-smoke-image.sh` 验证或从已缓存允许镜像 tag 出本地 smoke image；脚本仍不得自动 pull。`platform/e2e/docker-compose.smoke.yml` 的默认镜像值必须保持 digest-pinned，以满足 release manifest 静态门禁；本地开发如需使用其他已预加载镜像，只能通过显式环境变量覆盖。
+
 已注册的非业务 skeleton 只能承载未来原生录制控制面、本地 processing、dependency-check、artifact contract、transcription adapter、speaker-label fallback 和 export 命令边界。
 
 注册组件必须提供 argv 形式的标准命令：

@@ -36,6 +36,8 @@
 5. 生产 Docker 基础镜像必须固定 digest，并以非 root 用户运行。
 6. release 组件必须生成 CycloneDX JSON 或项目明确选择的等价 SBOM。
 
+Meeting Assistant 当前 native app 和 processing CLI 的 `Dockerfile` 是 release gate 用的最小 validation image：只验证 digest-pinned base、非 root `USER`、组件元数据和 SBOM 文件存在，不代表 macOS app 已具备团队分发包、真实 capture 发布物或生产服务镜像。产品发布可用性仍以 `06-product-validation-matrix.md` 中 `PV-MA-*` 是否达到 `covered` 为准。
+
 ## Meeting Assistant MVP 依赖策略
 
 `meeting_assistant` Phase 1 采用允许来源 + 人工安装策略：

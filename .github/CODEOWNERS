@@ -1,0 +1,8 @@
+# Repository ownership for release and protected-surface review.
+* @JeRRy
+
+/docs/product-spec/ @JeRRy
+/docs/engineering/ @JeRRy
+/harness/ @JeRRy
+/.github/ @JeRRy
+/platform/ @JeRRy

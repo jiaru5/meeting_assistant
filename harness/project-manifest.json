@@ -12,6 +12,7 @@
       "production": true,
       "requires_migrations": false,
       "architecture_test": "platform/native-app/tests/ArchitectureTest.md",
+      "dockerfile": "platform/native-app/Dockerfile",
       "commands": {
         "lint": [
           "./scripts/lint.sh"
@@ -40,6 +41,7 @@
       "production": true,
       "requires_migrations": false,
       "architecture_test": "platform/processing-cli/tests/ArchitectureTest.md",
+      "dockerfile": "platform/processing-cli/Dockerfile",
       "commands": {
         "lint": [
           "./scripts/lint.sh"
