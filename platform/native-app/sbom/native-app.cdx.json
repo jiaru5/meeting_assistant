@@ -6,8 +6,8 @@
   "metadata": {
     "component": {
       "type": "application",
-      "name": "meeting-assistant-native-app-skeleton",
-      "version": "0.0.0-adoption"
+      "name": "meeting-assistant-native-app",
+      "version": "0.1.0-vs-ma-12"
     }
   },
   "components": []

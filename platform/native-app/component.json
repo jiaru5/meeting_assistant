@@ -2,16 +2,20 @@
   "id": "native-app",
   "kind": "project-component",
   "scope": "platform",
-  "business_behavior": "none",
+  "business_behavior": "permission_dependency_status",
   "allowed_before_project_mode": false,
   "planned_runtime": "Swift/SwiftUI native control surface",
   "forbidden_capabilities": [
+    "start_stop_recording",
     "real_recording",
     "screen_capture",
     "audio_capture",
+    "fake_capture_adapter",
+    "recording_state_machine",
     "transcription",
     "speaker_labeling",
     "external_model_api",
-    "automatic_downloads"
+    "automatic_downloads",
+    "public_normalize_audio_command"
   ]
 }

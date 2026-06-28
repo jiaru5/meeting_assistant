@@ -11,7 +11,7 @@ from pathlib import Path
 sbom = json.loads(Path("sbom/native-app.cdx.json").read_text(encoding="utf-8"))
 if sbom.get("bomFormat") != "CycloneDX":
     raise SystemExit("native-app sbom failed: bomFormat must be CycloneDX")
-if sbom.get("metadata", {}).get("component", {}).get("name") != "meeting-assistant-native-app-skeleton":
+if sbom.get("metadata", {}).get("component", {}).get("name") != "meeting-assistant-native-app":
     raise SystemExit("native-app sbom failed: component name mismatch")
 PY
 
