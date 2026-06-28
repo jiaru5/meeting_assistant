@@ -77,9 +77,29 @@ def _ensure_real_session_root(workspace: Path, session_dir: Path) -> None:
 
 
 def _open_delete_event_log(workspace: Path) -> tuple[Path, TextIO]:
-    event_dir = workspace.expanduser().resolve(strict=False) / "events"
-    event_dir.mkdir(parents=True, exist_ok=True)
+    workspace_root = workspace.expanduser().resolve(strict=False)
+    event_dir_raw = workspace_root / "events"
+    if event_dir_raw.is_symlink():
+        raise ContractError("path_conflict", "Workspace events directory must not be a symlink.", path=str(event_dir_raw))
+    event_dir_raw.mkdir(parents=True, exist_ok=True)
+    if not event_dir_raw.is_dir():
+        raise ContractError("path_conflict", "Workspace events path is not a directory.", path=str(event_dir_raw))
+
+    event_dir = event_dir_raw.resolve(strict=True)
+    try:
+        event_dir.relative_to(workspace_root)
+    except ValueError as exc:
+        raise ContractError("path_conflict", "Workspace events directory resolves outside the workspace.", path=str(event_dir_raw)) from exc
+
     event_path = event_dir / "meeting_session.deleted.v1.jsonl"
+    if event_path.is_symlink():
+        raise ContractError("path_conflict", "Delete event log must not be a symlink.", path=str(event_path))
+    if event_path.exists() and event_path.stat().st_nlink > 1:
+        raise ContractError("path_conflict", "Delete event log must not be a hardlink.", path=str(event_path))
+    try:
+        event_path.resolve(strict=False).relative_to(workspace_root)
+    except ValueError as exc:
+        raise ContractError("path_conflict", "Delete event log resolves outside the workspace.", path=str(event_path)) from exc
     return event_path, event_path.open("a", encoding="utf-8")
 
 

@@ -104,7 +104,7 @@ MVP 默认 workspace 位于用户本地目录下：
 
 ## 路径、symlink 和删除边界
 
-所有应用管理的会话目录、artifact、transcript、speaker label、导出包和日志都必须在解析真实路径后位于当前 workspace 的目标 session 目录内。以下边界必须有自动化负向用例：
+所有应用管理的会话目录、artifact、transcript、speaker label、导出包和会话日志都必须在解析真实路径后位于当前 workspace 的目标 session 目录内；workspace 级事件日志必须在解析真实路径后仍位于当前 workspace 内。以下边界必须有自动化负向用例：
 
 1. 包含 `..` 的相对路径、解析后逃出 workspace 的绝对路径、缺失路径、目录路径和不支持扩展名必须返回 `invalid_input` 或 `path_conflict`，不得产生应用管理 artifact。
 2. `import_media` 的源文件必须是用户显式选择的本地 regular file；如果源路径是 symlink，只能复制其解析后的 regular file 内容，不能在 workspace 内登记指向 workspace 外部的 symlink。
@@ -112,6 +112,7 @@ MVP 默认 workspace 位于用户本地目录下：
 4. `delete_session` 必须先解析目标 session root，确认它位于当前 workspace 的 `sessions/<session_id>/` 下；路径不存在返回 `not_found`，路径越界或 symlink 逃逸返回 `path_conflict`。
 5. 删除遍历不得 follow symlink 到 workspace 外部；如果会话目录内存在 symlink，只能删除 symlink 条目本身，不能删除其外部目标。
 6. 删除会话不得删除 workspace 外导出文件、用户原始导入源文件、默认 workspace 之外的任意路径或外部工具生成的文件。
+7. `delete_session` 写入 workspace 级删除事件前，必须确认 `events/` 目录和目标事件文件不是 symlink 或 hardlink 逃逸路径；检测到异常时必须 fail closed，不得删除会话或写入 workspace 外部。
 
 ## 本地事件
 

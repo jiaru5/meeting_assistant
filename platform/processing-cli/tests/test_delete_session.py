@@ -184,6 +184,68 @@ class DeleteSessionTests(unittest.TestCase):
         self.assertTrue(target_exists)
         self.assertTrue(sessions_is_symlink)
 
+    def test_workspace_events_symlink_returns_path_conflict_without_deleting_or_writing_external_event(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_session_with_transcript(workspace)
+            external_events = root / "external-events"
+            external_events.mkdir()
+            events_dir = workspace / "events"
+            events_dir.symlink_to(external_events, target_is_directory=True)
+
+            response = run_delete_session("session-1", workspace=workspace, confirm=True)
+
+            session_exists = session_dir.exists()
+            external_event_path = external_events / "meeting_session.deleted.v1.jsonl"
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertTrue(session_exists)
+        self.assertFalse(external_event_path.exists())
+
+    def test_delete_event_file_symlink_returns_path_conflict_without_deleting_or_writing_external_event(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_session_with_transcript(workspace)
+            outside_event = root / "outside-events.jsonl"
+            outside_event.write_text("", encoding="utf-8")
+            events_dir = workspace / "events"
+            events_dir.mkdir()
+            (events_dir / "meeting_session.deleted.v1.jsonl").symlink_to(outside_event)
+
+            response = run_delete_session("session-1", workspace=workspace, confirm=True)
+
+            session_exists = session_dir.exists()
+            outside_event_text = outside_event.read_text(encoding="utf-8")
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertTrue(session_exists)
+        self.assertEqual(outside_event_text, "")
+
+    def test_delete_event_file_hardlink_returns_path_conflict_without_deleting_or_writing_external_event(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_session_with_transcript(workspace)
+            outside_event = root / "outside-events.jsonl"
+            outside_event.write_text("", encoding="utf-8")
+            events_dir = workspace / "events"
+            events_dir.mkdir()
+            os.link(outside_event, events_dir / "meeting_session.deleted.v1.jsonl")
+
+            response = run_delete_session("session-1", workspace=workspace, confirm=True)
+
+            session_exists = session_dir.exists()
+            outside_event_text = outside_event.read_text(encoding="utf-8")
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertTrue(session_exists)
+        self.assertEqual(outside_event_text, "")
+
     def test_symlink_inside_session_is_unlinked_without_deleting_external_target(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

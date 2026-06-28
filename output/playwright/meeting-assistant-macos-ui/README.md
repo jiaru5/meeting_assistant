@@ -1,6 +1,6 @@
 # Meeting Assistant macOS UI Mockups
 
-This folder contains static product mockups for the Meeting Assistant macOS client.
+This folder contains static product mockups for the Meeting Assistant macOS client. These files are not product or engineering fact sources; durable facts remain in `docs/product-spec/`, `docs/engineering/`, ADRs and the validation matrix.
 
 ## Files
 

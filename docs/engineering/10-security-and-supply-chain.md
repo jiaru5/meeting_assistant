@@ -41,7 +41,7 @@
 `meeting_assistant` Phase 1 采用允许来源 + 人工安装策略：
 
 1. bootstrap/check 脚本只检查和提示，不自动下载模型、二进制、驱动或外部脚本。
-2. 允许来源包括 Apple 官方 Xcode/Command Line Tools、官方或维护良好的开源项目发布源、用户已有本地 Whisper/Qwen 模型路径，以及后续经 ADR 批准的来源。
+2. 允许来源包括 Apple 官方 Xcode/Command Line Tools、官方或维护良好的开源项目发布源、用户已有本地 Whisper 模型路径，以及后续经 ADR 批准的来源；Qwen 或其他会议纪要模型只有在 `OD-MA-009` 关闭并完成 spec-change 后才能进入应用依赖范围。
 3. Agent 不得自行放宽 `harness/agent-policy.json`、网络 allowlist、CI 安全门禁或外部写权限来获取依赖。
 4. 版本/hash 锁定、许可证自动门禁和依赖签名验证作为后续增强；在真实 dependency-check 实现前至少必须有允许来源说明和人工安装边界。
 5. 如果后续需要自动下载依赖、模型或二进制，必须先更新本分卷、`13-security-and-compliance.md`、`harness/agent-policy.json` 和 ADR。
