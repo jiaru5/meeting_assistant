@@ -22,7 +22,7 @@
 | DATA-MA-004 | 处理日志和元数据 | internal | 本地 workspace | 不自动传输 | 不记录 secret、完整 transcript 或无关敏感内容 | 随会话删除 |
 | DATA-MA-005 | 本地模型路径和依赖版本 | internal | 本地配置或日志摘要 | 不自动传输 | 可记录版本和路径摘要 | 随配置或日志清理 |
 
-应用级加密、hash 锁定、安全删除和团队共享审计作为后续增强，不属于个人 MVP 默认能力；团队内部使用进入实施范围前必须重新审查。
+应用级加密、hash 锁定和安全删除作为后续增强，不属于个人 MVP 默认能力。团队共享审计、团队分发和集中支持不属于当前产品范围；多人使用时各自本地运行，数据不跨设备共享。
 
 ## 威胁模型
 
@@ -44,7 +44,7 @@ VS-MA-06 的本地 transcription runtime 不改变 MVP 的隐私和供应链边�
 4. runtime 或模型缺失时必须 fail closed，并返回 `06-api-contracts.md` 定义的错误码；不得静默回退到外部 API 或自动下载路径。
 5. 硬件 preflight 只能输出非敏感摘要，例如 CPU 架构、芯片名称和内存等级；不得输出或持久化本机序列号、硬件 UUID、Provisioning UDID 等设备唯一标识。
 6. 正式 runtime、模型和 ASR smoke fixture 使用 `~/.local` 下的用户级共享目录；不得保存在项目仓库、`Downloads`、`Desktop`、`Library/Caches` 或真实会议 workspace 中，避免误提交、缓存清理或敏感会议数据混入测试 fixture。
-7. 依赖版本、hash 锁定、许可证自动门禁和模型 provenance 自动校验作为后续硬化增强，进入团队分发或发布候选前重新审查。
+7. 依赖版本、hash 锁定、许可证自动门禁和模型 provenance 自动校验作为后续硬化增强，进入产品化发布候选前重新审查。
 
 ## 安全验证基线
 
@@ -58,26 +58,26 @@ VS-MA-06 的本地 transcription runtime 不改变 MVP 的隐私和供应链边�
 | 约束 | 适用范围 | 数据或流程影响 | 证据 | Owner |
 |---|---|---|---|---|
 | 个人本地使用 | Phase 1 MVP | 不引入组织账号、云同步或远程审计 | `01-product-scope.md` | JeRRy |
+| 本地各自运行 | 多人各自在自己的 Mac 上运行 | 不提供组织账号、共享空间、集中审计、安装分发或团队支持流程 | `01-product-scope.md`, `10-open-decisions.md` | JeRRy |
 | 用户主动外部复制 | transcript export/copy | 应用不自动上传，外部工具处理由用户自行决定 | `06-api-contracts.md` | JeRRy |
 | 依赖人工安装和允许来源 | 原生工具链、媒体工具、`whisper.cpp` CLI、multilingual Whisper 模型、speaker labeling runtime | bootstrap/check 只检查和提示，不自动下载模型或二进制 | `08-implementation-guidance.md` | JeRRy |
-| 未来团队内部使用 | 后续团队内部使用 | 需要重新确认权限、共享、审计、安装和数据治理 | `10-open-decisions.md` | JeRRy |
 
 ## 生产就绪适用性
 
-Phase 1 MVP 是个人本地 macOS 工具，不包含远程生产服务、组织级账号、云同步、团队共享空间、服务端 on-call 或集中式生产数据存储。因此以下生产运行要求在个人 MVP 中为 `not-applicable`，进入团队内部分发、云/API 集成或商业化分发前必须重新确认：
+Phase 1 MVP 是个人本地 macOS 工具，不包含远程生产服务、组织级账号、云同步、团队共享空间、服务端 on-call 或集中式生产数据存储。因此以下生产运行要求在个人 MVP 中为 `not-applicable`；多人使用时仍各自本地运行，不形成团队分发或团队支持边界。进入云/API 集成或商业化分发前必须重新确认：
 
 | 项 | Phase 1 适用性 | 理由 | 后续触发条件 |
 |---|---|---|---|
-| SLO / error budget | `not-applicable` | 没有远程生产服务或多用户可用性承诺 | 团队共享、云服务或对外分发进入范围 |
-| RTO / RPO | `not-applicable` | 默认数据保存在用户本地 workspace，由当前 macOS 用户管理 | 引入共享存储、自动备份或团队数据空间 |
-| On-call / incident response | `not-applicable` | 个人本地工具没有生产值班面 | 引入团队支持、集中服务或外部分发 |
-| Backup / restore plan | `not-applicable` | MVP 不提供应用级备份；会话删除按本地目录删除语义执行 | 引入应用管理备份、云同步或团队数据保留 |
+| SLO / error budget | `not-applicable` | 没有远程生产服务或多用户可用性承诺 | 云服务或对外分发进入范围 |
+| RTO / RPO | `not-applicable` | 默认数据保存在用户本地 workspace，由当前 macOS 用户管理 | 引入共享存储、自动备份或跨设备数据空间 |
+| On-call / incident response | `not-applicable` | 个人本地工具没有生产值班面 | 引入集中服务、商业化分发或外部支持 |
+| Backup / restore plan | `not-applicable` | MVP 不提供应用级备份；会话删除按本地目录删除语义执行 | 引入应用管理备份、云同步或跨设备数据保留 |
 
 ## 风险接受
 
-当前没有已接受的安全门禁例外。以下问题进入后续团队或产品化范围前必须重新审查：
+当前没有已接受的安全门禁例外。以下问题进入产品化范围前必须重新审查：
 
 1. 应用级加密和安全删除。
 2. 依赖自动下载、hash 锁定、签名和许可证自动门禁。
-3. 团队内部分发、共享和审计。
+3. 商业化分发、签名、公证、自动更新和集中支持。
 4. 更严格的 speaker labeling 质量阈值或真实身份识别。

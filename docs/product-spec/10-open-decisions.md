@@ -21,8 +21,8 @@
 | OD-MA-011 | closed | Phase 2 是否按通用 web/backend/db 纵切，还是按 native-app/processing-cli 本地纵切？ | `08-implementation-guidance.md`, `docs/engineering/07-development-plan.md` | 决策：Phase 2 采用 `processing-cli` 命令契约优先，再接最小 `native-app` 控制面的本地纵切；不为 Phase 1 先建 Web/远程后端/数据库 | JeRRy | 已写入 implementation guidance、开发计划和 ADR |
 | OD-MA-012 | closed | 原生 UI 自动化使用 XCUITest/Swift Testing，还是另设桌面测试工具？ | `12-ui-ux-design.md`, `docs/engineering/03-test-strategy.md` | 决策：Swift Testing 覆盖状态和 view model；XCUITest 覆盖 SwiftUI 关键用户状态；Playwright 只在未来 Web UI 时使用 | JeRRy | 已写入测试策略、UI/UX 和 ADR |
 | OD-MA-013 | closed | 原生系统音频 capture 不可行时能否回到辅助录制方案？ | `01-product-scope.md`, `08-implementation-guidance.md`, `11-adr.md` | 决策：native-first 不变；辅助 capture 只能在 spike 证据充分后通过 spec-change、ADR 和验证矩阵更新纳入，不允许代码静默切换 | JeRRy | 已写入 implementation guidance 和 ADR |
-| OD-MA-008 | watch | 少量团队内部使用如何分发和支持？ | `01-product-scope.md`, `03-permissions-and-identity.md`, `13-security-and-compliance.md` | A. 共享安装包；B. 私有源码运行；C. 签名公证分发 | JeRRy | 团队使用进入实施范围前关闭 |
-| OD-MA-009 | watch | 是否未来由应用自动调用 GPT 或本地 Qwen 生成会议纪要？ | `06-api-contracts.md`, `13-security-and-compliance.md` | A. 仅手动复制；B. 本地 Qwen；C. 外部 API；D. 双模式 | JeRRy | 会议纪要自动化进入实施范围前关闭 |
+| OD-MA-008 | closed | 少量团队内部使用如何分发和支持？ | `01-product-scope.md`, `03-permissions-and-identity.md`, `13-security-and-compliance.md` | 决策：不提供团队分发或团队支持；多人使用时各自在本地 Mac 上独立运行，数据、依赖、workspace 和问题排查由各自本地环境承担 | JeRRy | 已写入产品范围、权限、安全、实现指导和 ADR |
+| OD-MA-009 | watch | 是否未来由应用自动调用 GPT 或本地 Qwen 生成会议纪要？ | `06-api-contracts.md`, `13-security-and-compliance.md` | 当前确认：暂时只支持用户手动复制或导出 transcript 后自行整理会议纪要；应用自动调用 GPT 或本地 Qwen 仍待定 | JeRRy | 自动纪要进入实施范围前关闭，并更新 API、安全、数据和 ADR |
 
 状态取值：
 

@@ -8,15 +8,14 @@
 |---|---|---|---|
 | `local_os_user` | 当前 macOS 用户账号 | Phase 1 MVP | 本地会议文件默认归当前 OS 用户所有；MVP 不引入应用账号、密码或远程身份 |
 | `local_process` | 本地应用进程或脚本进程 | 本地命令、录制、处理、导出 | 必须只在用户授权目录内读写会议数据 |
-| `future_internal_user` | 待确认 | 后续团队内部使用 | 少量团队使用前必须重新确认身份、共享、权限和审计 |
 
 ## 认证和授权范围
 
 | 范围 ID | 规则 | 适用对象 | 状态 |
 |---|---|---|---|
 | AUTH-MA-001 | Phase 1 不要求应用内登录；使用当前 macOS 用户和文件系统权限作为本地访问边界 | `MeetingSession`, `RecordingArtifact`, `Transcript` | confirmed for MVP |
-| AUTH-MA-002 | Phase 1 不提供团队账号、组织空间、共享库或远程权限模型 | 所有业务对象 | confirmed for MVP |
-| AUTH-MA-003 | 后续团队内部使用不得复用个人本地访问模型作为权限模型 | future internal use | watch |
+| AUTH-MA-002 | 不提供团队账号、组织空间、共享库、远程权限模型、团队分发或团队支持；多人使用时每个人都是自己设备上的 `local_os_user` | 所有业务对象 | confirmed |
+| AUTH-MA-003 | 未来如重新提出团队协作、共享或集中支持，必须先新增独立身份和权限模型，不得复用个人本地访问模型 | future team use | out of scope |
 
 ## 数据隔离
 

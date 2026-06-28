@@ -124,7 +124,7 @@ Phase 2 以后按“大阶段管理、纵切交付、契约验收”的方式推
 | VS-MA-21 | 异常、重试和并发硬化 | Processing 和 native 主链路已打通 | lock、checksum 漂移检测、重复运行、失败日志和重试语义 | 并发/路径冲突测试、处理失败重试测试、日志脱敏检查 | 关闭或记录 `TDG-MA-002`、`TDG-MA-006` 的异常路径项；`PV-MA-009` 达到发布要求；失败可解释、可重试且不覆盖原始媒体 |
 | VS-MA-22 | 安全和供应链硬化 | 引入或固定真实 runtime/模型/依赖前 | 允许来源说明、依赖摘要、license/SBOM、agent policy 不放宽 | `./scripts/security-check.sh`、`./scripts/supply-chain-check.sh current`、组件 security/SBOM 命令 | 关闭或记录 `TDG-MA-006` 的安全边界项；`SEC-MA-001`-`SEC-MA-005` 均有对应测试或门禁证据 |
 | VS-MA-23 | 本地 MVP release candidate | 所有发布范围 `PV-MA-*` 已达到目标状态 | release preflight、production readiness 工件、review report evidence | `./scripts/check.sh`、`./scripts/test-e2e-full-stack.sh`、`./scripts/release-preflight.sh` | 关闭 `TDG-MA-007` 的 release-scope 证据项；可以进入人工发布审查；无阻塞 open decision，无未解释的 planned 发布项 |
-| VS-MA-24 | 团队内部分发准备 | `OD-MA-008` 关闭并写入主责分卷和 ADR 后 | 分发、安装、签名/公证、团队权限、共享和支持规则 | 更新 product-spec、security、production readiness、供应链门禁和相应 E2E | 这是后续范围；关闭 watch 决策前不得实现为默认产品能力 |
+| VS-MA-24 | 产品化分发准备 | 用户重新提出商业化分发、签名公证、自动更新、跨设备共享或集中支持诉求 | 分发、安装、签名/公证、权限、共享和支持规则 | 更新 product-spec、security、production readiness、供应链门禁和相应 E2E | 当前不提供团队分发或团队支持；进入范围前必须先走 spec-change 和 ADR |
 | VS-MA-25 | 自动纪要或模型集成 | `OD-MA-009` 关闭并写入 API、安全、数据和 ADR 后 | 本地 Qwen 或外部 API adapter、密钥边界、隐私告知、质量验收 | 新增 `CAP/AC/PV`、安全测试、外部集成契约测试、无自动上传负向测试 | 这是后续范围；MVP 只允许用户主动复制或导出 transcript |
 
 ## Phase 0: Starter 校准
