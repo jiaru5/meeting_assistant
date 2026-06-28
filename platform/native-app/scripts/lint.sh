@@ -21,7 +21,12 @@ required = [
     "Sources/MeetingAssistantNative/DependencyCheckProcessRunner.swift",
     "Sources/MeetingAssistantNative/PermissionDependencyStatusViewModel.swift",
     "Sources/MeetingAssistantNative/PermissionDependencyStatusView.swift",
+    "Sources/MeetingAssistantNative/RecordingCommandClient.swift",
+    "Sources/MeetingAssistantNative/RecordingFakeCommandClient.swift",
+    "Sources/MeetingAssistantNative/RecordingControlViewModel.swift",
+    "Sources/MeetingAssistantNative/RecordingControlView.swift",
     "tests/MeetingAssistantNativeTests/PermissionDependencyStatusViewModelTests.swift",
+    "tests/MeetingAssistantNativeTests/RecordingControlViewModelTests.swift",
     "sbom/native-app.cdx.json",
 ]
 missing = [path for path in required if not (root / path).is_file()]
@@ -33,8 +38,8 @@ if metadata.get("id") != "native-app":
     raise SystemExit("native-app lint failed: component id mismatch")
 if metadata.get("kind") != "project-component":
     raise SystemExit("native-app lint failed: component kind must be project-component")
-if metadata.get("business_behavior") != "permission_dependency_status":
-    raise SystemExit("native-app lint failed: business behavior must be permission_dependency_status")
+if metadata.get("business_behavior") != "permission_dependency_status_and_fake_recording":
+    raise SystemExit("native-app lint failed: business behavior must be permission_dependency_status_and_fake_recording")
 PY
 
 echo "native-app lint passed."

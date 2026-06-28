@@ -11,8 +11,8 @@ from pathlib import Path
 metadata = json.loads(Path("component.json").read_text(encoding="utf-8"))
 if metadata.get("kind") != "project-component":
     raise SystemExit("native-app test failed: component kind must be project-component")
-if metadata.get("business_behavior") != "permission_dependency_status":
-    raise SystemExit("native-app test failed: business behavior must be permission_dependency_status")
+if metadata.get("business_behavior") != "permission_dependency_status_and_fake_recording":
+    raise SystemExit("native-app test failed: business behavior must be permission_dependency_status_and_fake_recording")
 if metadata.get("allowed_before_project_mode") is not False:
     raise SystemExit("native-app test failed: project component cannot be allowed before project mode")
 
@@ -20,8 +20,9 @@ architecture = Path("tests/ArchitectureTest.md").read_text(encoding="utf-8")
 required_phrases = (
     "Component: `native-app`",
     "VS-MA-12 boundary",
+    "VS-MA-13 fake recording boundary",
     "check_dependencies",
-    "must not implement recording",
+    "must not implement real capture",
 )
 missing = [phrase for phrase in required_phrases if phrase not in architecture]
 if missing:
@@ -32,7 +33,12 @@ required_paths = (
     Path("Sources/MeetingAssistantNative/DependencyCheckProcessRunner.swift"),
     Path("Sources/MeetingAssistantNative/PermissionDependencyStatusViewModel.swift"),
     Path("Sources/MeetingAssistantNative/PermissionDependencyStatusView.swift"),
+    Path("Sources/MeetingAssistantNative/RecordingCommandClient.swift"),
+    Path("Sources/MeetingAssistantNative/RecordingFakeCommandClient.swift"),
+    Path("Sources/MeetingAssistantNative/RecordingControlViewModel.swift"),
+    Path("Sources/MeetingAssistantNative/RecordingControlView.swift"),
     Path("tests/MeetingAssistantNativeTests/PermissionDependencyStatusViewModelTests.swift"),
+    Path("tests/MeetingAssistantNativeTests/RecordingControlViewModelTests.swift"),
 )
 missing_paths = [str(path) for path in required_paths if not path.is_file()]
 if missing_paths:

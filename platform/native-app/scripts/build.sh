@@ -25,7 +25,7 @@ let package = Package(
 SWIFT
 
 (cd "$tmp_dir" && swift build)
-printf '%s\n' "native-app VS-MA-12 build: Swift permission/dependency status target compiled." > build/build-report.txt
+printf '%s\n' "native-app VS-MA-12/VS-MA-13 build: Swift permission/dependency status and fake recording target compiled." > build/build-report.txt
 
 test -f component.json
 test -f README.md
