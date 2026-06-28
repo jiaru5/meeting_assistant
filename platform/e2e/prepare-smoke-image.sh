@@ -3,7 +3,20 @@ set -euo pipefail
 
 target_image="${MEETING_ASSISTANT_SMOKE_IMAGE:-meeting-assistant-smoke:local}"
 
-if docker image inspect "$target_image" >/dev/null 2>&1; then
+image_exists() {
+  local image="$1"
+  local attempt
+
+  for attempt in 1 2 3; do
+    if docker image inspect "$image" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+if image_exists "$target_image"; then
   echo "local smoke image available: $target_image"
   exit 0
 fi
@@ -20,7 +33,7 @@ candidates+=(
 )
 
 for candidate in "${candidates[@]}"; do
-  if docker image inspect "$candidate" >/dev/null 2>&1; then
+  if image_exists "$candidate"; then
     docker image tag "$candidate" "$target_image"
     echo "local smoke image prepared: $target_image from cached $candidate"
     exit 0

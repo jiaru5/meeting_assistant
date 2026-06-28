@@ -25,15 +25,7 @@ if grep -n -E '^\| OD-[^|]* \| open \|' docs/product-spec/10-open-decisions.md; 
   fail "open product or technical decisions remain"
 fi
 
-uncovered_rows="$(
-  awk '/^\| PV-/ && $0 !~ /\| `covered` \|$/ && $0 !~ /PV-AREA-/ { print }' \
-    docs/engineering/06-product-validation-matrix.md
-)"
-
-if [ -n "$uncovered_rows" ]; then
-  printf '%s\n' "$uncovered_rows" >&2
-  fail "validation matrix contains non-covered PV-* rows"
-fi
+python3 scripts/product-validation-check.py release || fail "validation matrix contains non-covered release-scope PV-* rows"
 
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   generated_or_secret="$(

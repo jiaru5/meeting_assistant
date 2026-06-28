@@ -138,6 +138,14 @@ release-preflight
 ./scripts/check.sh
 ```
 
+阶段收口或 Main PM 集成检查默认运行：
+
+```bash
+./scripts/phase-preflight.sh
+```
+
+`phase-preflight.sh` 允许验证矩阵保留已写明目标入口、阻塞缺口和关闭条件的 `partial` 或 `planned` 行；它只能证明当前阶段可继续集成，不能替代发布候选验收。
+
 如果改动影响 E2E、Docker 或跨模块集成，还必须运行：
 
 ```bash
@@ -170,6 +178,8 @@ release-preflight
 ```bash
 ./scripts/release-preflight.sh
 ```
+
+`release-preflight.sh` 只用于真正的发布候选。它必须 fail-closed：发布范围内任何 `PV-*` 不是 `covered` 时都不能变绿，也不能用阶段收口证据替代。
 
 发布前必须确认：
 

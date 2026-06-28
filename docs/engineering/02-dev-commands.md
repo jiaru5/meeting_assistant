@@ -21,6 +21,7 @@
 ./scripts/dev-down.sh
 ./scripts/db-migration-check.sh
 ./scripts/prod-config-check.sh
+./scripts/product-validation-check.py current-phase
 ./scripts/spec-sync-check.sh
 ./scripts/agent-workflow-check.sh
 ./scripts/architecture-check.sh
@@ -34,6 +35,7 @@
 ./scripts/test-e2e-full-stack.sh
 ./scripts/build.sh
 ./scripts/check.sh
+./scripts/phase-preflight.sh
 ./scripts/release-preflight.sh
 ```
 
@@ -51,6 +53,7 @@
 | `dev-down.sh` | 停止本地集成环境，默认不删除数据卷 |
 | `db-migration-check.sh` | 对每个已接入服务验证 migration 可从空库执行 |
 | `prod-config-check.sh` | 检查生产 env 示例、默认 secret、profile 和 dev-only 配置隔离 |
+| `product-validation-check.py` | 按 `current-phase` 或 `release` 检查验证矩阵状态；当前阶段允许有 documented `partial/planned`，release 要求全部 `PV-*` 为 `covered` |
 | `spec-sync-check.sh` | 检查产品表面改动是否同步事实源和验证矩阵 |
 | `agent-workflow-check.sh` | 检查本次 diff 是否同步了必要 spec、测试、验证矩阵和工程规范 |
 | `architecture-check.sh` | 执行每个注册组件的结构和依赖边界测试 |
@@ -64,6 +67,7 @@
 | `test-e2e-full-stack.sh` | 启动真实 Compose 环境并运行 full-stack E2E |
 | `build.sh` | 构建前端、后端服务和 Docker 镜像 |
 | `check.sh` | 合并前总入口：workflow、prod config、migration、lint、test、build |
+| `phase-preflight.sh` | 阶段收口入口：验证当前阶段矩阵状态、运行 `check.sh`、full-stack E2E 和 evidence review |
 | `release-preflight.sh` | 发布候选总入口：release blocker、验证矩阵、open decisions、生成物和全量门禁 |
 
 在 `framework` 或 `adoption` 模式且尚未创建实际组件时，应用命令可以明确跳过。进入 `project` 模式后，任何未注册组件或缺少 lint、test、build、architecture、security、SBOM、E2E 命令的情况必须失败。

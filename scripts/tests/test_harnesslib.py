@@ -184,6 +184,68 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertEqual("partial", adoption_runtime.row_status(rows["validation matrix"]))
         self.assertTrue(adoption_runtime.row_is_blocking(rows["validation matrix"]))
 
+    def write_validation_statuses(
+        self,
+        fixture: Path,
+        default_status: str,
+        overrides: dict[str, str] | None = None,
+    ) -> None:
+        overrides = overrides or {}
+        matrix = fixture / "docs/engineering/06-product-validation-matrix.md"
+        lines: list[str] = []
+        for line in matrix.read_text(encoding="utf-8").splitlines():
+            if line.startswith("| PV-"):
+                identifier = line.split("|", 2)[1].strip()
+                if identifier != "PV-AREA-001":
+                    prefix, _, suffix = line.rsplit("|", 2)
+                    line = f"{prefix}| `{overrides.get(identifier, default_status)}` |{suffix}"
+            lines.append(line)
+        matrix.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def test_product_validation_current_phase_accepts_documented_partial_rows(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/product-validation-check.py"), "current-phase"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("product validation current-phase passed", result.stdout)
+
+    def test_product_validation_release_reports_concise_blockers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.write_validation_statuses(fixture, "covered", {"PV-MA-010": "planned"})
+
+            result = subprocess.run(
+                [sys.executable, str(fixture / "scripts/product-validation-check.py"), "release"],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            output = result.stderr + result.stdout
+            self.assertIn("Release candidate requires every PV-* row to be `covered`.", output)
+            self.assertIn("PV-MA-010: planned", output)
+            self.assertNotIn("当前证据", output)
+
+    def test_product_validation_current_phase_rejects_missing_status(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.write_validation_statuses(fixture, "covered", {"PV-MA-010": "missing"})
+
+            result = subprocess.run(
+                [sys.executable, str(fixture / "scripts/product-validation-check.py"), "current-phase"],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("PV-MA-010: current phase cannot leave validation status as missing", result.stderr)
+
     def test_release_is_fail_closed_outside_project_mode(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
