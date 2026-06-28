@@ -663,7 +663,7 @@ class TranscriptProcessingTests(unittest.TestCase):
             stdout = io.StringIO()
             try:
                 with contextlib.redirect_stdout(stdout):
-                    exit_code = main(["generate_transcript", "--session-id", "session-1", "--format", "json"])
+                    exit_code = main(["generate_transcript", "--session-id", "session-1"])
             finally:
                 os.environ.clear()
                 os.environ.update(old_env)
@@ -685,7 +685,7 @@ class TranscriptProcessingTests(unittest.TestCase):
             stdout = io.StringIO()
             try:
                 with contextlib.redirect_stdout(stdout):
-                    exit_code = main(["generate_transcript", "--session-id", "missing-session", "--format", "json"])
+                    exit_code = main(["generate_transcript", "--session-id", "missing-session"])
             finally:
                 os.environ.clear()
                 os.environ.update(old_env)
@@ -722,8 +722,6 @@ class TranscriptProcessingTests(unittest.TestCase):
                             "session-1",
                             "--runtime",
                             "whisper_cpp",
-                            "--format",
-                            "json",
                         ]
                     )
             finally:
@@ -753,8 +751,6 @@ class TranscriptProcessingTests(unittest.TestCase):
                             "session-1",
                             "--runtime",
                             "whisper_cpp",
-                            "--format",
-                            "json",
                         ]
                     )
             finally:

@@ -319,8 +319,6 @@ class SpeakerLabelingTests(unittest.TestCase):
                             "transcript-1",
                             "--allow-transcript-only-fallback",
                             "true",
-                            "--format",
-                            "json",
                         ]
                     )
             finally:
@@ -337,7 +335,7 @@ class SpeakerLabelingTests(unittest.TestCase):
     def test_cli_missing_required_argument_emits_contract_json(self) -> None:
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
-            exit_code = main(["generate_speaker_labels", "--session-id", "session-1", "--format", "json"])
+            exit_code = main(["generate_speaker_labels", "--session-id", "session-1"])
 
         payload = json.loads(stdout.getvalue())
 

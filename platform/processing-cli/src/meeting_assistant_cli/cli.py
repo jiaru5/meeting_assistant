@@ -48,32 +48,27 @@ def build_parser() -> argparse.ArgumentParser:
     import_media_parser = subparsers.add_parser("import_media")
     import_media_parser.add_argument("--path", required=True)
     import_media_parser.add_argument("--title", default=None)
-    import_media_parser.add_argument("--format", choices=("json", "pretty"), default="json")
 
     transcript = subparsers.add_parser("generate_transcript")
     transcript.add_argument("--session-id", required=True)
     transcript.add_argument("--source-artifact-id", default=None)
     transcript.add_argument("--language", default=None)
     transcript.add_argument("--runtime", default=None)
-    transcript.add_argument("--format", choices=("json", "pretty"), default="json")
 
     speaker = subparsers.add_parser("generate_speaker_labels")
     speaker.add_argument("--session-id", required=True)
     speaker.add_argument("--transcript-id", required=True)
     speaker.add_argument("--allow-transcript-only-fallback", required=True, choices=("true", "false"))
-    speaker.add_argument("--format", choices=("json", "pretty"), default="json")
 
     export = subparsers.add_parser("export_transcript")
     export.add_argument("--session-id", required=True)
     export.add_argument("--export-type", required=True, choices=("plain_text", "markdown", "json"))
     export.add_argument("--target-path", default=None)
-    export.add_argument("--format", choices=("json", "pretty"), default="json")
 
     delete = subparsers.add_parser("delete_session")
     delete.add_argument("--session-id", required=True)
     delete.add_argument("--workspace-dir", default=None)
     delete.add_argument("--confirm", required=True, choices=("true", "false"))
-    delete.add_argument("--format", choices=("json", "pretty"), default="json")
 
     return parser
 
@@ -136,10 +131,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _exit_code(response)
     if args.command == "import_media":
         response = run_import_media(Path(args.path), workspace=default_workspace(), title=args.title)
-        if args.format == "json":
-            print(json.dumps(response, ensure_ascii=False, sort_keys=True))
-        else:
-            _print_pretty(response)
+        print(json.dumps(response, ensure_ascii=False, sort_keys=True))
         return _exit_code(response)
     if args.command == "generate_transcript":
         response = run_generate_transcript(
@@ -149,10 +141,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             language=args.language,
             runtime=args.runtime,
         )
-        if args.format == "json":
-            print(json.dumps(response, ensure_ascii=False, sort_keys=True))
-        else:
-            _print_pretty(response)
+        print(json.dumps(response, ensure_ascii=False, sort_keys=True))
         return _exit_code(response)
     if args.command == "generate_speaker_labels":
         response = run_generate_speaker_labels(
@@ -161,10 +150,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             workspace=default_workspace(),
             allow_transcript_only_fallback=args.allow_transcript_only_fallback == "true",
         )
-        if args.format == "json":
-            print(json.dumps(response, ensure_ascii=False, sort_keys=True))
-        else:
-            _print_pretty(response)
+        print(json.dumps(response, ensure_ascii=False, sort_keys=True))
         return _exit_code(response)
     if args.command == "export_transcript":
         response = run_export_transcript(
@@ -173,10 +159,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             workspace=default_workspace(),
             target_path=Path(args.target_path) if args.target_path else None,
         )
-        if args.format == "json":
-            print(json.dumps(response, ensure_ascii=False, sort_keys=True))
-        else:
-            _print_pretty(response)
+        print(json.dumps(response, ensure_ascii=False, sort_keys=True))
         return _exit_code(response)
     if args.command == "delete_session":
         workspace = Path(args.workspace_dir).expanduser() if args.workspace_dir else default_workspace()
@@ -185,10 +168,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             workspace=workspace,
             confirm=args.confirm == "true",
         )
-        if args.format == "json":
-            print(json.dumps(response, ensure_ascii=False, sort_keys=True))
-        else:
-            _print_pretty(response)
+        print(json.dumps(response, ensure_ascii=False, sort_keys=True))
         return _exit_code(response)
     print(f"unsupported command: {args.command}", file=sys.stderr)
     return 2

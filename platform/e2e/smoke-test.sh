@@ -150,7 +150,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
 
     import_response = run_cli(
         workspace,
-        ["import_media", "--path", str(fixture), "--title", "P2-C deterministic fixture", "--format", "json"],
+        ["import_media", "--path", str(fixture), "--title", "P2-C deterministic fixture"],
         expected_exit=0,
         command="import_media",
     )
@@ -174,7 +174,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
 
     transcript_response = run_cli(
         workspace,
-        ["generate_transcript", "--session-id", session_id, "--language", "zh", "--format", "json"],
+        ["generate_transcript", "--session-id", session_id, "--language", "zh"],
         expected_exit=0,
         command="generate_transcript",
     )
@@ -216,8 +216,6 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
             str(transcript["id"]),
             "--allow-transcript-only-fallback",
             "true",
-            "--format",
-            "json",
         ],
         expected_exit=0,
         command="generate_speaker_labels",
@@ -246,8 +244,6 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
             "markdown",
             "--target-path",
             str(export_target),
-            "--format",
-            "json",
         ],
         expected_exit=0,
         command="export_transcript",
@@ -272,7 +268,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
 
     declined_delete = run_cli(
         workspace,
-        ["delete_session", "--session-id", session_id, "--workspace-dir", str(workspace), "--confirm", "false", "--format", "json"],
+        ["delete_session", "--session-id", session_id, "--workspace-dir", str(workspace), "--confirm", "false"],
         expected_exit=2,
         command="delete_session",
     )
@@ -282,7 +278,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
 
     delete_response = run_cli(
         workspace,
-        ["delete_session", "--session-id", session_id, "--workspace-dir", str(workspace), "--confirm", "true", "--format", "json"],
+        ["delete_session", "--session-id", session_id, "--workspace-dir", str(workspace), "--confirm", "true"],
         expected_exit=0,
         command="delete_session",
     )

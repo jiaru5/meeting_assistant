@@ -125,7 +125,7 @@ class ImportMediaTests(unittest.TestCase):
             stdout = io.StringIO()
             try:
                 with contextlib.redirect_stdout(stdout):
-                    exit_code = main(["import_media", "--path", str(source), "--title", "CLI", "--format", "json"])
+                    exit_code = main(["import_media", "--path", str(source), "--title", "CLI"])
             finally:
                 os.environ.clear()
                 os.environ.update(old_env)
@@ -155,7 +155,7 @@ class ImportMediaTests(unittest.TestCase):
             stdout = io.StringIO()
             try:
                 with contextlib.redirect_stdout(stdout):
-                    exit_code = main(["import_media", "--path", str(root / "missing.wav"), "--format", "json"])
+                    exit_code = main(["import_media", "--path", str(root / "missing.wav")])
             finally:
                 os.environ.clear()
                 os.environ.update(old_env)
@@ -170,7 +170,7 @@ class ImportMediaTests(unittest.TestCase):
     def test_cli_missing_required_argument_emits_contract_json(self) -> None:
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
-            exit_code = main(["import_media", "--format", "json"])
+            exit_code = main(["import_media"])
 
         payload = json.loads(stdout.getvalue())
 

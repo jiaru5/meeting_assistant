@@ -176,8 +176,6 @@ class TranscriptExportTests(unittest.TestCase):
                             "plain_text",
                             "--target-path",
                             str(target),
-                            "--format",
-                            "json",
                         ]
                     )
             finally:
