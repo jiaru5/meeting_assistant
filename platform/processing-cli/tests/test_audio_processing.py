@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -178,6 +179,50 @@ class AudioProcessingTests(unittest.TestCase):
         self.assertIn("mixed_audio", response["message"])
         self.assertFalse(normalized_exists)
 
+    def test_normalized_audio_symlink_destination_returns_path_conflict_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+            outside = root / "outside-normalized.wav"
+            outside.write_bytes(wav_bytes(b"outside"))
+            normalized_path = session_dir / "artifacts" / "normalized_audio.wav"
+            normalized_path.symlink_to(outside)
+
+            response = run_audio_normalization("session-1", workspace=workspace)
+
+            outside_bytes = outside.read_bytes()
+            normalized_is_symlink = normalized_path.is_symlink()
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertEqual(outside_bytes, wav_bytes(b"outside"))
+        self.assertTrue(normalized_is_symlink)
+        self.assertNotIn("normalized_audio", artifact_types)
+
+    def test_normalized_audio_hardlink_destination_returns_path_conflict_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+            outside = root / "outside-normalized.wav"
+            outside.write_bytes(wav_bytes(b"outside"))
+            normalized_path = session_dir / "artifacts" / "normalized_audio.wav"
+            os.link(outside, normalized_path)
+
+            response = run_audio_normalization("session-1", workspace=workspace)
+
+            outside_bytes = outside.read_bytes()
+            normalized_exists = normalized_path.exists()
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertEqual(outside_bytes, wav_bytes(b"outside"))
+        self.assertTrue(normalized_exists)
+        self.assertNotIn("normalized_audio", artifact_types)
+
     def test_no_audio_artifact_returns_artifact_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -194,6 +239,63 @@ class AudioProcessingTests(unittest.TestCase):
         self.assertIn("mixed_audio", response["message"])
         self.assertTrue(log_exists)
         self.assertIn("local-no-audio", log_text)
+
+    def test_processing_log_symlink_returns_path_conflict_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_audio_session(workspace, [])
+            outside = root / "outside-processing.log"
+            outside.write_text("outside\n", encoding="utf-8")
+            log_path = session_dir / "logs" / "processing.log"
+            log_path.symlink_to(outside)
+
+            response = run_audio_normalization("session-1", workspace=workspace)
+
+            outside_text = outside.read_text(encoding="utf-8")
+            log_is_symlink = log_path.is_symlink()
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertEqual(outside_text, "outside\n")
+        self.assertTrue(log_is_symlink)
+
+    def test_processing_log_hardlink_returns_path_conflict_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_audio_session(workspace, [])
+            outside = root / "outside-processing.log"
+            outside.write_text("outside\n", encoding="utf-8")
+            log_path = session_dir / "logs" / "processing.log"
+            os.link(outside, log_path)
+
+            response = run_audio_normalization("session-1", workspace=workspace)
+
+            outside_text = outside.read_text(encoding="utf-8")
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertEqual(outside_text, "outside\n")
+
+    def test_processing_log_broken_symlink_returns_path_conflict_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_audio_session(workspace, [])
+            missing_target = root / "missing" / "processing.log"
+            log_path = session_dir / "logs" / "processing.log"
+            log_path.symlink_to(missing_target)
+
+            response = run_audio_normalization("session-1", workspace=workspace)
+
+            target_exists = missing_target.exists()
+            log_is_symlink = log_path.is_symlink()
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertFalse(target_exists)
+        self.assertTrue(log_is_symlink)
 
     def test_repeated_normalization_reuses_derived_artifact_and_preserves_original(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

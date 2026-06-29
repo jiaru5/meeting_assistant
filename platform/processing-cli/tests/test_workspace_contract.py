@@ -12,6 +12,7 @@ from meeting_assistant_cli.workspace_contract import (
     acquire_session_lock,
     create_session,
     load_session,
+    prepare_managed_output_path,
     register_artifact,
     session_directory,
     sha256_file,
@@ -147,6 +148,66 @@ class WorkspaceContractTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "path_conflict")
         self.assertEqual(outside_text, b"outside")
         self.assertTrue(link_is_symlink)
+
+    def test_prepare_managed_output_path_rejects_broken_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            create_session(workspace, source_type="native_recording", session_id="session-1")
+            session_dir = workspace / "sessions" / "session-1"
+            broken_target = Path(tmp) / "missing" / "processing.log"
+            output = session_dir / "logs" / "processing.log"
+            output.symlink_to(broken_target)
+
+            with self.assertRaises(ContractError) as raised:
+                prepare_managed_output_path(session_dir, Path("logs/processing.log"))
+
+            target_exists = broken_target.exists()
+            output_is_symlink = output.is_symlink()
+
+        self.assertEqual(raised.exception.code, "path_conflict")
+        self.assertFalse(target_exists)
+        self.assertTrue(output_is_symlink)
+
+    def test_prepare_managed_output_path_rejects_hardlink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            root = Path(tmp)
+            create_session(workspace, source_type="native_recording", session_id="session-1")
+            session_dir = workspace / "sessions" / "session-1"
+            outside = root / "outside.log"
+            outside.write_text("outside", encoding="utf-8")
+            output = session_dir / "logs" / "processing.log"
+            os.link(outside, output)
+
+            with self.assertRaises(ContractError) as raised:
+                prepare_managed_output_path(session_dir, Path("logs/processing.log"))
+
+            outside_text = outside.read_text(encoding="utf-8")
+
+        self.assertEqual(raised.exception.code, "path_conflict")
+        self.assertEqual(outside_text, "outside")
+
+    def test_prepare_managed_output_path_rejects_symlink_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            root = Path(tmp)
+            create_session(workspace, source_type="native_recording", session_id="session-1")
+            session_dir = workspace / "sessions" / "session-1"
+            outside_logs = root / "outside-logs"
+            outside_logs.mkdir()
+            logs = session_dir / "logs"
+            logs.rmdir()
+            logs.symlink_to(outside_logs)
+
+            with self.assertRaises(ContractError) as raised:
+                prepare_managed_output_path(session_dir, Path("logs/processing.log"))
+
+            external_log_exists = (outside_logs / "processing.log").exists()
+            logs_is_symlink = logs.is_symlink()
+
+        self.assertEqual(raised.exception.code, "path_conflict")
+        self.assertFalse(external_log_exists)
+        self.assertTrue(logs_is_symlink)
 
     def test_original_media_artifacts_are_append_only_per_type(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

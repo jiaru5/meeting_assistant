@@ -15,6 +15,7 @@ from .workspace_contract import (
     acquire_session_lock,
     artifact_file_path,
     load_session,
+    prepare_managed_output_path,
     register_artifact,
     session_directory,
     sha256_file,
@@ -83,13 +84,32 @@ def _success_response(
 
 
 def _append_processing_log(session_dir: Path, *, request_id: str, code: str, message: str) -> Path:
-    log_dir = session_dir / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "processing.log"
+    log_path = prepare_managed_output_path(
+        session_dir,
+        Path("logs/processing.log"),
+        "Processing log path conflicts with the session boundary.",
+        create_parent=True,
+    )
     line = f"{utc_timestamp()} request_id={request_id} stage=audio_normalization code={code} message={message}\n"
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(line)
     return log_path
+
+
+def _record_processing_failure(
+    session_dir: Path,
+    *,
+    request_id: str,
+    code: str,
+    message: str,
+    details: dict[str, object],
+) -> tuple[str, str, dict[str, object]]:
+    try:
+        log_path = _append_processing_log(session_dir, request_id=request_id, code=code, message=message)
+    except ContractError as exc:
+        return exc.code, exc.message, dict(exc.details)
+    details["log_path"] = str(log_path)
+    return code, message, details
 
 
 def _usable_audio_source(session_dir: Path, artifact: dict) -> AudioSource | None:
@@ -279,9 +299,16 @@ def run_audio_normalization(
 
                 source = select_audio_source(session_dir, source_artifact_id)
 
-                artifacts_dir = session_dir / "artifacts"
-                destination = artifacts_dir / "normalized_audio.wav"
-                temp_path = artifacts_dir / ".normalized_audio.wav.tmp"
+                destination = prepare_managed_output_path(
+                    session_dir,
+                    Path("artifacts/normalized_audio.wav"),
+                    "normalized_audio output path conflicts with the session boundary.",
+                )
+                temp_path = prepare_managed_output_path(
+                    session_dir,
+                    Path("artifacts/.normalized_audio.wav.tmp"),
+                    "normalized_audio temporary output path conflicts with the session boundary.",
+                )
                 if temp_path.exists():
                     temp_path.unlink()
 
@@ -329,35 +356,45 @@ def run_audio_normalization(
     except ContractError as exc:
         details: dict[str, object] = dict(exc.details)
         if session_dir is not None and exc.code != "not_found":
-            log_path = _append_processing_log(session_dir, request_id=assigned_request_id, code=exc.code, message=exc.message)
-            details["log_path"] = str(log_path)
             if registered_artifact_id is not None:
                 _remove_registered_artifact(session_dir, registered_artifact_id)
             if destination is not None and destination_written:
                 destination.unlink(missing_ok=True)
+            response_code, response_message, details = _record_processing_failure(
+                session_dir,
+                request_id=assigned_request_id,
+                code=exc.code,
+                message=exc.message,
+                details=details,
+            )
+        else:
+            response_code = exc.code
+            response_message = exc.message
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)
-        return _failure_response(exc.code, exc.message, request_id=assigned_request_id, details=details or None)
+        return _failure_response(response_code, response_message, request_id=assigned_request_id, details=details or None)
     except Exception as exc:
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)
         message = f"Audio normalization failed: {exc}" if str(exc) else "Audio normalization failed."
+        response_code = "processing_failed"
+        response_message = message
         details = {"error": exc.__class__.__name__, "error_message": str(exc)}
         if session_dir is not None:
             if registered_artifact_id is not None:
                 _remove_registered_artifact(session_dir, registered_artifact_id)
             if destination is not None and destination_written:
                 destination.unlink(missing_ok=True)
-            log_path = _append_processing_log(
+            response_code, response_message, details = _record_processing_failure(
                 session_dir,
                 request_id=assigned_request_id,
                 code="processing_failed",
                 message=message,
+                details=details,
             )
-            details["log_path"] = str(log_path)
         return _failure_response(
-            "processing_failed",
-            message,
+            response_code,
+            response_message,
             request_id=assigned_request_id,
             details=details,
         )

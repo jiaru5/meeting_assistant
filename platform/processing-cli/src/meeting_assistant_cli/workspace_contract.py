@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -171,6 +172,41 @@ def _reject_linked_artifact_path(session_dir: Path, path: Path) -> None:
         return
     if stat_result.st_nlink > 1:
         raise ContractError("path_conflict", "Application-managed artifacts must not be hardlinks.", path=str(artifact_path))
+
+
+def prepare_managed_output_path(
+    base: Path,
+    candidate: Path,
+    message: str = "Application-managed output path conflicts with the session boundary.",
+    *,
+    create_parent: bool = False,
+) -> Path:
+    requested_path = candidate.expanduser() if candidate.is_absolute() else base / candidate
+    prepared_path = _ensure_within(base, requested_path, message)
+
+    parent_path = requested_path.parent
+    _ensure_within(base, parent_path, message)
+    if parent_path.is_symlink():
+        raise ContractError("path_conflict", "Application-managed output parent must not be a symlink.", path=str(parent_path))
+    if not parent_path.exists():
+        if create_parent:
+            parent_path.mkdir(parents=True, exist_ok=True)
+        else:
+            raise ContractError("path_conflict", "Application-managed output parent directory does not exist.", path=str(parent_path))
+    if not parent_path.is_dir():
+        raise ContractError("path_conflict", "Application-managed output parent must be a directory.", path=str(parent_path))
+
+    if requested_path.is_symlink():
+        raise ContractError("path_conflict", "Application-managed output must not be a symlink.", path=str(requested_path))
+    try:
+        stat_result = requested_path.stat()
+    except FileNotFoundError:
+        return prepared_path
+    if not stat.S_ISREG(stat_result.st_mode):
+        raise ContractError("path_conflict", "Application-managed output must be a regular file.", path=str(requested_path))
+    if stat_result.st_nlink > 1:
+        raise ContractError("path_conflict", "Application-managed output must not be a hardlink.", path=str(requested_path))
+    return prepared_path
 
 
 def artifact_file_path(session_dir: Path, artifact: dict) -> Path:
