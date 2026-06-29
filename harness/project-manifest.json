@@ -76,7 +76,7 @@
     ],
     "seed_command": [],
     "test_command": [
-      "./platform/e2e/smoke-test.sh"
+      "./platform/e2e/full-stack-smoke.sh"
     ],
     "cleanup": true
   },

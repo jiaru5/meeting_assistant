@@ -10,7 +10,8 @@
     "fake_recording_command_client",
     "fake_recording_state_machine",
     "fake_recording_control_view",
-    "read_only_transcript_review_view"
+    "read_only_transcript_review_view",
+    "read_only_workspace_transcript_loading"
   ],
   "forbidden_capabilities": [
     "real_recording",

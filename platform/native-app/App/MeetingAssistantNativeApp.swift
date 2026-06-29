@@ -82,6 +82,25 @@ private struct NativeControlPlaneFixtureConfiguration {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         arguments: [String] = CommandLine.arguments
     ) -> NativeControlPlaneFixtureConfiguration {
+        if let workspacePath = environment["MA_NATIVE_TRANSCRIPT_WORKSPACE"]
+            ?? argumentValue(named: "--ma-native-transcript-workspace", in: arguments),
+            let transcriptSessionID = environment["MA_NATIVE_TRANSCRIPT_SESSION_ID"]
+            ?? argumentValue(named: "--ma-native-transcript-session-id", in: arguments),
+            !workspacePath.isEmpty,
+            !transcriptSessionID.isEmpty {
+            let transcriptInput = (try? TranscriptReviewWorkspaceLoader.load(
+                workspaceURL: URL(fileURLWithPath: workspacePath, isDirectory: true),
+                sessionID: transcriptSessionID
+            )) ?? TranscriptReviewInput(sessionTitle: "Workspace transcript fixture", transcript: nil)
+
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .readyFixture,
+                recordingScript: .success,
+                sessionID: transcriptSessionID,
+                transcriptInput: transcriptInput
+            )
+        }
+
         let fixture = environment["MA_NATIVE_APP_SMOKE_FIXTURE"]
             ?? argumentValue(named: "--ma-native-fixture", in: arguments)
             ?? "blocked"

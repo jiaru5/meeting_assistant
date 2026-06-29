@@ -22,4 +22,5 @@ VS-MA-17 read-only transcript review boundary:
 3. It may consume only frozen `speaker_labels.json` fields `session_id`, `labels` and `segment_mapping`.
 4. Transcript-only speaker label degradation reason may appear only as fixture/read-model input state, not as a new artifact schema.
 5. It may expose stable `ma.transcript.*` accessibility identifiers for heading, summary, segment row, timestamp, text, anonymous speaker label, degradation, empty and missing states.
-6. It must not implement transcription generation, speaker generation, copy/export actions, delete actions, processing commands, real capture, external providers, network calls, downloads or helper runtime invocation.
+6. The read-only workspace transcript loading boundary may read `sessions/<session_id>/session.json`, find `transcript_text` and optional `speaker_labels` artifacts, validate artifact path/checksum safety, and project them into `TranscriptReviewInput`.
+7. It must not implement transcription generation, speaker generation, copy/export actions, delete actions, processing commands, real capture, external providers, network calls, downloads or helper runtime invocation.
