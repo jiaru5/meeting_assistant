@@ -29,6 +29,7 @@ required = [
     "Sources/MeetingAssistantNative/RecordingControlViewModel.swift",
     "Sources/MeetingAssistantNative/RecordingControlView.swift",
     "Sources/MeetingAssistantNative/TranscriptReviewReadModel.swift",
+    "Sources/MeetingAssistantNative/TranscriptReviewWorkspaceLoader.swift",
     "Sources/MeetingAssistantNative/TranscriptReviewViewModel.swift",
     "Sources/MeetingAssistantNative/TranscriptReviewView.swift",
     "tests/MeetingAssistantNativeTests/PermissionDependencyStatusViewModelTests.swift",
@@ -50,6 +51,8 @@ if metadata.get("kind") != "project-component":
 expected_behavior = "permission_dependency_status_fake_recording_and_transcript_review"
 if metadata.get("business_behavior") != expected_behavior:
     raise SystemExit(f"native-app lint failed: business behavior must be {expected_behavior}")
+if "read_only_workspace_transcript_loading" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app lint failed: missing read-only workspace transcript loading capability")
 
 project = (root / "MeetingAssistantNative.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
 required_project_snippets = [
@@ -58,6 +61,7 @@ required_project_snippets = [
     "AppBundleLocatorSmokeTests.swift",
     "MeetingAssistantNativeApp.swift",
     "TranscriptReviewReadModel.swift",
+    "TranscriptReviewWorkspaceLoader.swift",
     "TranscriptReviewViewModel.swift",
     "TranscriptReviewView.swift",
 ]

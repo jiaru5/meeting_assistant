@@ -15,6 +15,8 @@ if metadata.get("business_behavior") != "permission_dependency_status_fake_recor
     raise SystemExit("native-app test failed: business behavior must be permission_dependency_status_fake_recording_and_transcript_review")
 if metadata.get("allowed_before_project_mode") is not False:
     raise SystemExit("native-app test failed: project component cannot be allowed before project mode")
+if "read_only_workspace_transcript_loading" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app test failed: missing read-only workspace transcript loading capability")
 
 architecture = Path("tests/ArchitectureTest.md").read_text(encoding="utf-8")
 required_phrases = (
@@ -22,7 +24,9 @@ required_phrases = (
     "VS-MA-12 boundary",
     "VS-MA-13 fake recording boundary",
     "VS-MA-17 read-only transcript review boundary",
+    "read-only workspace transcript loading boundary",
     "check_dependencies",
+    "session.json",
     "transcript.json",
     "speaker_labels.json",
     "must not implement real capture",
@@ -44,6 +48,7 @@ required_paths = (
     Path("Sources/MeetingAssistantNative/RecordingControlViewModel.swift"),
     Path("Sources/MeetingAssistantNative/RecordingControlView.swift"),
     Path("Sources/MeetingAssistantNative/TranscriptReviewReadModel.swift"),
+    Path("Sources/MeetingAssistantNative/TranscriptReviewWorkspaceLoader.swift"),
     Path("Sources/MeetingAssistantNative/TranscriptReviewViewModel.swift"),
     Path("Sources/MeetingAssistantNative/TranscriptReviewView.swift"),
     Path("tests/MeetingAssistantNativeTests/PermissionDependencyStatusViewModelTests.swift"),

@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 
 final class AppBundleLocatorSmokeTests: XCTestCase {
@@ -100,6 +101,19 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         assertElement("ma.transcript.degradation", in: app, contains: "speaker labeling runtime unavailable")
     }
 
+    func testWorkspaceArtifactLaunchEnvironmentLoadsTranscriptOnlyReviewFromLaunchedAppBundle() throws {
+        let fixture = try createWorkspaceTranscriptOnlyFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.workspaceURL) }
+        let app = launchApp(workspaceURL: fixture.workspaceURL, sessionID: fixture.sessionID)
+
+        assertElement("ma.transcript.heading", in: app, contains: "Workspace injected transcript")
+        assertElement("ma.transcript.summary", in: app, contains: "Transcript has 1 segment for review.")
+        assertElement("ma.transcript.timestamp.seg-workspace", in: app, contains: "00:02-00:04")
+        assertElement("ma.transcript.text.seg-workspace", in: app, contains: "Workspace transcript loaded through launch environment.")
+        assertDoesNotExist("ma.transcript.speakerLabel.seg-workspace", in: app)
+        assertElement("ma.transcript.degradation", in: app, contains: "speaker labels degraded from session metadata")
+    }
+
     func testEmptyTranscriptFixtureExposesStableEmptyStateFromLaunchedAppBundle() {
         let app = launchApp(fixture: "transcript-empty")
 
@@ -108,12 +122,20 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         assertElement("ma.transcript.degradation", in: app, contains: "speaker labeling skipped")
     }
 
-    private func launchApp(fixture: String? = nil) -> XCUIApplication {
+    private func launchApp(
+        fixture: String? = nil,
+        workspaceURL: URL? = nil,
+        sessionID: String? = nil
+    ) -> XCUIApplication {
         dismissSpotlightIfPresent()
         let app = XCUIApplication()
         app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
         if let fixture {
             app.launchEnvironment["MA_NATIVE_APP_SMOKE_FIXTURE"] = fixture
+        }
+        if let workspaceURL, let sessionID {
+            app.launchEnvironment["MA_NATIVE_TRANSCRIPT_WORKSPACE"] = workspaceURL.path
+            app.launchEnvironment["MA_NATIVE_TRANSCRIPT_SESSION_ID"] = sessionID
         }
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10), "Expected app bundle to run foreground.")
@@ -207,5 +229,95 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         let result = XCTWaiter.wait(for: [expectation], timeout: 5)
         XCTAssertEqual(result, .completed, "Expected \(element) to become enabled.", file: file, line: line)
+    }
+
+    private func createWorkspaceTranscriptOnlyFixture() throws -> (workspaceURL: URL, sessionID: String) {
+        let sessionID = "session-app-workspace-transcript"
+        let workspaceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ma-native-app-workspace-\(UUID().uuidString)", isDirectory: true)
+        let sessionRoot = workspaceURL
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+        let artifactsRoot = sessionRoot.appendingPathComponent("artifacts", isDirectory: true)
+        try FileManager.default.createDirectory(at: artifactsRoot, withIntermediateDirectories: true)
+
+        let transcriptURL = artifactsRoot.appendingPathComponent("transcript.json")
+        let speakerURL = artifactsRoot.appendingPathComponent("speaker_labels.json")
+        let transcriptChecksum = try writeJSON(
+            [
+                "id": "transcript-app-workspace",
+                "session_id": sessionID,
+                "source_artifact_id": "artifact-normalized-audio",
+                "status": "succeeded",
+                "segments": [
+                    [
+                        "segment_id": "seg-workspace",
+                        "start_ms": 2_000,
+                        "end_ms": 4_000,
+                        "text": "Workspace transcript loaded through launch environment.",
+                    ],
+                ],
+                "created_at": "2026-06-29T00:00:00Z",
+            ],
+            to: transcriptURL
+        )
+        let speakerChecksum = try writeJSON(
+            [
+                "session_id": sessionID,
+                "transcript_id": "transcript-app-workspace",
+                "label_status": "transcript_only",
+                "degradation_reason": "json reason should not be used by native loader",
+                "labels": [],
+                "segment_mapping": [],
+                "created_at": "2026-06-29T00:00:00Z",
+            ],
+            to: speakerURL
+        )
+        _ = try writeJSON(
+            [
+                "id": sessionID,
+                "title": "Workspace injected transcript",
+                "source_type": "imported_media",
+                "status": "transcribed",
+                "started_at": "2026-06-29T00:00:00Z",
+                "workspace_dir": sessionRoot.path,
+                "created_at": "2026-06-29T00:00:00Z",
+                "updated_at": "2026-06-29T00:00:00Z",
+                "artifacts": [
+                    [
+                        "id": "artifact-workspace-transcript",
+                        "session_id": sessionID,
+                        "artifact_type": "transcript_text",
+                        "path": "artifacts/transcript.json",
+                        "format": "json",
+                        "capture_status": "available",
+                        "checksum": transcriptChecksum,
+                        "created_at": "2026-06-29T00:00:00Z",
+                    ],
+                    [
+                        "id": "artifact-workspace-speakers",
+                        "session_id": sessionID,
+                        "artifact_type": "speaker_labels",
+                        "path": "artifacts/speaker_labels.json",
+                        "format": "json",
+                        "capture_status": "degraded",
+                        "degradation_reason": "speaker labels degraded from session metadata",
+                        "checksum": speakerChecksum,
+                        "created_at": "2026-06-29T00:00:00Z",
+                    ],
+                ],
+            ],
+            to: sessionRoot.appendingPathComponent("session.json")
+        )
+        return (workspaceURL, sessionID)
+    }
+
+    @discardableResult
+    private func writeJSON(_ payload: Any, to url: URL) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: url)
+        let digest = SHA256.hash(data: data)
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "sha256:\(hex)"
     }
 }

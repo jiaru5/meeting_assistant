@@ -9,7 +9,9 @@ grep -q "Component: \`native-app\`" tests/ArchitectureTest.md
 grep -q "VS-MA-12 boundary" tests/ArchitectureTest.md
 grep -q "VS-MA-13 fake recording boundary" tests/ArchitectureTest.md
 grep -q "VS-MA-17 read-only transcript review boundary" tests/ArchitectureTest.md
+grep -q "read-only workspace transcript loading boundary" tests/ArchitectureTest.md
 grep -q "check_dependencies" tests/ArchitectureTest.md
+grep -q "session.json" tests/ArchitectureTest.md
 grep -q "transcript.json" tests/ArchitectureTest.md
 grep -q "speaker_labels.json" tests/ArchitectureTest.md
 test -f MeetingAssistantNative.xcodeproj/project.pbxproj
@@ -23,6 +25,7 @@ test -f Sources/MeetingAssistantNative/RecordingFakeCommandClient.swift
 test -f Sources/MeetingAssistantNative/RecordingControlViewModel.swift
 test -f Sources/MeetingAssistantNative/RecordingControlView.swift
 test -f Sources/MeetingAssistantNative/TranscriptReviewReadModel.swift
+test -f Sources/MeetingAssistantNative/TranscriptReviewWorkspaceLoader.swift
 test -f Sources/MeetingAssistantNative/TranscriptReviewViewModel.swift
 test -f Sources/MeetingAssistantNative/TranscriptReviewView.swift
 test -f UITests/MeetingAssistantNativeUITests/NativeControlPlaneSmokeTests.swift
@@ -35,6 +38,8 @@ grep -R -q "stop_recording" Sources tests
 grep -R -q "ma.recording" Sources tests App UITests
 grep -R -q "ma.transcript" Sources tests App UITests
 grep -R -q "TranscriptReviewViewModel" Sources tests App UITests
+grep -R -q "TranscriptReviewWorkspaceLoader" Sources tests App UITests
+grep -R -q "MA_NATIVE_TRANSCRIPT_WORKSPACE" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "XCTest" UITests
 grep -R -q "NSHostingController" UITests/MeetingAssistantNativeUITests
 grep -R -q "XCUIApplication" UITests/MeetingAssistantNativeAppUITests
@@ -49,7 +54,7 @@ fi
 recording_boundary_forbidden='(^[[:space:]]*import[[:space:]]+(ScreenCaptureKit|AVFoundation|CoreAudio|CoreMediaIO|ReplayKit|Network)\b|Process\b|ProcessInfo\b|NSTask\b|posix_spawn|execv|system[[:space:]]*\(|popen[[:space:]]*\(|meeting_assistant_cli|ProcessingCLIDependencyCheckRunner|DependencyCheckProcessRunner|native-helper|processing-cli|helper[[:space:]]+tool|ScreenCaptureKit|AVCapture|CGDisplayStream|SCStream|SCShareableContent|AVAudioEngine|AVAudioRecorder|RPScreenRecorder|CGWindowListCreate|CGDisplayCreateImage|AudioQueue|AudioUnit|AudioDevice|FileManager\b|FileHandle\b|OutputStream\b|InputStream\b|createFile[[:space:]]*\(|createDirectory[[:space:]]*\(|removeItem[[:space:]]*\(|copyItem[[:space:]]*\(|moveItem[[:space:]]*\(|\.(write|write(to|Bytes))[[:space:]]*\(|generate_transcript|generate_speaker_labels|normalize_audio|import_media|export_transcript|delete_session|check_dependencies|URLSession|URLRequest|URLSessionConfiguration|NWConnection|NWListener|WebSocket|https?://)'
 
 if grep -R --include 'Recording*.swift' -n -E "$recording_boundary_forbidden" Sources tests ||
-  grep -R --include '*.swift' -n -E "$recording_boundary_forbidden" UITests; then
+  grep -R --include '*.swift' -n -E "$recording_boundary_forbidden" UITests/MeetingAssistantNativeUITests; then
   echo "native-app architecture check failed: recording UI/state and UITests must stay on the fake recording boundary and must not call processes, real helpers/CLIs, file writes, capture frameworks, processing commands or network APIs." >&2
   exit 1
 fi

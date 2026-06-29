@@ -20,6 +20,7 @@
 		C00000000000000000000011 /* TranscriptReviewReadModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000013 /* TranscriptReviewReadModel.swift */; };
 		C00000000000000000000012 /* TranscriptReviewViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000014 /* TranscriptReviewViewModel.swift */; };
 		C00000000000000000000013 /* TranscriptReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000015 /* TranscriptReviewView.swift */; };
+		C00000000000000000000014 /* TranscriptReviewWorkspaceLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000016 /* TranscriptReviewWorkspaceLoader.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -48,6 +49,7 @@
 		B00000000000000000000013 /* TranscriptReviewReadModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptReviewReadModel.swift; sourceTree = "<group>"; };
 		B00000000000000000000014 /* TranscriptReviewViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptReviewViewModel.swift; sourceTree = "<group>"; };
 		B00000000000000000000015 /* TranscriptReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptReviewView.swift; sourceTree = "<group>"; };
+		B00000000000000000000016 /* TranscriptReviewWorkspaceLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptReviewWorkspaceLoader.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -107,6 +109,7 @@
 				B00000000000000000000008 /* RecordingControlViewModel.swift */,
 				B00000000000000000000009 /* RecordingControlView.swift */,
 				B00000000000000000000013 /* TranscriptReviewReadModel.swift */,
+				B00000000000000000000016 /* TranscriptReviewWorkspaceLoader.swift */,
 				B00000000000000000000014 /* TranscriptReviewViewModel.swift */,
 				B00000000000000000000015 /* TranscriptReviewView.swift */,
 			);
@@ -237,6 +240,7 @@
 				C00000000000000000000008 /* RecordingControlViewModel.swift in Sources */,
 				C00000000000000000000009 /* RecordingControlView.swift in Sources */,
 				C00000000000000000000011 /* TranscriptReviewReadModel.swift in Sources */,
+				C00000000000000000000014 /* TranscriptReviewWorkspaceLoader.swift in Sources */,
 				C00000000000000000000012 /* TranscriptReviewViewModel.swift in Sources */,
 				C00000000000000000000013 /* TranscriptReviewView.swift in Sources */,
 			);
