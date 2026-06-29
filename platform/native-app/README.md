@@ -20,4 +20,11 @@
 6. XCTest-hosted SwiftUI smoke 覆盖权限/依赖缺失状态、readiness blocked、fake recording start、recording、stop saved summary、start/stop failure，并通过生产 SwiftUI source contract 断言 `ma.permissionDependency.*` / `ma.recording.*` locator 和关键可见文案仍由视图定义使用。
 7. 持久 `MeetingAssistantNative.xcodeproj` 提供最小 macOS app bundle target 和 app-bundle XCUITest target；`AppBundleLocatorSmokeTests` 使用 `XCUIApplication()` 启动 `.app`，通过 deterministic launch fixture 覆盖默认 blocked readiness、ready fake start/stop、start failure error locator，且不调用真实 helper/CLI/capture/runtime。
 
-当前目录仍不得实现真实录制、屏幕捕获、系统音频捕获、麦克风捕获、转写、speaker labeling、外部模型调用、公开 `normalize_audio` 命令或自动依赖下载。VS-MA-13 fake recording 和 app-bundle locator smoke 证据只能用于 `PV-MA-001`、`PV-MA-002`、`PV-MA-005` 的 partial 状态，不能替代 VS-MA-14 的真实 native capture、真实 macOS 权限负向用例或真实 runtime/model smoke。
+当前已实现 VS-MA-17 read-only transcript review consumer 边界：
+
+1. `TranscriptReviewReadModel` 只读取 `transcript.json` 的 `id`、`session_id`、`source_artifact_id`、`status`、`segments[]`、`segment_id`、`start_ms`、`end_ms`、`text`、可选 `speaker_label`，以及 `speaker_labels.json` 的 `session_id`、`labels`、`segment_mapping`。
+2. `TranscriptReviewViewModel` 输出稳定可见状态：heading、summary、timestamp label、transcript text、匿名 speaker label、transcript-only degradation reason、missing transcript 和 empty transcript。
+3. `TranscriptReviewView` 暴露 `ma.transcript.*` accessibility identifier，供 Swift Testing 和 XCUITest 稳定断言。
+4. `MeetingAssistantNativeApp` 通过 deterministic `MA_NATIVE_APP_SMOKE_FIXTURE=transcript-review|transcript-empty` fixture 验证 app-bundle locator，不调用真实 CLI、helper、capture、runtime、provider、网络或下载。
+
+当前目录仍不得实现真实录制、屏幕捕获、系统音频捕获、麦克风捕获、转写、speaker labeling、外部模型调用、公开 `normalize_audio` 命令、复制/导出 transcript、删除会话或自动依赖下载。VS-MA-13 fake recording 和 app-bundle locator smoke 证据只能用于 `PV-MA-001`、`PV-MA-002`、`PV-MA-005` 的 partial 状态，不能替代 VS-MA-14 的真实 native capture、真实 macOS 权限负向用例或真实 runtime/model smoke。VS-MA-17 read-only transcript review 证据只能证明 native UI 可消费确定性 transcript/speaker label fixture 并显示回查状态，不能替代真实 processing runtime、copy/export 或 delete_session 证据。

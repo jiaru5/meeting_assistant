@@ -47,12 +47,16 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         assertElement("ma.permissionDependency.summary", in: app, contains: "Permissions and required dependencies are ready.")
         let startButton = button("ma.recording.startButton", in: app)
         waitForEnabled(startButton)
+        app.activate()
+        dismissSpotlightIfPresent()
         startButton.click()
 
         assertElement("ma.recording.status", in: app, contains: "Recording in progress.")
         assertElement("ma.recording.sessionID", in: app, contains: "session-app-ui-smoke")
         let stopButton = button("ma.recording.stopButton", in: app)
         waitForEnabled(stopButton)
+        app.activate()
+        dismissSpotlightIfPresent()
         stopButton.click()
 
         assertElement("ma.recording.status", in: app, contains: "Recording saved.")
@@ -64,6 +68,8 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
 
         let startButton = button("ma.recording.startButton", in: app)
         waitForEnabled(startButton)
+        app.activate()
+        dismissSpotlightIfPresent()
         startButton.click()
 
         assertElement("ma.recording.status", in: app, contains: "Recording failed.")
@@ -71,7 +77,39 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         assertElement("ma.recording.error", in: app, contains: "permission_denied")
     }
 
+    func testTranscriptReviewFixtureExposesReadOnlyTranscriptLocatorsFromLaunchedAppBundle() {
+        let app = launchApp(fixture: "transcript-review")
+
+        assertElement("ma.transcript.heading", in: app, contains: "Transcript Review Fixture")
+        assertElement("ma.transcript.summary", in: app, contains: "Transcript has 2 segments for review.")
+        assertExists("ma.transcript.segmentRow.seg-1", in: app)
+        assertElement("ma.transcript.timestamp.seg-1", in: app, contains: "00:00-00:05")
+        assertElement("ma.transcript.text.seg-1", in: app, contains: "First transcript segment for review.")
+        assertElement("ma.transcript.speakerLabel.seg-1", in: app, contains: "Anonymous speaker SPEAKER_01")
+        assertElement("ma.transcript.speakerLabel.seg-1", in: app, contains: "not a verified identity")
+        assertDoesNotExist("ma.transcript.degradation", in: app)
+    }
+
+    func testTranscriptOnlyFixtureShowsDegradationWhenNoSpeakerLabelsAreVisible() {
+        let app = launchApp(fixture: "transcript-only")
+
+        assertElement("ma.transcript.heading", in: app, contains: "Transcript-only fixture")
+        assertElement("ma.transcript.summary", in: app, contains: "Transcript has 1 segment for review.")
+        assertElement("ma.transcript.text.seg-plain", in: app, contains: "Transcript remains available without speaker labels.")
+        assertDoesNotExist("ma.transcript.speakerLabel.seg-plain", in: app)
+        assertElement("ma.transcript.degradation", in: app, contains: "speaker labeling runtime unavailable")
+    }
+
+    func testEmptyTranscriptFixtureExposesStableEmptyStateFromLaunchedAppBundle() {
+        let app = launchApp(fixture: "transcript-empty")
+
+        assertElement("ma.transcript.heading", in: app, contains: "Empty transcript fixture")
+        assertElement("ma.transcript.empty", in: app, contains: "Transcript has no segments to review.")
+        assertElement("ma.transcript.degradation", in: app, contains: "speaker labeling skipped")
+    }
+
     private func launchApp(fixture: String? = nil) -> XCUIApplication {
+        dismissSpotlightIfPresent()
         let app = XCUIApplication()
         app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
         if let fixture {
@@ -82,6 +120,14 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         XCTAssertTrue(appWindow(in: app).waitForExistence(timeout: 5), "Expected app bundle window to exist.")
         launchedApp = app
         return app
+    }
+
+    private func dismissSpotlightIfPresent() {
+        let spotlight = XCUIApplication(bundleIdentifier: "com.apple.Spotlight")
+        guard spotlight.windows.firstMatch.exists else {
+            return
+        }
+        spotlight.typeKey(.escape, modifierFlags: [])
     }
 
     private func button(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
@@ -128,6 +174,28 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             file: file,
             line: line
         )
+    }
+
+    private func assertExists(
+        _ identifier: String,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        _ = element(identifier, in: app)
+    }
+
+    private func assertDoesNotExist(
+        _ identifier: String,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let element = appWindow(in: app)
+            .descendants(matching: .any)
+            .matching(identifier: identifier)
+            .firstMatch
+        XCTAssertFalse(element.waitForExistence(timeout: 1), "Expected element \(identifier) not to exist.", file: file, line: line)
     }
 
     private func waitForEnabled(

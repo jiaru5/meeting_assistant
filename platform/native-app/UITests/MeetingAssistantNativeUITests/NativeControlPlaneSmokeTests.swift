@@ -147,6 +147,125 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         SwiftUIViewSourceContract.assertRecordingViewUsesAccessibleStates()
     }
 
+    func testTranscriptReviewIsHostedWithStableReadOnlyState() {
+        let viewModel = TranscriptReviewViewModel(
+            input: TranscriptReviewInput(
+                sessionTitle: "Hosted Transcript",
+                transcript: TranscriptReviewTranscript(
+                    id: "transcript-hosted",
+                    sessionID: "session-hosted",
+                    sourceArtifactID: "artifact-normalized-audio",
+                    status: "succeeded",
+                    segments: [
+                        TranscriptReviewSegment(
+                            segmentID: "seg-2",
+                            startMS: 60_000,
+                            endMS: 65_000,
+                            text: "Second hosted segment.",
+                            speakerLabel: "SPEAKER_02"
+                        ),
+                        TranscriptReviewSegment(
+                            segmentID: "seg-1",
+                            startMS: 0,
+                            endMS: 3_000,
+                            text: "First hosted segment.",
+                            speakerLabel: "SPEAKER_01"
+                        ),
+                    ]
+                ),
+                speakerLabels: SpeakerLabelsReviewArtifact(
+                    sessionID: "session-hosted",
+                    labels: [
+                        SpeakerLabelReviewEntry(
+                            label: "SPEAKER_01",
+                            sessionID: "session-hosted",
+                            isVerifiedIdentity: false
+                        ),
+                        SpeakerLabelReviewEntry(
+                            label: "SPEAKER_02",
+                            sessionID: "session-hosted",
+                            isVerifiedIdentity: false
+                        ),
+                    ],
+                    segmentMapping: [
+                        SpeakerLabelSegmentMapping(segmentID: "seg-1", label: "SPEAKER_01"),
+                        SpeakerLabelSegmentMapping(segmentID: "seg-2", label: "SPEAKER_02"),
+                    ]
+                ),
+                speakerLabelsDegradationReason: "speaker labeling runtime unavailable"
+            )
+        )
+        let host = HostedSwiftUIView(TranscriptReviewView(viewModel: viewModel))
+
+        host.assertHosted()
+        XCTAssertEqual(viewModel.state.contentState, .available)
+        XCTAssertEqual(viewModel.state.heading, "Hosted Transcript")
+        XCTAssertEqual(viewModel.state.segments.map(\.id), ["seg-1", "seg-2"])
+        XCTAssertEqual(viewModel.state.segments.first?.timestampLabel, "00:00-00:03")
+        XCTAssertEqual(
+            viewModel.state.segments.first?.speakerDisplayLabel,
+            "Anonymous speaker SPEAKER_01 (not a verified identity)"
+        )
+        XCTAssertNil(viewModel.state.degradationReason)
+        assertTranscriptLocators()
+        SwiftUIViewSourceContract.assertTranscriptReviewViewUsesAccessibleStates()
+    }
+
+    func testTranscriptReviewMissingAndEmptyStatesAreHosted() {
+        let missingViewModel = TranscriptReviewViewModel(
+            input: TranscriptReviewInput(transcript: nil)
+        )
+        let missingHost = HostedSwiftUIView(TranscriptReviewView(viewModel: missingViewModel))
+        missingHost.assertHosted()
+        XCTAssertEqual(missingViewModel.state.contentState, .missing)
+        XCTAssertEqual(missingViewModel.state.summary, "Transcript is missing for this session.")
+
+        let transcriptOnlyViewModel = TranscriptReviewViewModel(
+            input: TranscriptReviewInput(
+                transcript: TranscriptReviewTranscript(
+                    id: "transcript-only",
+                    sessionID: "session-transcript-only",
+                    sourceArtifactID: "artifact-normalized-audio",
+                    status: "succeeded",
+                    segments: [
+                        TranscriptReviewSegment(
+                            segmentID: "seg-plain",
+                            startMS: 1_000,
+                            endMS: 2_000,
+                            text: "Transcript-only hosted segment."
+                        ),
+                    ]
+                ),
+                speakerLabelsDegradationReason: "speaker labeling runtime unavailable"
+            )
+        )
+        let transcriptOnlyHost = HostedSwiftUIView(TranscriptReviewView(viewModel: transcriptOnlyViewModel))
+        transcriptOnlyHost.assertHosted()
+        XCTAssertEqual(transcriptOnlyViewModel.state.contentState, .available)
+        XCTAssertNil(transcriptOnlyViewModel.state.segments.first?.speakerDisplayLabel)
+        XCTAssertEqual(transcriptOnlyViewModel.state.degradationReason, "speaker labeling runtime unavailable")
+
+        let emptyViewModel = TranscriptReviewViewModel(
+            input: TranscriptReviewInput(
+                transcript: TranscriptReviewTranscript(
+                    id: "transcript-empty",
+                    sessionID: "session-empty",
+                    sourceArtifactID: "artifact-normalized-audio",
+                    status: "succeeded",
+                    segments: []
+                ),
+                speakerLabelsDegradationReason: "speaker labeling skipped"
+            )
+        )
+        let emptyHost = HostedSwiftUIView(TranscriptReviewView(viewModel: emptyViewModel))
+        emptyHost.assertHosted()
+        XCTAssertEqual(emptyViewModel.state.contentState, .empty)
+        XCTAssertEqual(emptyViewModel.state.summary, "Transcript has no segments to review.")
+        XCTAssertEqual(emptyViewModel.state.degradationReason, "speaker labeling skipped")
+        assertTranscriptLocators()
+        SwiftUIViewSourceContract.assertTranscriptReviewViewUsesAccessibleStates()
+    }
+
     func testStopFailureIsHostedWithStableFailureState() async {
         let client = FakeRecordingCommandClient(
             script: .stopFailure(
@@ -181,6 +300,7 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
     func testStableAccessibilityIdentifierContract() {
         assertPermissionDependencyLocators()
         assertRecordingLocators()
+        assertTranscriptLocators()
     }
 
     private func assertPermissionDependencyLocators(
@@ -262,6 +382,66 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         XCTAssertEqual(
             RecordingAccessibilityID.savedSummary,
             "ma.recording.savedSummary",
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertTranscriptLocators(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(
+            TranscriptReviewAccessibilityID.heading,
+            "ma.transcript.heading",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            TranscriptReviewAccessibilityID.summary,
+            "ma.transcript.summary",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            TranscriptReviewAccessibilityID.segmentRow("seg-1"),
+            "ma.transcript.segmentRow.seg-1",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            TranscriptReviewAccessibilityID.timestamp("seg-1"),
+            "ma.transcript.timestamp.seg-1",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            TranscriptReviewAccessibilityID.text("seg-1"),
+            "ma.transcript.text.seg-1",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            TranscriptReviewAccessibilityID.speakerLabel("seg-1"),
+            "ma.transcript.speakerLabel.seg-1",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            TranscriptReviewAccessibilityID.degradation,
+            "ma.transcript.degradation",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            TranscriptReviewAccessibilityID.empty,
+            "ma.transcript.empty",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            TranscriptReviewAccessibilityID.missing,
+            "ma.transcript.missing",
             file: file,
             line: line
         )
@@ -356,6 +536,30 @@ private enum SwiftUIViewSourceContract {
                 ".accessibilityIdentifier(RecordingControlAccessibilityID.sessionID)",
                 ".accessibilityIdentifier(RecordingControlAccessibilityID.success)",
                 ".accessibilityIdentifier(RecordingControlAccessibilityID.failure)",
+            ],
+            file: file,
+            line: line
+        )
+    }
+
+    static func assertTranscriptReviewViewUsesAccessibleStates(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let source = readSource("TranscriptReviewView.swift", file: file, line: line)
+        assertSource(
+            source,
+            contains: [
+                ".accessibilityIdentifier(TranscriptReviewAccessibilityID.heading)",
+                ".accessibilityIdentifier(TranscriptReviewAccessibilityID.summary)",
+                ".accessibilityIdentifier(TranscriptReviewAccessibilityID.missing)",
+                ".accessibilityIdentifier(TranscriptReviewAccessibilityID.empty)",
+                ".accessibilityIdentifier(TranscriptReviewAccessibilityID.degradation)",
+                ".accessibilityIdentifier(TranscriptReviewAccessibilityID.timestamp(segment.id))",
+                ".accessibilityIdentifier(TranscriptReviewAccessibilityID.speakerLabel(segment.id))",
+                ".accessibilityIdentifier(TranscriptReviewAccessibilityID.text(segment.id))",
+                ".accessibilityIdentifier(TranscriptReviewAccessibilityID.segmentRow(segment.id))",
+                "Speaker labels unavailable:",
             ],
             file: file,
             line: line
