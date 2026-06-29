@@ -29,6 +29,9 @@ if missing:
     raise SystemExit(f"native-app test failed: missing architecture phrases {missing}")
 
 required_paths = (
+    Path("MeetingAssistantNative.xcodeproj/project.pbxproj"),
+    Path("MeetingAssistantNative.xcodeproj/xcshareddata/xcschemes/MeetingAssistantNative.xcscheme"),
+    Path("App/MeetingAssistantNativeApp.swift"),
     Path("Sources/MeetingAssistantNative/DependencyCheckContract.swift"),
     Path("Sources/MeetingAssistantNative/DependencyCheckProcessRunner.swift"),
     Path("Sources/MeetingAssistantNative/PermissionDependencyStatusViewModel.swift"),
@@ -39,16 +42,19 @@ required_paths = (
     Path("Sources/MeetingAssistantNative/RecordingControlView.swift"),
     Path("tests/MeetingAssistantNativeTests/PermissionDependencyStatusViewModelTests.swift"),
     Path("tests/MeetingAssistantNativeTests/RecordingControlViewModelTests.swift"),
+    Path("UITests/MeetingAssistantNativeUITests/NativeControlPlaneSmokeTests.swift"),
+    Path("UITests/MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests.swift"),
 )
 missing_paths = [str(path) for path in required_paths if not path.is_file()]
 if missing_paths:
-    raise SystemExit(f"native-app test failed: missing Swift status surface files {missing_paths}")
+    raise SystemExit(f"native-app test failed: missing Swift status surface, app bundle, or UI smoke files {missing_paths}")
 PY
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 ln -s "$component_dir/Sources" "$tmp_dir/Sources"
 ln -s "$component_dir/tests" "$tmp_dir/tests"
+ln -s "$component_dir/UITests" "$tmp_dir/UITests"
 cat > "$tmp_dir/Package.swift" <<'SWIFT'
 // swift-tools-version: 6.0
 import PackageDescription
@@ -66,10 +72,21 @@ let package = Package(
             dependencies: ["MeetingAssistantNative"],
             path: "tests/MeetingAssistantNativeTests"
         ),
+        .testTarget(
+            name: "MeetingAssistantNativeUITests",
+            dependencies: ["MeetingAssistantNative"],
+            path: "UITests/MeetingAssistantNativeUITests"
+        ),
     ]
 )
 SWIFT
 
 (cd "$tmp_dir" && swift test)
+
+xcodebuild test \
+  -project "$component_dir/MeetingAssistantNative.xcodeproj" \
+  -scheme "MeetingAssistantNative" \
+  -destination 'platform=macOS' \
+  -derivedDataPath "$tmp_dir/DerivedData"
 
 echo "native-app tests passed."

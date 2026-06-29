@@ -5,7 +5,7 @@ component_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$component_dir"
 
 if grep -R -n -E 'curl |wget |brew install|pip install|npm install|API_KEY|SECRET|TOKEN' \
-  Sources tests component.json README.md; then
+  Sources tests App UITests MeetingAssistantNative.xcodeproj/project.pbxproj component.json README.md; then
   echo "native-app security failed: forbidden network, install, or secret marker found." >&2
   exit 1
 fi

@@ -39,15 +39,18 @@ public struct RecordingControlView: View {
             Text("Recording")
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
+                .accessibilityLabel("Recording")
                 .accessibilityIdentifier(RecordingControlAccessibilityID.heading)
 
             Text(readinessStatusText)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .accessibilityLabel(readinessStatusText)
                 .accessibilityIdentifier(RecordingControlAccessibilityID.readinessStatus)
 
             Text(viewModel.state.statusText)
                 .font(.body)
+                .accessibilityLabel(viewModel.state.statusText)
                 .accessibilityIdentifier(RecordingControlAccessibilityID.status)
 
             HStack(spacing: 8) {
@@ -72,6 +75,7 @@ public struct RecordingControlView: View {
                 Text("Session: \(sessionID)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityLabel("Session: \(sessionID)")
                     .accessibilityIdentifier(RecordingControlAccessibilityID.sessionID)
             }
 
@@ -79,6 +83,7 @@ public struct RecordingControlView: View {
                 Text(savedSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityLabel(savedSummary)
                     .accessibilityIdentifier(RecordingControlAccessibilityID.success)
             }
 
@@ -92,6 +97,7 @@ public struct RecordingControlView: View {
                 .font(.caption)
                 .foregroundStyle(.red)
                 .accessibilityElement(children: .combine)
+                .accessibilityLabel(errorAccessibilityLabel)
                 .accessibilityIdentifier(RecordingControlAccessibilityID.failure)
             }
 
@@ -104,6 +110,7 @@ public struct RecordingControlView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .accessibilityElement(children: .combine)
+                .accessibilityLabel(viewModel.state.warnings.joined(separator: " "))
                 .accessibilityIdentifier(RecordingControlAccessibilityID.warnings)
             }
         }
@@ -122,5 +129,15 @@ public struct RecordingControlView: View {
         case .failed:
             return "Recording command failed."
         }
+    }
+
+    private var errorAccessibilityLabel: String {
+        guard let errorMessage = viewModel.state.errorMessage else {
+            return ""
+        }
+        if let errorCode = viewModel.state.errorCode {
+            return "\(errorMessage) Error code: \(errorCode.rawValue)"
+        }
+        return errorMessage
     }
 }

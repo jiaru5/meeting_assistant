@@ -21,10 +21,12 @@ public struct PermissionDependencyStatusView: View {
                 Text("Meeting Assistant Readiness")
                     .font(.title2)
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityLabel("Meeting Assistant Readiness")
                     .accessibilityIdentifier(PermissionDependencyAccessibilityID.heading)
 
                 Text(viewModel.state.summary)
                     .font(.body)
+                    .accessibilityLabel(viewModel.state.summary)
                     .accessibilityIdentifier(PermissionDependencyAccessibilityID.summary)
 
                 Button("Check permissions and dependencies") {
@@ -79,6 +81,7 @@ public struct PermissionDependencyStatusView: View {
             content()
         }
         .accessibilityElement(children: .contain)
+        .accessibilityLabel(title)
         .accessibilityIdentifier(identifier)
     }
 
@@ -102,6 +105,7 @@ public struct PermissionDependencyStatusView: View {
                 .foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title), \(status), \(message)")
         .accessibilityIdentifier(identifier)
     }
 }

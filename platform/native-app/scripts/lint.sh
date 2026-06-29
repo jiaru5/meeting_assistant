@@ -16,6 +16,9 @@ root = Path(".")
 required = [
     "README.md",
     "component.json",
+    "MeetingAssistantNative.xcodeproj/project.pbxproj",
+    "MeetingAssistantNative.xcodeproj/xcshareddata/xcschemes/MeetingAssistantNative.xcscheme",
+    "App/MeetingAssistantNativeApp.swift",
     "tests/ArchitectureTest.md",
     "Sources/MeetingAssistantNative/DependencyCheckContract.swift",
     "Sources/MeetingAssistantNative/DependencyCheckProcessRunner.swift",
@@ -27,6 +30,8 @@ required = [
     "Sources/MeetingAssistantNative/RecordingControlView.swift",
     "tests/MeetingAssistantNativeTests/PermissionDependencyStatusViewModelTests.swift",
     "tests/MeetingAssistantNativeTests/RecordingControlViewModelTests.swift",
+    "UITests/MeetingAssistantNativeUITests/NativeControlPlaneSmokeTests.swift",
+    "UITests/MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests.swift",
     "sbom/native-app.cdx.json",
 ]
 missing = [path for path in required if not (root / path).is_file()]
@@ -40,6 +45,17 @@ if metadata.get("kind") != "project-component":
     raise SystemExit("native-app lint failed: component kind must be project-component")
 if metadata.get("business_behavior") != "permission_dependency_status_and_fake_recording":
     raise SystemExit("native-app lint failed: business behavior must be permission_dependency_status_and_fake_recording")
+
+project = (root / "MeetingAssistantNative.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
+required_project_snippets = [
+    "MeetingAssistantNative.app",
+    "MeetingAssistantNativeAppUITests.xctest",
+    "AppBundleLocatorSmokeTests.swift",
+    "MeetingAssistantNativeApp.swift",
+]
+missing_project_snippets = [snippet for snippet in required_project_snippets if snippet not in project]
+if missing_project_snippets:
+    raise SystemExit(f"native-app lint failed: xcodeproj missing {missing_project_snippets}")
 PY
 
 echo "native-app lint passed."

@@ -17,5 +17,7 @@
 3. `RecordingControlViewModel` 覆盖 idle、ready、starting、recording、stopping、recorded 和 failed 状态。
 4. `RecordingControlView` 覆盖开始、录制中、停止、保存成功和失败状态，并暴露稳定 accessibility identifier。
 5. Swift Testing 覆盖 readiness 未通过不能 start、start/stop 成功、start/stop 失败、重复触发和 locator 常量。
+6. XCTest-hosted SwiftUI smoke 覆盖权限/依赖缺失状态、readiness blocked、fake recording start、recording、stop saved summary、start/stop failure，并通过生产 SwiftUI source contract 断言 `ma.permissionDependency.*` / `ma.recording.*` locator 和关键可见文案仍由视图定义使用。
+7. 持久 `MeetingAssistantNative.xcodeproj` 提供最小 macOS app bundle target 和 app-bundle XCUITest target；`AppBundleLocatorSmokeTests` 使用 `XCUIApplication()` 启动 `.app`，通过 deterministic launch fixture 覆盖默认 blocked readiness、ready fake start/stop、start failure error locator，且不调用真实 helper/CLI/capture/runtime。
 
-当前目录仍不得实现真实录制、屏幕捕获、系统音频捕获、麦克风捕获、转写、speaker labeling、外部模型调用、公开 `normalize_audio` 命令或自动依赖下载。VS-MA-13 fake recording 证据只能用于 `PV-MA-002` 的 partial 状态，不能替代 VS-MA-14 的真实 native capture。
+当前目录仍不得实现真实录制、屏幕捕获、系统音频捕获、麦克风捕获、转写、speaker labeling、外部模型调用、公开 `normalize_audio` 命令或自动依赖下载。VS-MA-13 fake recording 和 app-bundle locator smoke 证据只能用于 `PV-MA-001`、`PV-MA-002`、`PV-MA-005` 的 partial 状态，不能替代 VS-MA-14 的真实 native capture、真实 macOS 权限负向用例或真实 runtime/model smoke。

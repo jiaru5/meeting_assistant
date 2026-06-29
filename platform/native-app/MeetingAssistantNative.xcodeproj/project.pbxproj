@@ -1,0 +1,385 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		C00000000000000000000001 /* MeetingAssistantNativeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000001 /* MeetingAssistantNativeApp.swift */; };
+		C00000000000000000000002 /* DependencyCheckContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000002 /* DependencyCheckContract.swift */; };
+		C00000000000000000000003 /* DependencyCheckProcessRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000003 /* DependencyCheckProcessRunner.swift */; };
+		C00000000000000000000004 /* PermissionDependencyStatusViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000004 /* PermissionDependencyStatusViewModel.swift */; };
+		C00000000000000000000005 /* PermissionDependencyStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000005 /* PermissionDependencyStatusView.swift */; };
+		C00000000000000000000006 /* RecordingCommandClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000006 /* RecordingCommandClient.swift */; };
+		C00000000000000000000007 /* RecordingFakeCommandClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000007 /* RecordingFakeCommandClient.swift */; };
+		C00000000000000000000008 /* RecordingControlViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000008 /* RecordingControlViewModel.swift */; };
+		C00000000000000000000009 /* RecordingControlView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000009 /* RecordingControlView.swift */; };
+		C00000000000000000000010 /* AppBundleLocatorSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000010 /* AppBundleLocatorSmokeTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A00000000000000000004002 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A00000000000000000001001;
+			remoteInfo = MeetingAssistantNative;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		B00000000000000000000001 /* MeetingAssistantNativeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingAssistantNativeApp.swift; sourceTree = "<group>"; };
+		B00000000000000000000002 /* DependencyCheckContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyCheckContract.swift; sourceTree = "<group>"; };
+		B00000000000000000000003 /* DependencyCheckProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyCheckProcessRunner.swift; sourceTree = "<group>"; };
+		B00000000000000000000004 /* PermissionDependencyStatusViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionDependencyStatusViewModel.swift; sourceTree = "<group>"; };
+		B00000000000000000000005 /* PermissionDependencyStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionDependencyStatusView.swift; sourceTree = "<group>"; };
+		B00000000000000000000006 /* RecordingCommandClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingCommandClient.swift; sourceTree = "<group>"; };
+		B00000000000000000000007 /* RecordingFakeCommandClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingFakeCommandClient.swift; sourceTree = "<group>"; };
+		B00000000000000000000008 /* RecordingControlViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingControlViewModel.swift; sourceTree = "<group>"; };
+		B00000000000000000000009 /* RecordingControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingControlView.swift; sourceTree = "<group>"; };
+		B00000000000000000000010 /* AppBundleLocatorSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBundleLocatorSmokeTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000011 /* MeetingAssistantNative.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MeetingAssistantNative.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B00000000000000000000012 /* MeetingAssistantNativeAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MeetingAssistantNativeAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A00000000000000000002002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A00000000000000000002012 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A00000000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000004 /* App */,
+				A00000000000000000000005 /* MeetingAssistantNative */,
+				A00000000000000000000006 /* UITests */,
+				A00000000000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A00000000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000011 /* MeetingAssistantNative.app */,
+				B00000000000000000000012 /* MeetingAssistantNativeAppUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000004 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000001 /* MeetingAssistantNativeApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000005 /* MeetingAssistantNative */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000002 /* DependencyCheckContract.swift */,
+				B00000000000000000000003 /* DependencyCheckProcessRunner.swift */,
+				B00000000000000000000004 /* PermissionDependencyStatusViewModel.swift */,
+				B00000000000000000000005 /* PermissionDependencyStatusView.swift */,
+				B00000000000000000000006 /* RecordingCommandClient.swift */,
+				B00000000000000000000007 /* RecordingFakeCommandClient.swift */,
+				B00000000000000000000008 /* RecordingControlViewModel.swift */,
+				B00000000000000000000009 /* RecordingControlView.swift */,
+			);
+			path = Sources/MeetingAssistantNative;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000006 /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000007 /* MeetingAssistantNativeAppUITests */,
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000007 /* MeetingAssistantNativeAppUITests */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000010 /* AppBundleLocatorSmokeTests.swift */,
+			);
+			path = MeetingAssistantNativeAppUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A00000000000000000001001 /* MeetingAssistantNative */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00000000000000000003002 /* Build configuration list for PBXNativeTarget "MeetingAssistantNative" */;
+			buildPhases = (
+				A00000000000000000002001 /* Sources */,
+				A00000000000000000002002 /* Frameworks */,
+				A00000000000000000002003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MeetingAssistantNative;
+			productName = MeetingAssistantNative;
+			productReference = B00000000000000000000011 /* MeetingAssistantNative.app */;
+			productType = "com.apple.product-type.application";
+		};
+		A00000000000000000001002 /* MeetingAssistantNativeAppUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00000000000000000003003 /* Build configuration list for PBXNativeTarget "MeetingAssistantNativeAppUITests" */;
+			buildPhases = (
+				A00000000000000000002011 /* Sources */,
+				A00000000000000000002012 /* Frameworks */,
+				A00000000000000000002013 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A00000000000000000004001 /* PBXTargetDependency */,
+			);
+			name = MeetingAssistantNativeAppUITests;
+			productName = MeetingAssistantNativeAppUITests;
+			productReference = B00000000000000000000012 /* MeetingAssistantNativeAppUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A00000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					A00000000000000000001001 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					A00000000000000000001002 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = A00000000000000000001001;
+					};
+				};
+			};
+			buildConfigurationList = A00000000000000000003001 /* Build configuration list for PBXProject "MeetingAssistantNative" */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A00000000000000000000002;
+			productRefGroup = A00000000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A00000000000000000001001 /* MeetingAssistantNative */,
+				A00000000000000000001002 /* MeetingAssistantNativeAppUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A00000000000000000002003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A00000000000000000002013 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A00000000000000000002001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C00000000000000000000001 /* MeetingAssistantNativeApp.swift in Sources */,
+				C00000000000000000000002 /* DependencyCheckContract.swift in Sources */,
+				C00000000000000000000003 /* DependencyCheckProcessRunner.swift in Sources */,
+				C00000000000000000000004 /* PermissionDependencyStatusViewModel.swift in Sources */,
+				C00000000000000000000005 /* PermissionDependencyStatusView.swift in Sources */,
+				C00000000000000000000006 /* RecordingCommandClient.swift in Sources */,
+				C00000000000000000000007 /* RecordingFakeCommandClient.swift in Sources */,
+				C00000000000000000000008 /* RecordingControlViewModel.swift in Sources */,
+				C00000000000000000000009 /* RecordingControlView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A00000000000000000002011 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C00000000000000000000010 /* AppBundleLocatorSmokeTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A00000000000000000004001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A00000000000000000001001 /* MeetingAssistantNative */;
+			targetProxy = A00000000000000000004002 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		A00000000000000000003101 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A00000000000000000003102 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		A00000000000000000003201 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Meeting Assistant Native";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "local.meeting-assistant.native";
+				PRODUCT_MODULE_NAME = MeetingAssistantNative;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A00000000000000000003202 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Meeting Assistant Native";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "local.meeting-assistant.native";
+				PRODUCT_MODULE_NAME = MeetingAssistantNative;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		A00000000000000000003301 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "local.meeting-assistant.native.ui-tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+				TEST_TARGET_NAME = MeetingAssistantNative;
+			};
+			name = Debug;
+		};
+		A00000000000000000003302 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "local.meeting-assistant.native.ui-tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+				TEST_TARGET_NAME = MeetingAssistantNative;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A00000000000000000003001 /* Build configuration list for PBXProject "MeetingAssistantNative" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000003101 /* Debug */,
+				A00000000000000000003102 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A00000000000000000003002 /* Build configuration list for PBXNativeTarget "MeetingAssistantNative" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000003201 /* Debug */,
+				A00000000000000000003202 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A00000000000000000003003 /* Build configuration list for PBXNativeTarget "MeetingAssistantNativeAppUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000003301 /* Debug */,
+				A00000000000000000003302 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A00000000000000000000001 /* Project object */;
+}

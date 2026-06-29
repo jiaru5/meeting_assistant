@@ -25,7 +25,12 @@ let package = Package(
 SWIFT
 
 (cd "$tmp_dir" && swift build)
-printf '%s\n' "native-app VS-MA-12/VS-MA-13 build: Swift permission/dependency status and fake recording target compiled." > build/build-report.txt
+xcodebuild build \
+  -project "$component_dir/MeetingAssistantNative.xcodeproj" \
+  -scheme "MeetingAssistantNative" \
+  -destination 'platform=macOS' \
+  -derivedDataPath "$tmp_dir/DerivedData"
+printf '%s\n' "native-app VS-MA-12/VS-MA-13 build: Swift permission/dependency status, fake recording target, and app bundle compiled." > build/build-report.txt
 
 test -f component.json
 test -f README.md
