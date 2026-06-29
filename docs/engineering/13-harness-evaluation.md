@@ -52,6 +52,8 @@ Meeting Assistant 的初始真实 eval 必须覆盖 platform 纵切实现、禁�
 3. 是否给每个 subagent 明确 spec sync 分类、读写权限、允许/禁止文件范围、必读分卷和输出格式。
 4. 是否包含只读 Product/spec guard、Architect、Reviewer 或 Risk-checker 等必要守卫角色。
 5. 是否由 PM/Main Agent 最终整合结论并执行最终验证，而不是把 subagent 局部结果直接当成交付事实。
+6. 是否把团队模板拆成阶段顺序、`spawn_now`、等待条件和 PM gate，而不是一开始并行启动所有角色。
+7. 是否保证 Product/spec guard 和 Architect 先行，Implementer 通过 PM gate 后启动，Tester 在稳定 diff 后启动，Reviewer 在实现和测试证据后启动。
 
 ## 评分
 

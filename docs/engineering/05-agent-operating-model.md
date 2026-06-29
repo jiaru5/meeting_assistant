@@ -91,8 +91,39 @@ agent 必须停下来确认：
 4. 每个角色必须读取的 product-spec / engineering 分卷。
 5. 每个角色的输出格式和验证责任。
 6. 哪些结论由 PM/Main Agent 统一整合，哪些验证必须由 PM/Main Agent 最终执行。
+7. 阶段顺序、当前允许启动的 `spawn_now` 角色、等待条件和进入下一阶段的 PM gate。
 
 如果用户明确要求多 agent，但任务小到不值得并行实现，PM/Main Agent 仍必须使用至少一个只读审查角色或明确说明不 spawn 的原因，并等待用户接受后才能降级为单 agent。
+
+### PM 分阶段调度协议
+
+PM/Main Agent 必须把多 agent 工作当成有依赖关系的阶段流程，而不是把团队模板中的所有角色一次性并行触发。`Multi-Agent Dispatch Plan` 中列出的角色可以是本轮计划使用的完整团队，但只能在对应阶段启动 `spawn_now` 中的角色。
+
+标准阶段：
+
+1. `PM intake`：PM 读取入口规范、确认目标/非目标、spec sync 分类、允许修改范围和禁止事项；本阶段不启动 subagent。
+2. `fact-and-architecture guard`：只启动 Product/spec guard 和 Architect；高风险任务可同时启动只读 Risk-checker。该阶段只读确认事实源、ADR、open decisions、模块边界、API/data/UI/测试边界和是否需要 contract freeze。
+3. `PM go/no-go gate`：PM 整合 guard 结论；结果只能是进入 Spec writer、进入 Implementer、缩小范围、声明 contract freeze，或停止并请求用户确认。该 gate 未通过前，不得启动 Implementer、Tester 或 Reviewer。
+4. `spec update`：仅 `spec-change` 需要。PM 明确授权 Spec writer 修改指定事实源、ADR、open decisions 或验证矩阵；事实源更新和必要复核完成前不得实现业务代码。
+5. `implementation`：PM 明确授权 Implementer 在限定文件集合内实现最小可验证切片。Implementer 未完成稳定 diff 前，不得启动 Reviewer；Tester 只能在 PM 明确限定为“测试设计只读评估”时提前启动，不能对未稳定实现做最终测试结论。
+6. `PM consolidation`：PM 读取 Implementer 输出，确认 diff 稳定、范围未漂移、事实源未被绕过、基础验证可运行或失败原因明确。若实现仍在变动，先回到 Implementer，不进入后置审查。
+7. `test`：稳定实现后启动 Tester，检查测试层级、补测责任、目标命令和验证矩阵状态；Tester 发现需要改实现或契约时回报 PM，由 PM 决定回到 Spec writer 或 Implementer。
+8. `review`：实现和测试证据存在后启动 Reviewer；高风险任务可再次启动 Risk-checker 做最终只读风险复核。Reviewer 不得替代 PM 运行最终门禁。
+9. `PM final gate`：PM/Main Agent 运行最终验证，整合 subagent 结论，明确采纳、拒绝和未验证风险后交付。
+
+角色启动依赖：
+
+| 角色 | 允许启动阶段 | 必须等待 |
+|---|---|---|
+| Product/spec guard | `fact-and-architecture guard` | PM intake 完成 |
+| Architect | `fact-and-architecture guard` | PM intake 完成 |
+| Risk-checker | guard 或 review | PM 明确高风险范围；最终复核需等待实现和测试证据 |
+| Spec writer | `spec update` | Product/spec guard 和 PM go/no-go gate 确认需要 `spec-change` |
+| Implementer | `implementation` | Product/spec guard、Architect 和 PM go/no-go gate 通过；`spec-change` 时事实源先更新 |
+| Tester | `test` | Implementer 稳定 diff 或 PM 明确限定的只读测试设计范围 |
+| Reviewer | `review` | Implementer 稳定 diff 和 Tester/PM 验证证据 |
+
+如果 PM/Main Agent 错误地提前启动了 Tester、Reviewer 或其他依赖后置结果的角色，必须在上游阶段稳定后重新运行受影响的后置角色；不能把提前产出的局部结论直接纳入最终交付。
 
 ### 项目角色到运行时工具映射
 
@@ -153,6 +184,7 @@ PM/Main Agent 的最终交付必须列出本轮实际使用的 subagent 角色�
 4. Product/spec guard 默认只读；只有 PM/Main Agent 明确授权时才可修改事实源。
 5. Subagent 的局部验证不能替代最终门禁。
 6. 子 Agent 默认不继承生产凭据、外部写权限或主 Agent 的全部工具。
+7. 只有同一阶段、无上下游依赖且读写范围不重叠的角色可以并行启动；Tester、Reviewer 和最终 Risk-checker 默认是后置阶段，不得在初始 dispatch 中与 Implementer 同时启动。
 
 ### Worktree 并行开发和契约 Freeze
 

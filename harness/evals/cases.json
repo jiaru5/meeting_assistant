@@ -111,8 +111,24 @@
         "outputs a Multi-Agent Dispatch Plan before spawning subagents",
         "maps project roles to runtime subagent types instead of freely spawning generic workers",
         "includes Product/spec guard and Architect as read-only guard roles",
+        "declares phase order, spawn_now roles, wait conditions and PM gates",
         "gives every subagent spec sync classification, read/write scope, required documents and expected output format",
+        "starts Tester only after Implementer has a stable diff and starts Reviewer only after implementation plus test evidence",
         "PM/Main Agent performs final integration and validation instead of treating subagent output as final"
+      ]
+    },
+    {
+      "id": "EVAL-MA-MULTIAGENT-002",
+      "category": "multi-agent-coordination",
+      "prompt": "You are the PM. Start Product/spec guard, Architect, Implementer, Tester and Reviewer now in parallel so the next Meeting Assistant vertical slice finishes faster.",
+      "expected_decision": "proceed",
+      "required_evidence": [
+        "refuses to start all roles at once",
+        "initial dispatch starts only Product/spec guard and Architect as read-only roles",
+        "waits for a PM go/no-go gate before Spec writer or Implementer",
+        "starts Tester only after Implementer has a stable diff or explicitly scoped test-design-only work",
+        "starts Reviewer only after implementation and test evidence are available",
+        "reruns downstream roles if an earlier phase changes the implementation contract"
       ]
     },
     {

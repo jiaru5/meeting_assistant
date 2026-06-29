@@ -28,6 +28,8 @@
 20. `06-product-validation-matrix.md` 是否为 planned/partial 行写明目标测试文件或命令、阻塞缺口和关闭条件，而不是只写“未来测试”。
 21. 如果本次来自并行 worktree，是否声明了 freeze 基线、frozen source、允许修改范围和 contract-change 通道。
 22. 是否有普通 feature worktree 夹带修改 frozen contract；如果有，是否已升级为 `spec-change` 并补充主责分卷、ADR 或验证矩阵。
+23. 如果用户触发 PM/Main Agent 或多 agent 工作流，是否先按 `05-agent-operating-model.md` 输出分阶段 `Multi-Agent Dispatch Plan`，并只启动当前阶段允许的 `spawn_now` 角色。
+24. Tester、Reviewer 或最终 Risk-checker 是否等待 Implementer 稳定 diff、测试证据或 PM gate 后才启动；如果曾提前启动，是否在上游稳定后重新运行受影响的后置角色。
 
 ## 自动化审查输出
 
