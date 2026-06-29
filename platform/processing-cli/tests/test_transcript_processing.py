@@ -294,6 +294,49 @@ class TranscriptProcessingTests(unittest.TestCase):
         self.assertFalse(transcript_exists)
         self.assertNotIn("transcript_text", artifact_types)
 
+    def test_transcript_symlink_destination_returns_path_conflict_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+            outside = root / "outside-transcript.json"
+            outside.write_text('{"outside": true}\n', encoding="utf-8")
+            transcript_path = session_dir / "artifacts" / "transcript.json"
+            transcript_path.symlink_to(outside)
+
+            response = run_generate_transcript("session-1", workspace=workspace)
+
+            outside_text = outside.read_text(encoding="utf-8")
+            transcript_is_symlink = transcript_path.is_symlink()
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertEqual(outside_text, '{"outside": true}\n')
+        self.assertTrue(transcript_is_symlink)
+        self.assertNotIn("transcript_text", artifact_types)
+
+    def test_transcript_broken_symlink_destination_returns_path_conflict_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+            missing_target = root / "missing" / "transcript.json"
+            transcript_path = session_dir / "artifacts" / "transcript.json"
+            transcript_path.symlink_to(missing_target)
+
+            response = run_generate_transcript("session-1", workspace=workspace)
+
+            target_exists = missing_target.exists()
+            transcript_is_symlink = transcript_path.is_symlink()
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertFalse(target_exists)
+        self.assertTrue(transcript_is_symlink)
+        self.assertNotIn("transcript_text", artifact_types)
+
     def test_unsupported_runtime_is_rejected_before_creating_transcript_or_normalized_audio(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)

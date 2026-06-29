@@ -235,6 +235,59 @@ class SpeakerLabelingTests(unittest.TestCase):
         self.assertEqual(response["code"], "processing_failed")
         self.assertFalse(speaker_exists)
 
+    def test_speaker_labels_symlink_destination_returns_path_conflict_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_transcript_session(workspace)
+            outside = root / "outside-speaker-labels.json"
+            outside.write_text('{"outside": true}\n', encoding="utf-8")
+            speaker_path = session_dir / "artifacts" / "speaker_labels.json"
+            speaker_path.symlink_to(outside)
+
+            response = run_generate_speaker_labels(
+                "session-1",
+                "transcript-1",
+                workspace=workspace,
+                allow_transcript_only_fallback=True,
+            )
+
+            outside_text = outside.read_text(encoding="utf-8")
+            speaker_is_symlink = speaker_path.is_symlink()
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertEqual(outside_text, '{"outside": true}\n')
+        self.assertTrue(speaker_is_symlink)
+        self.assertNotIn("speaker_labels", artifact_types)
+
+    def test_speaker_labels_broken_symlink_destination_returns_path_conflict_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_transcript_session(workspace)
+            missing_target = root / "missing" / "speaker_labels.json"
+            speaker_path = session_dir / "artifacts" / "speaker_labels.json"
+            speaker_path.symlink_to(missing_target)
+
+            response = run_generate_speaker_labels(
+                "session-1",
+                "transcript-1",
+                workspace=workspace,
+                allow_transcript_only_fallback=True,
+            )
+
+            target_exists = missing_target.exists()
+            speaker_is_symlink = speaker_path.is_symlink()
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertFalse(target_exists)
+        self.assertTrue(speaker_is_symlink)
+        self.assertNotIn("speaker_labels", artifact_types)
+
     def test_repeated_speaker_labeling_reuses_existing_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)

@@ -16,6 +16,7 @@ from .workspace_contract import (
     acquire_session_lock,
     artifact_file_path,
     load_session,
+    prepare_managed_output_path,
     register_artifact,
     session_directory,
     utc_timestamp,
@@ -80,13 +81,32 @@ def _success_response(
 
 
 def _append_processing_log(session_dir: Path, *, request_id: str, code: str, message: str) -> Path:
-    log_dir = session_dir / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "processing.log"
+    log_path = prepare_managed_output_path(
+        session_dir,
+        Path("logs/processing.log"),
+        "Processing log path conflicts with the session boundary.",
+        create_parent=True,
+    )
     line = f"{utc_timestamp()} request_id={request_id} command=generate_transcript code={code} message={message}\n"
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(line)
     return log_path
+
+
+def _record_processing_failure(
+    session_dir: Path,
+    *,
+    request_id: str,
+    code: str,
+    message: str,
+    details: dict[str, object],
+) -> tuple[str, str, dict[str, object]]:
+    try:
+        log_path = _append_processing_log(session_dir, request_id=request_id, code=code, message=message)
+    except ContractError as exc:
+        return exc.code, exc.message, dict(exc.details)
+    details["log_path"] = str(log_path)
+    return code, message, details
 
 
 def _normalization_failure_code(code: str) -> str:
@@ -391,9 +411,17 @@ def run_generate_transcript(
                     language=language,
                     clock=clock,
                 )
-                destination = session_dir / "artifacts" / "transcript.json"
+                destination = prepare_managed_output_path(
+                    session_dir,
+                    Path("artifacts/transcript.json"),
+                    "Transcript artifact path conflicts with the session boundary.",
+                )
                 if destination.exists():
-                    raise ContractError("processing_failed", "Unregistered transcript.json already exists; refusing to overwrite it.")
+                    raise ContractError(
+                        "path_conflict",
+                        "Unregistered transcript.json already exists; refusing to overwrite it.",
+                        path=str(destination),
+                    )
                 destination.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
                 destination_written = True
                 artifact = register_artifact(
@@ -420,25 +448,37 @@ def run_generate_transcript(
     except ContractError as exc:
         details: dict[str, object] = dict(exc.details)
         code = exc.code
+        message = exc.message
         if session_dir is not None and exc.code != "not_found":
-            log_path = _append_processing_log(session_dir, request_id=assigned_request_id, code=code, message=exc.message)
-            details["log_path"] = str(log_path)
             if registered_artifact_id is not None:
                 _remove_registered_artifact(session_dir, registered_artifact_id)
             if destination is not None and destination_written:
                 destination.unlink(missing_ok=True)
-        return _failure_response(code, exc.message, request_id=assigned_request_id, details=details or None)
+            code, message, details = _record_processing_failure(
+                session_dir,
+                request_id=assigned_request_id,
+                code=code,
+                message=message,
+                details=details,
+            )
+        return _failure_response(code, message, request_id=assigned_request_id, details=details or None)
     except Exception as exc:
         message = f"Transcript generation failed: {exc}" if str(exc) else "Transcript generation failed."
+        code = "processing_failed"
         details = {"error": exc.__class__.__name__, "error_message": str(exc)}
         if session_dir is not None:
             if registered_artifact_id is not None:
                 _remove_registered_artifact(session_dir, registered_artifact_id)
             if destination is not None and destination_written:
                 destination.unlink(missing_ok=True)
-            log_path = _append_processing_log(session_dir, request_id=assigned_request_id, code="processing_failed", message=message)
-            details["log_path"] = str(log_path)
-        return _failure_response("processing_failed", message, request_id=assigned_request_id, details=details)
+            code, message, details = _record_processing_failure(
+                session_dir,
+                request_id=assigned_request_id,
+                code="processing_failed",
+                message=message,
+                details=details,
+            )
+        return _failure_response(code, message, request_id=assigned_request_id, details=details)
 
 
 generate_transcript = run_generate_transcript
