@@ -2,14 +2,15 @@
   "id": "native-app",
   "kind": "project-component",
   "scope": "platform",
-  "business_behavior": "permission_dependency_status_and_fake_recording",
+  "business_behavior": "permission_dependency_status_fake_recording_and_transcript_review",
   "allowed_before_project_mode": false,
   "planned_runtime": "Swift/SwiftUI native control surface",
   "allowed_capabilities": [
     "check_dependencies_status",
     "fake_recording_command_client",
     "fake_recording_state_machine",
-    "fake_recording_control_view"
+    "fake_recording_control_view",
+    "read_only_transcript_review_view"
   ],
   "forbidden_capabilities": [
     "real_recording",
@@ -19,6 +20,9 @@
     "speaker_labeling",
     "external_model_api",
     "automatic_downloads",
-    "public_normalize_audio_command"
+    "public_normalize_audio_command",
+    "copy_transcript",
+    "export_transcript",
+    "delete_session"
   ]
 }

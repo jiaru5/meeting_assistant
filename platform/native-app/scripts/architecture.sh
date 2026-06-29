@@ -8,7 +8,10 @@ test -f tests/ArchitectureTest.md
 grep -q "Component: \`native-app\`" tests/ArchitectureTest.md
 grep -q "VS-MA-12 boundary" tests/ArchitectureTest.md
 grep -q "VS-MA-13 fake recording boundary" tests/ArchitectureTest.md
+grep -q "VS-MA-17 read-only transcript review boundary" tests/ArchitectureTest.md
 grep -q "check_dependencies" tests/ArchitectureTest.md
+grep -q "transcript.json" tests/ArchitectureTest.md
+grep -q "speaker_labels.json" tests/ArchitectureTest.md
 test -f MeetingAssistantNative.xcodeproj/project.pbxproj
 test -f MeetingAssistantNative.xcodeproj/xcshareddata/xcschemes/MeetingAssistantNative.xcscheme
 test -f App/MeetingAssistantNativeApp.swift
@@ -19,6 +22,9 @@ test -f Sources/MeetingAssistantNative/RecordingCommandClient.swift
 test -f Sources/MeetingAssistantNative/RecordingFakeCommandClient.swift
 test -f Sources/MeetingAssistantNative/RecordingControlViewModel.swift
 test -f Sources/MeetingAssistantNative/RecordingControlView.swift
+test -f Sources/MeetingAssistantNative/TranscriptReviewReadModel.swift
+test -f Sources/MeetingAssistantNative/TranscriptReviewViewModel.swift
+test -f Sources/MeetingAssistantNative/TranscriptReviewView.swift
 test -f UITests/MeetingAssistantNativeUITests/NativeControlPlaneSmokeTests.swift
 test -f UITests/MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests.swift
 
@@ -27,6 +33,8 @@ grep -R -q "ma.permissionDependency" Sources tests App UITests
 grep -R -q "start_native_recording" Sources tests
 grep -R -q "stop_recording" Sources tests
 grep -R -q "ma.recording" Sources tests App UITests
+grep -R -q "ma.transcript" Sources tests App UITests
+grep -R -q "TranscriptReviewViewModel" Sources tests App UITests
 grep -R -q "XCTest" UITests
 grep -R -q "NSHostingController" UITests/MeetingAssistantNativeUITests
 grep -R -q "XCUIApplication" UITests/MeetingAssistantNativeAppUITests
