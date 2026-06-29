@@ -28,8 +28,12 @@ required = [
     "Sources/MeetingAssistantNative/RecordingFakeCommandClient.swift",
     "Sources/MeetingAssistantNative/RecordingControlViewModel.swift",
     "Sources/MeetingAssistantNative/RecordingControlView.swift",
+    "Sources/MeetingAssistantNative/TranscriptReviewReadModel.swift",
+    "Sources/MeetingAssistantNative/TranscriptReviewViewModel.swift",
+    "Sources/MeetingAssistantNative/TranscriptReviewView.swift",
     "tests/MeetingAssistantNativeTests/PermissionDependencyStatusViewModelTests.swift",
     "tests/MeetingAssistantNativeTests/RecordingControlViewModelTests.swift",
+    "tests/MeetingAssistantNativeTests/TranscriptReviewViewModelTests.swift",
     "UITests/MeetingAssistantNativeUITests/NativeControlPlaneSmokeTests.swift",
     "UITests/MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests.swift",
     "sbom/native-app.cdx.json",
@@ -43,8 +47,9 @@ if metadata.get("id") != "native-app":
     raise SystemExit("native-app lint failed: component id mismatch")
 if metadata.get("kind") != "project-component":
     raise SystemExit("native-app lint failed: component kind must be project-component")
-if metadata.get("business_behavior") != "permission_dependency_status_and_fake_recording":
-    raise SystemExit("native-app lint failed: business behavior must be permission_dependency_status_and_fake_recording")
+expected_behavior = "permission_dependency_status_fake_recording_and_transcript_review"
+if metadata.get("business_behavior") != expected_behavior:
+    raise SystemExit(f"native-app lint failed: business behavior must be {expected_behavior}")
 
 project = (root / "MeetingAssistantNative.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
 required_project_snippets = [
@@ -52,6 +57,9 @@ required_project_snippets = [
     "MeetingAssistantNativeAppUITests.xctest",
     "AppBundleLocatorSmokeTests.swift",
     "MeetingAssistantNativeApp.swift",
+    "TranscriptReviewReadModel.swift",
+    "TranscriptReviewViewModel.swift",
+    "TranscriptReviewView.swift",
 ]
 missing_project_snippets = [snippet for snippet in required_project_snippets if snippet not in project]
 if missing_project_snippets:
