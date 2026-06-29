@@ -1,0 +1,1750 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Meeting Assistant UI/UX PRD</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23171717'/%3E%3Cpath d='M9 10h14v2H9v-2zm0 5h14v2H9v-2zm0 5h9v2H9v-2z' fill='white'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #ffffff;
+      --bg-2: #fafafa;
+      --canvas: #f2f2f2;
+      --line: #eaeaea;
+      --line-strong: #c9c9c9;
+      --text: #171717;
+      --text-2: #4d4d4d;
+      --text-3: #8f8f8f;
+      --blue: #006bff;
+      --blue-bg: #f0f7ff;
+      --blue-line: #cae7ff;
+      --green: #28a948;
+      --green-bg: #ecfdec;
+      --green-line: #d3fad1;
+      --amber: #aa4d00;
+      --amber-bg: #fff6de;
+      --amber-line: #ffdc73;
+      --red: #ea001d;
+      --red-bg: #ffeeef;
+      --red-line: #ffd7d6;
+      --teal: #00927f;
+      --teal-bg: #defffb;
+      --purple: #8500d1;
+      --purple-bg: #faf0ff;
+      --shadow-card: 0 2px 2px rgba(0, 0, 0, 0.04);
+      --shadow-float: 0 1px 1px rgba(0, 0, 0, 0.02), 0 4px 8px -4px rgba(0, 0, 0, 0.04), 0 16px 24px -8px rgba(0, 0, 0, 0.06);
+      --radius: 6px;
+      --radius-lg: 12px;
+      --max: 1200px;
+      font-family: Geist, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.45;
+      letter-spacing: 0;
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      background: var(--canvas);
+      color: var(--text);
+    }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(var(--line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line) 1px, transparent 1px),
+        var(--canvas);
+      background-size: 32px 32px;
+      color: var(--text);
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    p, h1, h2, h3, h4, ul, ol, figure { margin: 0; }
+
+    ul, ol { padding-left: 18px; }
+
+    li + li { margin-top: 6px; }
+
+    .page-shell {
+      display: grid;
+      grid-template-columns: 248px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .side-nav {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 24px 20px;
+      border-right: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(12px);
+      overflow: auto;
+    }
+
+    .brand {
+      display: grid;
+      gap: 8px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand-mark {
+      display: inline-flex;
+      width: 32px;
+      height: 32px;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--radius);
+      background: var(--text);
+      color: var(--bg);
+      font-weight: 650;
+    }
+
+    .brand strong {
+      display: block;
+      font-size: 14px;
+      line-height: 20px;
+      font-weight: 650;
+    }
+
+    .brand span {
+      color: var(--text-3);
+      font-size: 12px;
+      line-height: 16px;
+    }
+
+    .nav-group {
+      display: grid;
+      gap: 4px;
+      margin-top: 20px;
+    }
+
+    .nav-label {
+      margin: 14px 0 6px;
+      color: var(--text-3);
+      font-size: 11px;
+      line-height: 16px;
+      font-weight: 650;
+      text-transform: uppercase;
+    }
+
+    .nav-link {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 32px;
+      padding: 0 8px;
+      border-radius: var(--radius);
+      color: var(--text-2);
+      font-size: 13px;
+    }
+
+    .nav-link:hover {
+      background: #0000000d;
+      color: var(--text);
+    }
+
+    .nav-link code {
+      color: var(--text-3);
+      font-family: "SF Mono", "Geist Mono", ui-monospace, monospace;
+      font-size: 11px;
+    }
+
+    main {
+      padding: 32px;
+    }
+
+    .doc {
+      display: grid;
+      gap: 32px;
+      max-width: var(--max);
+      margin: 0 auto;
+    }
+
+    .hero {
+      min-height: 520px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+      gap: 32px;
+      align-items: stretch;
+      padding: 48px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--bg);
+      box-shadow: var(--shadow-card);
+    }
+
+    .hero-copy {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 32px;
+    }
+
+    .eyebrow {
+      color: var(--text-3);
+      font-size: 12px;
+      line-height: 16px;
+      font-weight: 650;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 760px;
+      margin-top: 16px;
+      font-size: 56px;
+      line-height: 1.02;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      max-width: 720px;
+      margin-top: 20px;
+      color: var(--text-2);
+      font-size: 18px;
+      line-height: 28px;
+    }
+
+    .chip-row, .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--bg);
+      color: var(--text-2);
+      font-size: 12px;
+      font-weight: 520;
+      white-space: nowrap;
+    }
+
+    .chip.blue { color: #0059ec; background: var(--blue-bg); border-color: var(--blue-line); }
+    .chip.green { color: #107d32; background: var(--green-bg); border-color: var(--green-line); }
+    .chip.amber { color: var(--amber); background: var(--amber-bg); border-color: var(--amber-line); }
+    .chip.red { color: var(--red); background: var(--red-bg); border-color: var(--red-line); }
+    .chip.purple { color: var(--purple); background: var(--purple-bg); border-color: #f2d9ff; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 40px;
+      padding: 0 12px;
+      border: 1px solid #00000014;
+      border-radius: var(--radius);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 520;
+      box-shadow: 0 1px 1px rgba(0, 0, 0, 0.02);
+    }
+
+    .btn.primary {
+      border-color: var(--text);
+      background: var(--text);
+      color: var(--bg);
+    }
+
+    .btn.danger {
+      border-color: var(--red);
+      background: var(--red);
+      color: var(--bg);
+    }
+
+    .hero-card {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--bg-2);
+      box-shadow: var(--shadow-float);
+    }
+
+    .window-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 48px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--line);
+      background: var(--bg);
+    }
+
+    .traffic {
+      display: flex;
+      gap: 6px;
+    }
+
+    .traffic span {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--line-strong);
+    }
+
+    .traffic span:nth-child(1) { background: #ff5f57; }
+    .traffic span:nth-child(2) { background: #ffbd2e; }
+    .traffic span:nth-child(3) { background: #28c840; }
+
+    .hero-screen {
+      display: grid;
+      grid-template-columns: 160px 1fr;
+      min-height: 420px;
+    }
+
+    .mock-sidebar {
+      display: grid;
+      align-content: start;
+      gap: 8px;
+      padding: 16px;
+      border-right: 1px solid var(--line);
+      background: var(--bg);
+    }
+
+    .mock-tab {
+      min-height: 32px;
+      padding: 7px 8px;
+      border-radius: var(--radius);
+      color: var(--text-2);
+      font-size: 12px;
+      font-weight: 520;
+    }
+
+    .mock-tab.active {
+      background: #0000000d;
+      color: var(--text);
+    }
+
+    .mock-body {
+      display: grid;
+      gap: 16px;
+      align-content: start;
+      padding: 20px;
+    }
+
+    .status-card, .panel, .mini-card, .feature-card, .flow-node, .state-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg);
+      box-shadow: var(--shadow-card);
+    }
+
+    .status-card {
+      padding: 14px;
+    }
+
+    .status-row {
+      display: grid;
+      grid-template-columns: 12px 1fr auto;
+      gap: 10px;
+      align-items: start;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg);
+    }
+
+    .status-row + .status-row { margin-top: 8px; }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      margin-top: 4px;
+      border-radius: 50%;
+      background: var(--text-3);
+    }
+
+    .dot.ok { background: var(--green); }
+    .dot.warn { background: #ffae00; }
+    .dot.bad { background: var(--red); }
+    .dot.info { background: var(--blue); }
+
+    .status-main {
+      display: grid;
+      gap: 2px;
+    }
+
+    .status-main b {
+      font-size: 13px;
+      line-height: 18px;
+      font-weight: 650;
+    }
+
+    .status-main span {
+      color: var(--text-2);
+      font-size: 12px;
+      line-height: 16px;
+    }
+
+    .section {
+      display: grid;
+      gap: 20px;
+      padding: 32px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--bg);
+      box-shadow: var(--shadow-card);
+    }
+
+    .section-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .section-title {
+      display: grid;
+      gap: 10px;
+      max-width: 760px;
+    }
+
+    h2 {
+      font-size: 32px;
+      line-height: 40px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      font-size: 18px;
+      line-height: 26px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+
+    h4 {
+      font-size: 14px;
+      line-height: 20px;
+      font-weight: 650;
+    }
+
+    .muted {
+      color: var(--text-2);
+      font-size: 14px;
+      line-height: 22px;
+    }
+
+    .caption {
+      color: var(--text-3);
+      font-size: 12px;
+      line-height: 18px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .grid-2 > *,
+    .grid-3 > *,
+    .grid-4 > *,
+    .control-grid > *,
+    .artifact-grid > *,
+    .screen-content > *,
+    .hero-screen > * {
+      min-width: 0;
+    }
+
+    .mini-card, .feature-card, .state-card {
+      display: grid;
+      gap: 10px;
+      padding: 16px;
+    }
+
+    .mini-card strong, .feature-card strong, .state-card strong {
+      font-size: 14px;
+      line-height: 20px;
+      font-weight: 650;
+    }
+
+    .mini-card p, .feature-card p, .state-card p {
+      color: var(--text-2);
+      font-size: 13px;
+      line-height: 20px;
+    }
+
+    .artboard {
+      position: relative;
+      display: grid;
+      gap: 24px;
+      min-height: 820px;
+      padding: 36px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-lg);
+      background:
+        linear-gradient(var(--line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line) 1px, transparent 1px),
+        var(--bg);
+      background-size: 32px 32px;
+      box-shadow: var(--shadow-float);
+      overflow: hidden;
+    }
+
+    .artboard::after {
+      content: attr(data-frame);
+      position: absolute;
+      right: 24px;
+      bottom: 18px;
+      color: var(--text-3);
+      font-family: "SF Mono", "Geist Mono", ui-monospace, monospace;
+      font-size: 11px;
+    }
+
+    .artboard-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .artboard-title {
+      display: grid;
+      gap: 10px;
+      max-width: 760px;
+    }
+
+    .artboard-title h2 {
+      font-size: 28px;
+      line-height: 36px;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .flow-node {
+      position: relative;
+      min-height: 176px;
+      padding: 16px;
+    }
+
+    .flow-node::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -13px;
+      width: 14px;
+      height: 1px;
+      background: var(--line-strong);
+    }
+
+    .flow-node:last-child::after { display: none; }
+
+    .flow-node .num {
+      display: inline-flex;
+      width: 28px;
+      height: 28px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: var(--text);
+      color: var(--bg);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .flow-node h3 {
+      margin-top: 16px;
+      font-size: 15px;
+      line-height: 22px;
+    }
+
+    .flow-node p {
+      margin-top: 8px;
+      color: var(--text-2);
+      font-size: 13px;
+      line-height: 20px;
+    }
+
+    .screen {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-lg);
+      background: var(--bg);
+      box-shadow: var(--shadow-float);
+    }
+
+    .screen-content {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      min-height: 560px;
+    }
+
+    .screen-main {
+      display: grid;
+      gap: 18px;
+      align-content: start;
+      padding: 24px;
+      background: var(--bg-2);
+    }
+
+    .sidebar-title {
+      display: grid;
+      gap: 4px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .sidebar-title strong {
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .sidebar-title span {
+      color: var(--text-3);
+      font-size: 12px;
+    }
+
+    .panel {
+      display: grid;
+      overflow: hidden;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 48px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--line);
+      background: var(--bg);
+    }
+
+    .panel-body {
+      display: grid;
+      gap: 12px;
+      padding: 16px;
+      background: var(--bg);
+    }
+
+    .control-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .control {
+      display: grid;
+      gap: 8px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg);
+    }
+
+    .control span {
+      color: var(--text-3);
+      font-size: 12px;
+    }
+
+    .toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 40px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg);
+    }
+
+    .switch {
+      width: 32px;
+      height: 18px;
+      padding: 2px;
+      border-radius: 999px;
+      background: var(--text);
+    }
+
+    .switch::before {
+      content: "";
+      display: block;
+      width: 14px;
+      height: 14px;
+      margin-left: 14px;
+      border-radius: 50%;
+      background: var(--bg);
+    }
+
+    .recording-shell {
+      background: #0a0a0a;
+      color: var(--bg);
+    }
+
+    .recording-shell .window-top,
+    .recording-shell .panel,
+    .recording-shell .panel-head,
+    .recording-shell .panel-body,
+    .recording-shell .mock-sidebar,
+    .recording-shell .screen-main {
+      background: #111111;
+      border-color: #2a2a2a;
+      color: var(--bg);
+    }
+
+    .recording-shell .mock-tab.active { background: #262626; color: var(--bg); }
+    .recording-shell .mock-tab, .recording-shell .muted, .recording-shell .caption { color: #a8a8a8; }
+    .recording-shell .status-row { background: #171717; border-color: #2a2a2a; color: var(--bg); }
+    .recording-shell .status-main span { color: #a8a8a8; }
+
+    .meter {
+      display: flex;
+      align-items: end;
+      gap: 4px;
+      height: 96px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg);
+    }
+
+    .recording-shell .meter { background: #0a0a0a; border-color: #2a2a2a; }
+
+    .bar {
+      flex: 1;
+      min-width: 6px;
+      border-radius: 999px 999px 0 0;
+      background: var(--blue);
+    }
+
+    .bar:nth-child(2n) { height: 42%; }
+    .bar:nth-child(3n) { height: 70%; }
+    .bar:nth-child(4n) { height: 54%; }
+    .bar:nth-child(5n) { height: 84%; }
+    .bar:nth-child(6n) { height: 36%; }
+    .bar:nth-child(7n) { height: 63%; }
+    .bar:nth-child(8n) { height: 48%; }
+
+    .artifact-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .artifact {
+      display: grid;
+      gap: 8px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg);
+    }
+
+    .artifact-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .artifact-top strong {
+      font-family: "SF Mono", "Geist Mono", ui-monospace, monospace;
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .artifact p {
+      color: var(--text-2);
+      font-size: 12px;
+      line-height: 18px;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 10px;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 28px 1fr auto;
+      gap: 12px;
+      align-items: start;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg);
+    }
+
+    .step-index {
+      display: inline-flex;
+      width: 28px;
+      height: 28px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      color: var(--text-2);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .step.done .step-index { background: var(--green-bg); border-color: var(--green-line); color: var(--green); }
+    .step.warn .step-index { background: var(--amber-bg); border-color: var(--amber-line); color: var(--amber); }
+    .step.bad .step-index { background: var(--red-bg); border-color: var(--red-line); color: var(--red); }
+
+    .step h4 {
+      margin-bottom: 2px;
+    }
+
+    .step p {
+      color: var(--text-2);
+      font-size: 12px;
+      line-height: 18px;
+    }
+
+    .code {
+      overflow: auto;
+      padding: 14px;
+      border: 1px solid #00000014;
+      border-radius: var(--radius);
+      background: #0a0a0a;
+      color: #f2f2f2;
+      font-family: "SF Mono", "Geist Mono", ui-monospace, monospace;
+      font-size: 12px;
+      line-height: 20px;
+      white-space: pre-wrap;
+    }
+
+    .transcript {
+      display: grid;
+      gap: 10px;
+    }
+
+    .segment {
+      display: grid;
+      grid-template-columns: 96px 104px 1fr;
+      gap: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg);
+    }
+
+    .segment time,
+    .mono {
+      font-family: "SF Mono", "Geist Mono", ui-monospace, monospace;
+      font-size: 12px;
+      line-height: 18px;
+    }
+
+    .segment p {
+      color: var(--text);
+      font-size: 13px;
+      line-height: 20px;
+    }
+
+    .modal-backdrop {
+      display: grid;
+      place-items: center;
+      min-height: 520px;
+      padding: 24px;
+      border-radius: var(--radius);
+      background: rgba(0, 0, 0, 0.08);
+    }
+
+    .modal {
+      width: min(560px, 100%);
+      display: grid;
+      gap: 16px;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--bg);
+      box-shadow: var(--shadow-float);
+    }
+
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg);
+      font-size: 13px;
+    }
+
+    .table th, .table td {
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .table th {
+      color: var(--text-2);
+      background: var(--bg-2);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .table tr:last-child td { border-bottom: 0; }
+
+    .token-grid {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .swatch {
+      display: grid;
+      min-height: 88px;
+      align-content: end;
+      gap: 4px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg);
+      overflow: hidden;
+    }
+
+    .swatch::before {
+      content: "";
+      display: block;
+      height: 30px;
+      margin: -10px -10px 6px;
+      background: var(--swatch);
+    }
+
+    .swatch strong {
+      font-family: "SF Mono", "Geist Mono", ui-monospace, monospace;
+      font-size: 11px;
+    }
+
+    .swatch span {
+      color: var(--text-3);
+      font-family: "SF Mono", "Geist Mono", ui-monospace, monospace;
+      font-size: 10px;
+    }
+
+    .callout {
+      display: grid;
+      grid-template-columns: 4px 1fr;
+      gap: 12px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg-2);
+    }
+
+    .callout::before {
+      content: "";
+      border-radius: 999px;
+      background: var(--blue);
+    }
+
+    .callout.warn::before { background: #ffae00; }
+    .callout.danger::before { background: var(--red); }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 13px;
+    }
+
+    .callout p {
+      color: var(--text-2);
+      font-size: 13px;
+      line-height: 20px;
+    }
+
+    @media (max-width: 1100px) {
+      .page-shell { grid-template-columns: 1fr; }
+      .side-nav {
+        position: relative;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .nav-group { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      main { padding: 20px; }
+      .hero { grid-template-columns: 1fr; padding: 32px; }
+      h1 { font-size: 40px; line-height: 48px; }
+      .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .flow-node::after { display: none; }
+      .grid-3, .grid-4, .control-grid, .artifact-grid, .token-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .screen-content, .hero-screen { grid-template-columns: 1fr; }
+      .mock-sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+    }
+
+    @media (max-width: 720px) {
+      main { padding: 12px; }
+      .section, .artboard, .hero { padding: 20px; }
+      h1 { font-size: 32px; line-height: 38px; }
+      h2 { font-size: 24px; line-height: 32px; }
+      .section-header, .artboard-header { display: grid; }
+      .grid-2, .grid-3, .grid-4, .flow, .token-grid, .control-grid, .artifact-grid { grid-template-columns: 1fr; }
+      .segment { grid-template-columns: 1fr; }
+      .nav-group { grid-template-columns: 1fr; }
+      .artboard { min-height: auto; }
+      .table,
+      .table thead,
+      .table tbody,
+      .table tr,
+      .table th,
+      .table td {
+        display: block;
+        width: 100%;
+      }
+      .table thead { display: none; }
+      .table tr { border-bottom: 1px solid var(--line); }
+      .table tr:last-child { border-bottom: 0; }
+      .table td {
+        border-bottom: 0;
+        padding: 10px 12px;
+      }
+      .table td + td { border-top: 1px solid var(--line); }
+    }
+
+    @media print {
+      body { background: #fff; }
+      .page-shell { display: block; }
+      .side-nav { display: none; }
+      main { padding: 0; }
+      .doc { max-width: none; }
+      .hero, .section, .artboard {
+        page-break-inside: avoid;
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page-shell">
+    <nav class="side-nav" aria-label="Document navigation">
+      <div class="brand">
+        <span class="brand-mark">MA</span>
+        <div>
+          <strong>Meeting Assistant</strong>
+          <span>UI/UX PRD · HTML Artboards</span>
+        </div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">PRD</div>
+        <a class="nav-link" href="#overview">产品定位 <code>00</code></a>
+        <a class="nav-link" href="#scope">范围与原则 <code>01</code></a>
+        <a class="nav-link" href="#journey">用户旅程 <code>02</code></a>
+        <a class="nav-link" href="#capabilities">功能地图 <code>03</code></a>
+        <div class="nav-label">Artboards</div>
+        <a class="nav-link" href="#frame-preflight">预检首页 <code>F01</code></a>
+        <a class="nav-link" href="#frame-recording">录制控制 <code>F02</code></a>
+        <a class="nav-link" href="#frame-artifacts">产物登记 <code>F03</code></a>
+        <a class="nav-link" href="#frame-processing">处理流水线 <code>F04</code></a>
+        <a class="nav-link" href="#frame-transcript">回查导出 <code>F05</code></a>
+        <a class="nav-link" href="#frame-delete">删除确认 <code>F06</code></a>
+        <a class="nav-link" href="#frame-states">状态与错误 <code>F07</code></a>
+        <a class="nav-link" href="#frame-kit">设计系统 <code>F08</code></a>
+        <div class="nav-label">Evidence</div>
+        <a class="nav-link" href="#validation">验证状态 <code>PV</code></a>
+        <a class="nav-link" href="#sources">事实源 <code>SRC</code></a>
+      </div>
+    </nav>
+
+    <main>
+      <div class="doc">
+        <section id="overview" class="hero">
+          <div class="hero-copy">
+            <div>
+              <div class="chip-row">
+                <span class="chip green">mode: project</span>
+                <span class="chip blue">Spec Sync: no-product-impact</span>
+                <span class="chip amber">Derived artifact, not source of truth</span>
+              </div>
+              <p class="eyebrow" style="margin-top: 32px;">Product UI/UX PRD</p>
+              <h1>本地 macOS 会议助手的完整体验蓝图</h1>
+              <p class="lead">这份 HTML 文档把项目事实源整理成类似 Figma 产出物的 PRD：覆盖产品定位、用户旅程、核心功能介绍、关键 UI 状态、桌面画板、设计 token、验证状态和未决边界。</p>
+            </div>
+            <div class="grid-2">
+              <div class="mini-card">
+                <span class="chip blue">Primary user</span>
+                <strong>本地会议记录用户</strong>
+                <p>在自己的 Apple Silicon Mac 上独立录制会议、生成 transcript、回查、导出，并自行决定是否粘贴到外部 GPT。</p>
+              </div>
+              <div class="mini-card">
+                <span class="chip">MVP surface</span>
+                <strong>最小 Swift/SwiftUI app + processing CLI</strong>
+                <p>图形入口负责录制控制和可见状态，CLI/helper 负责依赖检查、媒体处理、转写、speaker label fallback、导出和删除。</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="hero-card" aria-label="Product snapshot mockup">
+            <div class="window-top">
+              <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+              <span class="caption">Meeting Assistant · Product Snapshot</span>
+            </div>
+            <div class="hero-screen">
+              <aside class="mock-sidebar">
+                <div class="sidebar-title">
+                  <strong>Local workspace</strong>
+                  <span>~/Movies/MeetingAssistant</span>
+                </div>
+                <span class="mock-tab active">Preflight</span>
+                <span class="mock-tab">Recording</span>
+                <span class="mock-tab">Processing</span>
+                <span class="mock-tab">Transcript</span>
+                <span class="mock-tab">Exports</span>
+              </aside>
+              <div class="mock-body">
+                <div class="status-card">
+                  <div class="status-row">
+                    <span class="dot ok"></span>
+                    <div class="status-main"><b>Workspace writable</b><span>Session files and metadata stay local.</span></div>
+                    <span class="chip green">ready</span>
+                  </div>
+                  <div class="status-row">
+                    <span class="dot warn"></span>
+                    <div class="status-main"><b>Speaker labeling runtime</b><span>Unavailable; transcript-only fallback remains allowed.</span></div>
+                    <span class="chip amber">fallback</span>
+                  </div>
+                  <div class="status-row">
+                    <span class="dot info"></span>
+                    <div class="status-main"><b>External GPT</b><span>Manual copy or export only; no automatic upload.</span></div>
+                    <span class="chip">manual</span>
+                  </div>
+                </div>
+                <div class="button-row">
+                  <a class="btn primary" href="#frame-preflight">Open Artboards</a>
+                  <a class="btn" href="#validation">Review PV Status</a>
+                </div>
+                <div class="callout">
+                  <div>
+                    <strong>设计风格参考</strong>
+                    <p>视觉 token 参考 Vercel Geist light theme：中性高对比、4px 间距、6px 控件圆角、克制色彩和状态优先的内容层级。</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="scope" class="section">
+          <div class="section-header">
+            <div class="section-title">
+              <span class="eyebrow">Scope</span>
+              <h2>产品范围、设计原则和非目标</h2>
+              <p class="muted">本文档只整理既有事实源，不新增产品能力。任何自动纪要、团队共享、商业分发、辅助录制主路径或真实身份识别，都必须先走 spec-change、ADR 和验证矩阵更新。</p>
+            </div>
+            <span class="chip amber">source-derived</span>
+          </div>
+          <div class="grid-3">
+            <div class="feature-card">
+              <span class="chip blue">North Star</span>
+              <strong>本地记录和可回查</strong>
+              <p>用户能完成录制前检查、开始/停止原生录制、保存视频和音频、生成带时间戳 transcript，并在本地回查。</p>
+            </div>
+            <div class="feature-card">
+              <span class="chip green">Privacy boundary</span>
+              <strong>默认不上传</strong>
+              <p>会议视频、音频、transcript 和日志默认保留在本地 workspace。外部 GPT 仅是用户主动复制或导出后的外部行为。</p>
+            </div>
+            <div class="feature-card">
+              <span class="chip amber">MVP truth</span>
+              <strong>best-effort 匿名标签</strong>
+              <p>speaker labels 用 `SPEAKER_01` 等匿名标签辅助阅读，不代表真实姓名，也不承诺 diarization 质量阈值。</p>
+            </div>
+          </div>
+          <div class="grid-2">
+            <div class="panel">
+              <div class="panel-head"><h3>设计原则</h3><span class="chip">UI/UX</span></div>
+              <div class="panel-body">
+                <div class="status-row"><span class="dot info"></span><div class="status-main"><b>状态先于装饰</b><span>权限、依赖、录制、处理、降级、失败和删除结果必须可见、可查询、可恢复。</span></div><span></span></div>
+                <div class="status-row"><span class="dot ok"></span><div class="status-main"><b>文件化和可重试</b><span>原始媒体优先保护，normalized audio、transcript、speaker labels 和 export 都是可重建派生产物。</span></div><span></span></div>
+                <div class="status-row"><span class="dot warn"></span><div class="status-main"><b>主动外部使用</b><span>复制或导出 transcript 是用户触发动作，界面不暗示自动纪要或自动上传。</span></div><span></span></div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h3>明确非目标</h3><span class="chip red">out of MVP</span></div>
+              <div class="panel-body">
+                <div class="status-row"><span class="dot bad"></span><div class="status-main"><b>团队账号和共享会议库</b><span>多人使用时仍各自在本机独立运行，不提供组织空间、集中审计或团队支持。</span></div><span></span></div>
+                <div class="status-row"><span class="dot bad"></span><div class="status-main"><b>自动 GPT / Qwen 纪要</b><span>当前是 watch 决策；进入实现前必须新增 API、安全、数据和验证覆盖。</span></div><span></span></div>
+                <div class="status-row"><span class="dot bad"></span><div class="status-main"><b>OBS / BlackHole 主路径</b><span>原生 macOS 录制优先；辅助方案只能在 spike 证据后通过 spec-change 纳入。</span></div><span></span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="journey" class="artboard" data-frame="Frame 00 · Journey Map">
+          <div class="artboard-header">
+            <div class="artboard-title">
+              <span class="eyebrow">End-to-end Journey</span>
+              <h2>用户从会前预检到删除会话的完整路径</h2>
+              <p class="muted">核心旅程覆盖 `JRN-MA-001` 到 `JRN-MA-006`。导入媒体是回退和测试路径，不改变原生录制主路径。</p>
+            </div>
+            <div class="chip-row">
+              <span class="chip blue">JRN-MA-001..006</span>
+              <span class="chip amber">some UI planned</span>
+            </div>
+          </div>
+          <div class="flow">
+            <div class="flow-node">
+              <span class="num">1</span>
+              <h3>启动与预检</h3>
+              <p>检查 macOS 录屏、麦克风、文件写入、workspace、FFmpeg、whisper.cpp runtime、模型和 speaker fallback。</p>
+              <span class="chip blue">CAP-MA-001</span>
+            </div>
+            <div class="flow-node">
+              <span class="num">2</span>
+              <h3>配置录制</h3>
+              <p>选择屏幕、窗口或区域，确认系统音频和麦克风捕获目标；缺权限时阻断开始。</p>
+              <span class="chip">CMD-MA-001</span>
+            </div>
+            <div class="flow-node">
+              <span class="num">3</span>
+              <h3>录制中</h3>
+              <p>稳定展示 `recording` 状态、目标、音轨和停止按钮，避免用户不确定是否正在捕获。</p>
+              <span class="chip red">live</span>
+            </div>
+            <div class="flow-node">
+              <span class="num">4</span>
+              <h3>保存与登记</h3>
+              <p>停止后写入 `session.json`，登记 `screen_video`、三类音频、checksum、降级状态和原因。</p>
+              <span class="chip green">recorded</span>
+            </div>
+            <div class="flow-node">
+              <span class="num">5</span>
+              <h3>处理与转写</h3>
+              <p>默认使用 `mixed_audio`，生成 `normalized_audio.wav` 和按时间排序的 transcript；speaker labels 可降级。</p>
+              <span class="chip amber">partial</span>
+            </div>
+            <div class="flow-node">
+              <span class="num">6</span>
+              <h3>回查、导出、删除</h3>
+              <p>显示时间戳文本和匿名 labels，用户主动复制或导出；删除仅影响 workspace 内会话目录。</p>
+              <span class="chip amber">planned UI</span>
+            </div>
+          </div>
+          <div class="grid-3">
+            <div class="mini-card">
+              <strong>Happy path</strong>
+              <p>Preflight ready → native recording → artifacts available → transcript generated → export markdown → delete session later.</p>
+            </div>
+            <div class="mini-card">
+              <strong>Degraded path</strong>
+              <p>系统音频或 speaker engine 不可用时，界面保留成功产物并明确显示 `degradation_reason`。</p>
+            </div>
+            <div class="mini-card">
+              <strong>Recovery path</strong>
+              <p>依赖缺失、模型缺失、导出路径冲突、路径越界和处理失败都必须返回可解释错误，并保留原始媒体。</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="capabilities" class="section">
+          <div class="section-header">
+            <div class="section-title">
+              <span class="eyebrow">Capability Catalog</span>
+              <h2>基础功能介绍和用户价值</h2>
+              <p class="muted">这部分可以作为面向用户或评审者的产品说明。验证状态取自当前矩阵：`covered` 才代表长期标准门禁完整覆盖；`partial/planned` 只能代表能力目标或局部证据。</p>
+            </div>
+            <span class="chip">CAP-MA-001..012</span>
+          </div>
+          <div class="grid-4">
+            <div class="feature-card"><span class="chip blue">01</span><strong>权限和环境预检</strong><p>开始录制或处理前暴露权限、依赖、模型、workspace 和允许来源状态。</p></div>
+            <div class="feature-card"><span class="chip red">02</span><strong>原生录制控制</strong><p>SwiftUI 最小窗口提供开始、录制中、停止、保存和失败反馈。</p></div>
+            <div class="feature-card"><span class="chip green">03</span><strong>会话和产物登记</strong><p>每次会议落盘为 `MeetingSession`，可追踪视频、音频、metadata 和降级原因。</p></div>
+            <div class="feature-card"><span class="chip">04</span><strong>导入已有媒体</strong><p>用户显式选择 `.wav/.m4a/.mp3/.mp4/.mov` 文件，作为回退或测试入口。</p></div>
+            <div class="feature-card"><span class="chip">05</span><strong>标准化音频</strong><p>从可用音频生成可重建 `.wav`，不覆盖原始录制音轨。</p></div>
+            <div class="feature-card"><span class="chip">06</span><strong>时间戳转写</strong><p>本地 `whisper.cpp` 或 fake adapter 生成按时间排序的 transcript segments。</p></div>
+            <div class="feature-card"><span class="chip amber">07</span><strong>匿名 speaker labels</strong><p>输出 `SPEAKER_01` 等辅助标签；不可用时 transcript-only fallback。</p></div>
+            <div class="feature-card"><span class="chip blue">08</span><strong>回查与导出</strong><p>用户查看时间戳、复制或导出 plain text / Markdown / JSON，不自动上传。</p></div>
+            <div class="feature-card"><span class="chip red">09</span><strong>删除本地会话</strong><p>用户确认后删除当前 workspace 内会话目录，workspace 外导出文件保留。</p></div>
+            <div class="feature-card"><span class="chip green">10</span><strong>本地数据边界</strong><p>默认 workspace 是 `~/Movies/MeetingAssistant/`，MVP 不提供应用级加密。</p></div>
+            <div class="feature-card"><span class="chip purple">11</span><strong>模块解耦</strong><p>native app、helper、processing CLI、workspace files 和 adapter 通过契约协作。</p></div>
+            <div class="feature-card"><span class="chip amber">12</span><strong>可验证门禁</strong><p>每个能力必须回指 `AC-MA-*`、`PV-MA-*` 和标准脚本证据。</p></div>
+          </div>
+        </section>
+
+        <section id="frame-preflight" class="artboard" data-frame="Frame 01 · Home and Preflight">
+          <div class="artboard-header">
+            <div class="artboard-title">
+              <span class="eyebrow">Main Surface</span>
+              <h2>启动页聚焦：现在能不能安全开始录制或处理</h2>
+              <p class="muted">预检不是设置页附属功能，而是进入所有关键旅程前的门槛。缺少必需权限或依赖时，录制和处理按钮必须阻断。</p>
+            </div>
+            <span class="chip blue">UI-MA-PERMISSION-001</span>
+          </div>
+          <div class="screen">
+            <div class="window-top">
+              <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+              <span class="caption">Meeting Assistant · Preflight</span>
+            </div>
+            <div class="screen-content">
+              <aside class="mock-sidebar">
+                <div class="sidebar-title"><strong>Today</strong><span>2 local sessions</span></div>
+                <span class="mock-tab active">Preflight</span>
+                <span class="mock-tab">Record meeting</span>
+                <span class="mock-tab">Import media</span>
+                <span class="mock-tab">Recent sessions</span>
+              </aside>
+              <div class="screen-main">
+                <div class="grid-2">
+                  <div class="panel">
+                    <div class="panel-head"><h3>Readiness</h3><span class="chip amber">2 actions needed</span></div>
+                    <div class="panel-body">
+                      <div class="status-row"><span class="dot ok"></span><div class="status-main"><b>Workspace writable</b><span>~/Movies/MeetingAssistant/ is available.</span></div><span class="chip green">ready</span></div>
+                      <div class="status-row"><span class="dot ok"></span><div class="status-main"><b>Media tool</b><span>FFmpeg or compatible media processing is available.</span></div><span class="chip green">ready</span></div>
+                      <div class="status-row"><span class="dot warn"></span><div class="status-main"><b>Screen recording permission</b><span>Open macOS Settings and allow screen recording before capture.</span></div><span class="chip amber">unknown</span></div>
+                      <div class="status-row"><span class="dot bad"></span><div class="status-main"><b>Transcription model</b><span>Set a local multilingual Whisper-compatible model path.</span></div><span class="chip red">missing</span></div>
+                    </div>
+                  </div>
+                  <div class="panel">
+                    <div class="panel-head"><h3>Primary action</h3><span class="chip">local only</span></div>
+                    <div class="panel-body">
+                      <p class="muted">开始录制前必须知道哪些能力可用。预检文案需要告诉用户“发生了什么”和“下一步做什么”。</p>
+                      <div class="button-row">
+                        <button class="btn primary">Start Native Recording</button>
+                        <button class="btn">Run Dependency Check</button>
+                      </div>
+                      <div class="callout warn">
+                        <div>
+                          <strong>阻断规则</strong>
+                          <p>如果缺失屏幕录制、麦克风或必需 runtime，按钮可以保持可见，但点击必须返回结构化失败和修复提示。</p>
+                        </div>
+                      </div>
+                      <div class="code">meeting-assistant-cli check_dependencies --format json
+→ ok=false, code=dependency_missing</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="grid-3">
+                  <div class="mini-card"><strong>Accessible title</strong><p>主视图标题为 “Meeting Assistant Preflight”，状态变化对屏幕阅读器可见。</p></div>
+                  <div class="mini-card"><strong>Stable locator</strong><p>`ma.preflight.status`, `ma.record.startButton`, `ma.dependencies.runButton`。</p></div>
+                  <div class="mini-card"><strong>Copy rule</strong><p>错误文案包含具体缺失项，不使用 “Something went wrong”。</p></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="frame-recording" class="artboard" data-frame="Frame 02 · Native Recording Control">
+          <div class="artboard-header">
+            <div class="artboard-title">
+              <span class="eyebrow">Capture Flow</span>
+              <h2>录制配置和录制中状态要保持明确、稳定、可中断</h2>
+              <p class="muted">原生录制是主路径。系统不应在录制失败时静默切换到 OBS、BlackHole 或 FFmpeg 辅助 capture。</p>
+            </div>
+            <div class="chip-row"><span class="chip red">recording</span><span class="chip">CMD-MA-001/002</span></div>
+          </div>
+          <div class="grid-2">
+            <div class="screen">
+              <div class="window-top">
+                <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+                <span class="caption">Setup</span>
+              </div>
+              <div class="screen-content">
+                <aside class="mock-sidebar">
+                  <div class="sidebar-title"><strong>New recording</strong><span>Native capture</span></div>
+                  <span class="mock-tab active">Target</span>
+                  <span class="mock-tab">Audio</span>
+                  <span class="mock-tab">Workspace</span>
+                </aside>
+                <div class="screen-main">
+                  <div class="panel">
+                    <div class="panel-head"><h3>Capture target</h3><span class="chip">screen / window / area</span></div>
+                    <div class="panel-body">
+                      <div class="control-grid">
+                        <div class="control"><strong>Screen</strong><span>Full display capture</span></div>
+                        <div class="control"><strong>Window</strong><span>Meeting app window</span></div>
+                        <div class="control"><strong>Area</strong><span>Manual selection</span></div>
+                      </div>
+                      <div class="toggle"><strong>Capture system audio</strong><span class="switch"></span></div>
+                      <div class="toggle"><strong>Capture microphone audio</strong><span class="switch"></span></div>
+                      <button class="btn primary">Start Native Recording</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="screen recording-shell">
+              <div class="window-top">
+                <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+                <button class="btn danger">Stop Recording</button>
+              </div>
+              <div class="screen-content">
+                <aside class="mock-sidebar">
+                  <div class="sidebar-title"><strong style="color:#fff;">Weekly Review</strong><span>Session state: recording</span></div>
+                  <span class="mock-tab active">Live capture</span>
+                  <span class="mock-tab">Audio tracks</span>
+                </aside>
+                <div class="screen-main">
+                  <div class="status-row"><span class="dot bad"></span><div class="status-main"><b>Recording</b><span>Started 10:15 · window target · session-20260629-1015</span></div><span class="chip red">live</span></div>
+                  <div class="meter" aria-hidden="true">
+                    <span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span>
+                  </div>
+                  <div class="grid-2">
+                    <div class="mini-card" style="background:#171717;border-color:#2a2a2a;"><strong style="color:#fff;">System audio</strong><p>Capture target should be visible while recording.</p></div>
+                    <div class="mini-card" style="background:#171717;border-color:#2a2a2a;"><strong style="color:#fff;">Microphone</strong><p>Mic unavailable must show a degraded artifact later.</p></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="frame-artifacts" class="artboard" data-frame="Frame 03 · Saved Artifacts">
+          <div class="artboard-header">
+            <div class="artboard-title">
+              <span class="eyebrow">Session Detail</span>
+              <h2>停止录制后先展示会话、产物和降级原因</h2>
+              <p class="muted">这不是单纯的“保存成功”页面。用户需要知道哪些 artifact 可用、哪些缺失、是否可以继续处理，以及原始媒体是否被保护。</p>
+            </div>
+            <span class="chip green">status: recorded</span>
+          </div>
+          <div class="screen">
+            <div class="window-top">
+              <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+              <div class="button-row"><button class="btn">Open Folder</button><button class="btn primary">Process Transcript</button></div>
+            </div>
+            <div class="screen-content">
+              <aside class="mock-sidebar">
+                <div class="sidebar-title"><strong>Weekly Review</strong><span>session-20260629-1015</span></div>
+                <span class="mock-tab active">Artifacts</span>
+                <span class="mock-tab">Transcript</span>
+                <span class="mock-tab">Exports</span>
+                <span class="mock-tab">Logs</span>
+              </aside>
+              <div class="screen-main">
+                <div class="artifact-grid">
+                  <div class="artifact"><div class="artifact-top"><strong>screen_video.mov</strong><span class="chip green">available</span></div><p>原生录制输出格式保留，metadata 记录实际 format 和 checksum。</p></div>
+                  <div class="artifact"><div class="artifact-top"><strong>system_audio.m4a</strong><span class="chip amber">degraded</span></div><p>如果系统音频不可用，必须显示原因，不能伪装为完整成功。</p></div>
+                  <div class="artifact"><div class="artifact-top"><strong>microphone_audio.m4a</strong><span class="chip green">available</span></div><p>用于现场讨论或补充用户本机声音。</p></div>
+                  <div class="artifact"><div class="artifact-top"><strong>mixed_audio.m4a</strong><span class="chip green">default</span></div><p>默认转写输入；缺失时允许用户选择其他可用音频重试。</p></div>
+                </div>
+                <div class="grid-3">
+                  <div class="mini-card"><span class="chip">Invariant</span><strong>原始媒体只追加</strong><p>转写、speaker labeling 和导出不得覆盖原始视频或音频。</p></div>
+                  <div class="mini-card"><span class="chip amber">Degradation</span><strong>原因必须可见</strong><p>`capture_status` 为 degraded/missing/failed 时必须有 `degradation_reason`。</p></div>
+                  <div class="mini-card"><span class="chip blue">Next</span><strong>进入处理链路</strong><p>处理动作应读取 artifact contract，不直接解释 native capture 内部状态。</p></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="frame-processing" class="artboard" data-frame="Frame 04 · Processing Pipeline">
+          <div class="artboard-header">
+            <div class="artboard-title">
+              <span class="eyebrow">Processing</span>
+              <h2>处理面板展示可重试流水线、失败原因和 transcript-only fallback</h2>
+              <p class="muted">CLI 已覆盖较多 processing 证据；native 处理状态 UI 仍需后续补齐。设计上要保留处理步骤、输入选择、重试和日志摘要。</p>
+            </div>
+            <span class="chip amber">CLI partial · native planned</span>
+          </div>
+          <div class="grid-2">
+            <div class="panel">
+              <div class="panel-head"><h3>Pipeline steps</h3><span class="chip">CMD-MA-005/006</span></div>
+              <div class="panel-body timeline">
+                <div class="step done"><span class="step-index">1</span><div><h4>Normalize audio</h4><p>使用 mixed_audio 生成可重建 `normalized_audio.wav`。</p></div><span class="chip green">done</span></div>
+                <div class="step done"><span class="step-index">2</span><div><h4>Generate transcript</h4><p>segments 按时间排序，每段包含 start/end/text。</p></div><span class="chip green">done</span></div>
+                <div class="step warn"><span class="step-index">3</span><div><h4>Speaker labels</h4><p>本地 engine 不可用，保留 transcript-only fallback 和原因。</p></div><span class="chip amber">fallback</span></div>
+                <div class="step"><span class="step-index">4</span><div><h4>Export package</h4><p>用户后续主动选择 plain text / markdown / json。</p></div><span class="chip">ready</span></div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h3>Command evidence</h3><span class="chip">stable JSON</span></div>
+              <div class="panel-body">
+                <div class="code">meeting-assistant-cli generate_transcript \
+  --session-id session-20260629-1015 \
+  --runtime whisper_cpp
+
+→ ok=true
+→ transcript_id=transcript-...
+→ segment_count=42</div>
+                <div class="callout warn">
+                  <div>
+                    <strong>真实 runtime 边界</strong>
+                    <p>`whisper.cpp` 和 multilingual 模型由用户人工准备；应用和脚本不得自动下载模型、二进制或调用外部 API。</p>
+                  </div>
+                </div>
+                <div class="callout">
+                  <div>
+                    <strong>Native UI expectation</strong>
+                    <p>后续 SwiftUI 处理状态要覆盖 processing、failed、degraded、retry、transcript available，并提供稳定 accessibility identifier。</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="frame-transcript" class="artboard" data-frame="Frame 05 · Transcript Review and Export">
+          <div class="artboard-header">
+            <div class="artboard-title">
+              <span class="eyebrow">Review / Export</span>
+              <h2>回查界面强调时间戳、匿名标签和用户主动导出边界</h2>
+              <p class="muted">`PV-MA-010` 当前仍是 planned，因此这里是目标体验设计。实现时必须避免把 speaker labels 表述成真实身份。</p>
+            </div>
+            <div class="chip-row"><span class="chip amber">PV-MA-010 planned</span><span class="chip blue">no auto upload</span></div>
+          </div>
+          <div class="screen">
+            <div class="window-top">
+              <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+              <div class="button-row"><button class="btn primary">Copy Transcript</button><button class="btn">Export Markdown</button></div>
+            </div>
+            <div class="screen-content">
+              <aside class="mock-sidebar">
+                <div class="sidebar-title"><strong>Transcript</strong><span>42 segments · transcript-only labels</span></div>
+                <span class="mock-tab active">Review</span>
+                <span class="mock-tab">Export</span>
+                <span class="mock-tab">Source media</span>
+              </aside>
+              <div class="screen-main">
+                <div class="grid-2">
+                  <div class="panel">
+                    <div class="panel-head"><h3>Transcript segments</h3><span class="chip amber">anonymous</span></div>
+                    <div class="panel-body transcript">
+                      <div class="segment"><time>00:00:12</time><span class="chip">SPEAKER_01</span><p>我们先确认今天的目标，录制、转写和导出都只在本地完成。</p></div>
+                      <div class="segment"><time>00:01:04</time><span class="chip">SPEAKER_02</span><p>HTTP 接口不是 MVP 范围，processing CLI 会输出稳定 JSON。</p></div>
+                      <div class="segment"><time>00:02:31</time><span class="chip amber">fallback</span><p>speaker labeling engine unavailable; transcript-only fallback was used.</p></div>
+                    </div>
+                  </div>
+                  <div class="panel">
+                    <div class="panel-head"><h3>Export boundary</h3><span class="chip blue">user action</span></div>
+                    <div class="panel-body">
+                      <p class="muted">复制和导出按钮必须由用户触发。应用不保存外部 API key，不自动上传 transcript、音频或视频。</p>
+                      <div class="status-row"><span class="dot info"></span><div class="status-main"><b>Plain text</b><span>快速复制给用户手动整理。</span></div><span class="chip">copy</span></div>
+                      <div class="status-row"><span class="dot info"></span><div class="status-main"><b>Markdown</b><span>保留时间戳和匿名标签。</span></div><span class="chip">file</span></div>
+                      <div class="status-row"><span class="dot info"></span><div class="status-main"><b>JSON</b><span>结构化 segments，供本地重处理。</span></div><span class="chip">file</span></div>
+                      <div class="callout warn">
+                        <div>
+                          <strong>Content warning</strong>
+                          <p>UI 应提醒外部 GPT 处理不受本系统控制，但不能用营销或恐吓文案打断核心工作流。</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="frame-delete" class="artboard" data-frame="Frame 06 · Delete Confirmation">
+          <div class="artboard-header">
+            <div class="artboard-title">
+              <span class="eyebrow">Data Lifecycle</span>
+              <h2>删除确认必须说明目标会话、影响范围和不会删除的外部文件</h2>
+              <p class="muted">删除会话只能作用于当前 workspace 内目标 session 目录。workspace 外导出文件、原始导入源文件和外部工具生成内容都不由应用自动删除。</p>
+            </div>
+            <span class="chip red">CMD-MA-008</span>
+          </div>
+          <div class="modal-backdrop">
+            <div class="modal" role="dialog" aria-modal="true" aria-labelledby="delete-title">
+              <span class="chip red">Destructive action</span>
+              <h2 id="delete-title">Delete “Weekly Product Review”?</h2>
+              <p class="muted">This deletes application-managed files inside this session folder. External exports are retained and remain your responsibility.</p>
+              <div class="panel">
+                <div class="panel-body">
+                  <div class="status-row"><span class="dot bad"></span><div class="status-main"><b>Deleted inside workspace</b><span>Media artifacts, transcript, speaker labels, export packages, logs and session metadata.</span></div><span class="chip red">inside session</span></div>
+                  <div class="status-row"><span class="dot ok"></span><div class="status-main"><b>Retained outside workspace</b><span>Workspace-external exports and original imported source files.</span></div><span class="chip green">retained</span></div>
+                  <div class="status-row"><span class="dot warn"></span><div class="status-main"><b>Failure state</b><span>Path conflict, symlink escape or permission failure must return a result summary.</span></div><span class="chip amber">fail closed</span></div>
+                </div>
+              </div>
+              <div class="button-row">
+                <button class="btn danger">Delete Session</button>
+                <button class="btn">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="frame-states" class="artboard" data-frame="Frame 07 · States, Copy and Recovery">
+          <div class="artboard-header">
+            <div class="artboard-title">
+              <span class="eyebrow">State System</span>
+              <h2>每个关键状态都要有持久区域、可访问文案和下一步动作</h2>
+              <p class="muted">权限缺失、依赖缺失、speaker fallback、导出失败和删除失败不能只用短暂 toast 表达。</p>
+            </div>
+            <span class="chip">UI-MA-STATE-001..006</span>
+          </div>
+          <div class="grid-3">
+            <div class="state-card"><span class="chip amber">Permission</span><strong>Screen recording permission is missing</strong><p>Open macOS Settings and allow Meeting Assistant before starting capture.</p></div>
+            <div class="state-card"><span class="chip red">Dependency</span><strong>Transcription model is missing</strong><p>Set `MEETING_ASSISTANT_TRANSCRIPTION_MODEL` to a local multilingual Whisper-compatible model.</p></div>
+            <div class="state-card"><span class="chip red">Capture</span><strong>Recording stopped with no usable media</strong><p>No artifact was saved. Review capture.log and start a new session.</p></div>
+            <div class="state-card"><span class="chip amber">Degraded</span><strong>System audio was not captured</strong><p>Microphone audio is available. You can process that audio or retry after fixing capture settings.</p></div>
+            <div class="state-card"><span class="chip amber">Speaker fallback</span><strong>Transcript-only mode</strong><p>Speaker labeling engine is unavailable. Transcript text was preserved without verified identities.</p></div>
+            <div class="state-card"><span class="chip red">Export</span><strong>Export path already exists</strong><p>Choose another path or confirm replacement before writing the export file.</p></div>
+            <div class="state-card"><span class="chip red">Delete</span><strong>Session path escaped workspace</strong><p>Deletion was blocked because the resolved path is outside the configured workspace.</p></div>
+            <div class="state-card"><span class="chip green">Done</span><strong>Transcript exported</strong><p>Markdown export created. External use is your manual action.</p></div>
+            <div class="state-card"><span class="chip">Empty</span><strong>No sessions yet</strong><p>Start a native recording or import a local media file to create a session.</p></div>
+          </div>
+          <div class="callout">
+            <div>
+              <strong>Voice rule</strong>
+              <p>按钮和状态命名用明确对象，例如 “Start Native Recording”、“Export Markdown”、“Delete Session”。避免 “OK”、“Confirm” 或不带对象的裸动词。</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="frame-kit" class="artboard" data-frame="Frame 08 · Geist-inspired Design Kit">
+          <div class="artboard-header">
+            <div class="artboard-title">
+              <span class="eyebrow">Design Tokens</span>
+              <h2>参考 Vercel Geist 的克制、高对比、状态优先视觉语言</h2>
+              <p class="muted">这不是照搬品牌，而是把 `design.md` 中的 light theme token 映射到 Meeting Assistant 的本地工具语境：中性背景、清晰边框、6px 控件半径、状态色只用于含义。</p>
+            </div>
+            <span class="chip blue">Vercel design.md</span>
+          </div>
+          <div class="token-grid">
+            <div class="swatch" style="--swatch:#ffffff"><strong>background-100</strong><span>#ffffff</span></div>
+            <div class="swatch" style="--swatch:#fafafa"><strong>background-200</strong><span>#fafafa</span></div>
+            <div class="swatch" style="--swatch:#171717"><strong>gray-1000</strong><span>#171717</span></div>
+            <div class="swatch" style="--swatch:#4d4d4d"><strong>gray-900</strong><span>#4d4d4d</span></div>
+            <div class="swatch" style="--swatch:#006bff"><strong>blue-700</strong><span>#006bff</span></div>
+            <div class="swatch" style="--swatch:#ea001d"><strong>red-800</strong><span>#ea001d</span></div>
+            <div class="swatch" style="--swatch:#fff6de"><strong>amber-100</strong><span>#fff6de</span></div>
+          </div>
+          <div class="grid-3">
+            <div class="panel">
+              <div class="panel-head"><h3>Controls</h3><span class="chip">40px</span></div>
+              <div class="panel-body">
+                <button class="btn primary">Start Native Recording</button>
+                <button class="btn">Run Dependency Check</button>
+                <button class="btn danger">Delete Session</button>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h3>Spacing</h3><span class="chip">4px scale</span></div>
+              <div class="panel-body">
+                <p class="muted">8px 组织组内元素，16px 分隔功能组，32px 到 40px 分隔大段内容。画板本身使用 32px grid，便于像 Figma 一样扫描。</p>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h3>Accessibility</h3><span class="chip green">required</span></div>
+              <div class="panel-body">
+                <p class="muted">每个核心控件必须有 accessible name 和稳定 identifier；焦点态可见；错误和状态变化在持久区域呈现。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="validation" class="section">
+          <div class="section-header">
+            <div class="section-title">
+              <span class="eyebrow">Validation Status</span>
+              <h2>当前验证状态对 UX 文档的影响</h2>
+              <p class="muted">文档中的 UI 画板包含目标体验，但实际完成度必须看验证矩阵。当前 processing CLI 链路证据较多，native review/export/delete UI 仍需要后续纵切补齐。</p>
+            </div>
+            <span class="chip amber">do not overclaim</span>
+          </div>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>能力</th>
+                <th>当前状态</th>
+                <th>本文档呈现方式</th>
+                <th>后续关闭条件</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>预检、录制、处理、导出、删除命令边界</td>
+                <td><span class="chip amber">partial</span></td>
+                <td>作为已定义目标和部分已有证据呈现，不写成全部完成。</td>
+                <td>相关 SwiftUI/XCUITest、native bridge 和真实 capture smoke 纳入标准门禁。</td>
+              </tr>
+              <tr>
+                <td>Transcript 回查 UI</td>
+                <td><span class="chip amber">planned</span></td>
+                <td>作为目标画板和实现规格建议呈现。</td>
+                <td>View model tests、XCUITest locator、时间戳/匿名标签/降级文案测试落地。</td>
+              </tr>
+              <tr>
+                <td>外部 GPT 或本地 Qwen 自动纪要</td>
+                <td><span class="chip">watch decision</span></td>
+                <td>明确写为非 MVP 自动行为，只允许用户主动复制或导出。</td>
+                <td>关闭 `OD-MA-009`，补 API、安全、数据、ADR 和新增 PV 覆盖。</td>
+              </tr>
+              <tr>
+                <td>团队分发、团队账号、共享会议库</td>
+                <td><span class="chip red">out of scope</span></td>
+                <td>作为非目标写入，不在 UI 中设计团队空间或协作入口。</td>
+                <td>用户重新提出团队场景并完成 spec-change。</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="sources" class="section">
+          <div class="section-header">
+            <div class="section-title">
+              <span class="eyebrow">Source Map</span>
+              <h2>事实源和参考资料</h2>
+              <p class="muted">长期产品事实仍由 `docs/product-spec/` 和 `docs/engineering/` 维护。本 HTML 是用于沟通、评审和视觉对齐的派生产物。</p>
+            </div>
+            <span class="chip">appendix</span>
+          </div>
+          <div class="grid-2">
+            <div class="panel">
+              <div class="panel-head"><h3>Project source files</h3><span class="chip green">authoritative</span></div>
+              <div class="panel-body">
+                <ul class="muted">
+                  <li>`docs/product-spec/01-product-scope.md`：目标、能力、非目标和角色。</li>
+                  <li>`docs/product-spec/04-user-journeys-and-ui.md`：用户旅程和交互面边界。</li>
+                  <li>`docs/product-spec/06-api-contracts.md`：本地命令、响应、错误码和外部边界。</li>
+                  <li>`docs/product-spec/07-data-and-events.md`：workspace、metadata、artifact 和删除语义。</li>
+                  <li>`docs/product-spec/12-ui-ux-design.md`：UI 状态、可访问性和 locator 契约。</li>
+                  <li>`docs/engineering/06-product-validation-matrix.md`：当前覆盖状态和缺口。</li>
+                </ul>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h3>External style reference</h3><span class="chip blue">visual only</span></div>
+              <div class="panel-body">
+                <p class="muted">Vercel Geist design system light theme, `https://vercel.com/design.md`：中性高对比界面、4px spacing scale、6px everyday radius、状态色语义、按钮和输入尺寸、错误文案规则。</p>
+                <div class="callout warn">
+                  <div>
+                    <strong>Priority rule</strong>
+                    <p>外部风格只影响视觉表达；产品事实、字段、命令、权限、数据和验收仍以仓库事实源为准。</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
