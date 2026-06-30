@@ -10,4 +10,4 @@
 
 `full-stack-smoke.sh` 是 manifest 注册入口，顺序运行 processing local smoke 和 native bridge smoke。`platform/processing-cli/scripts/test.sh` 仍直接调用 `smoke-test.sh`，避免 processing 组件测试反向依赖 native/Xcode 工具链。
 
-`prepare-smoke-image.sh` 只复用本机已缓存的允许基础镜像并打成本地 smoke tag；它不会在 E2E 执行阶段从外部 registry 拉取镜像。脚本会对 Docker image inspect 做有界重试，以吸收 Docker Desktop image-store 短暂不可用；没有可用缓存时，标准 E2E 应明确失败并提示预加载镜像。
+`prepare-smoke-image.sh` 只复用本机已缓存的允许基础镜像并打成本地 smoke tag；它不会在 E2E 执行阶段从外部 registry 拉取镜像。脚本会在有界窗口内反复扫描 target 和允许的 cached base images，以吸收 Docker Desktop image-store 短暂不可用；没有可用缓存时，标准 E2E 应明确失败并提示预加载镜像。
