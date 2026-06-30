@@ -397,6 +397,103 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         SwiftUIViewSourceContract.assertTranscriptActionViewUsesAccessibleStates()
     }
 
+    func testProcessingStateIsHostedWithBlockedSuccessDegradedAndFailureStates() async {
+        let blockedClient = ProcessingCommandFakeClient()
+        let blockedViewModel = ProcessingStateViewModel(
+            commandClient: blockedClient,
+            readinessState: blockedReadinessState(),
+            defaultSessionID: "session-processing-blocked"
+        )
+        let blockedHost = HostedSwiftUIView(ProcessingStateView(viewModel: blockedViewModel))
+        blockedHost.assertHosted()
+        XCTAssertEqual(blockedViewModel.state.phase, .blocked)
+        XCTAssertFalse(blockedViewModel.canStart)
+
+        await blockedViewModel.start()
+        blockedHost.flush()
+
+        let blockedTranscriptRequests = await blockedClient.transcriptRequestSnapshot()
+        XCTAssertTrue(blockedTranscriptRequests.isEmpty)
+        XCTAssertEqual(
+            blockedViewModel.state.statusText,
+            "Processing is blocked until required dependencies are available."
+        )
+
+        let successClient = ProcessingCommandFakeClient(
+            transcriptScript: .success(
+                transcriptID: "transcript-hosted-processing",
+                artifactID: "artifact-hosted-transcript",
+                segmentCount: 2
+            ),
+            speakerLabelsScript: .success(
+                labelStatus: "labels_available",
+                speakerLabelsArtifactID: "artifact-hosted-speakers"
+            )
+        )
+        let successViewModel = ProcessingStateViewModel(
+            commandClient: successClient,
+            readinessState: readyReadinessState(),
+            defaultSessionID: "session-hosted-processing"
+        )
+        let successHost = HostedSwiftUIView(ProcessingStateView(viewModel: successViewModel))
+
+        await successViewModel.start()
+        successHost.flush()
+
+        XCTAssertEqual(successViewModel.state.phase, .completed)
+        XCTAssertEqual(successViewModel.state.statusText, "Processing complete.")
+        XCTAssertEqual(
+            successViewModel.state.successSummary,
+            "Generated transcript and speaker labels for session session-hosted-processing."
+        )
+
+        let degradedClient = ProcessingCommandFakeClient(
+            transcriptScript: .success(transcriptID: "transcript-hosted-processing"),
+            speakerLabelsScript: .success(
+                labelStatus: "transcript_only",
+                speakerLabelsArtifactID: "artifact-hosted-speakers",
+                degradationReason: "speaker labeling runtime unavailable"
+            )
+        )
+        let degradedViewModel = ProcessingStateViewModel(
+            commandClient: degradedClient,
+            readinessState: readyReadinessState(),
+            defaultSessionID: "session-hosted-processing"
+        )
+        let degradedHost = HostedSwiftUIView(ProcessingStateView(viewModel: degradedViewModel))
+
+        await degradedViewModel.start()
+        degradedHost.flush()
+
+        XCTAssertEqual(degradedViewModel.state.phase, .degraded)
+        XCTAssertEqual(degradedViewModel.state.degradationReason, "speaker labeling runtime unavailable")
+
+        let failureClient = ProcessingCommandFakeClient(
+            transcriptScript: .failure(
+                code: "processing_failed",
+                message: "Transcript adapter failed.",
+                details: ["adapter exited with 5"]
+            )
+        )
+        let failureViewModel = ProcessingStateViewModel(
+            commandClient: failureClient,
+            readinessState: readyReadinessState(),
+            defaultSessionID: "session-hosted-processing"
+        )
+        let failureHost = HostedSwiftUIView(ProcessingStateView(viewModel: failureViewModel))
+
+        await failureViewModel.start()
+        failureHost.flush()
+
+        XCTAssertEqual(failureViewModel.state.phase, .failed)
+        XCTAssertTrue(failureViewModel.canRetry)
+        XCTAssertEqual(failureViewModel.state.errorCode?.rawValue, "processing_failed")
+        XCTAssertEqual(failureViewModel.state.errorMessage, "Transcript adapter failed.")
+
+        assertProcessingLocators()
+        SwiftUIViewSourceContract.assertProcessingViewUsesAccessibleStates()
+    }
+
     func testStopFailureIsHostedWithStableFailureState() async {
         let client = FakeRecordingCommandClient(
             script: .stopFailure(
@@ -431,6 +528,7 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
     func testStableAccessibilityIdentifierContract() {
         assertPermissionDependencyLocators()
         assertRecordingLocators()
+        assertProcessingLocators()
         assertTranscriptLocators()
         assertTranscriptActionLocators()
     }
@@ -574,6 +672,72 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         XCTAssertEqual(
             TranscriptReviewAccessibilityID.missing,
             "ma.transcript.missing",
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertProcessingLocators(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(
+            ProcessingAccessibilityID.heading,
+            "ma.processing.heading",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            ProcessingAccessibilityID.status,
+            "ma.processing.status",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            ProcessingAccessibilityID.startButton,
+            "ma.processing.startButton",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            ProcessingAccessibilityID.retryButton,
+            "ma.processing.retryButton",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            ProcessingAccessibilityID.transcriptStatus,
+            "ma.processing.transcriptStatus",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            ProcessingAccessibilityID.speakerLabelStatus,
+            "ma.processing.speakerLabelStatus",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            ProcessingAccessibilityID.success,
+            "ma.processing.success",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            ProcessingAccessibilityID.error,
+            "ma.processing.error",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            ProcessingAccessibilityID.degradation,
+            "ma.processing.degradation",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            ProcessingAccessibilityID.warnings,
+            "ma.processing.warnings",
             file: file,
             line: line
         )
@@ -758,6 +922,33 @@ private enum SwiftUIViewSourceContract {
                 ".accessibilityIdentifier(TranscriptReviewAccessibilityID.text(segment.id))",
                 ".accessibilityIdentifier(TranscriptReviewAccessibilityID.segmentRow(segment.id))",
                 "Speaker labels unavailable:",
+            ],
+            file: file,
+            line: line
+        )
+    }
+
+    static func assertProcessingViewUsesAccessibleStates(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let source = readSource("ProcessingStateView.swift", file: file, line: line)
+        assertSource(
+            source,
+            contains: [
+                "Text(\"Processing\")",
+                "Button(\"Start Processing\")",
+                "Button(\"Retry Processing\")",
+                ".accessibilityIdentifier(ProcessingAccessibilityID.heading)",
+                ".accessibilityIdentifier(ProcessingAccessibilityID.status)",
+                ".accessibilityIdentifier(ProcessingAccessibilityID.startButton)",
+                ".accessibilityIdentifier(ProcessingAccessibilityID.retryButton)",
+                ".accessibilityIdentifier(ProcessingAccessibilityID.transcriptStatus)",
+                ".accessibilityIdentifier(ProcessingAccessibilityID.speakerLabelStatus)",
+                ".accessibilityIdentifier(ProcessingAccessibilityID.success)",
+                ".accessibilityIdentifier(ProcessingAccessibilityID.error)",
+                ".accessibilityIdentifier(ProcessingAccessibilityID.degradation)",
+                ".accessibilityIdentifier(ProcessingAccessibilityID.warnings)",
             ],
             file: file,
             line: line

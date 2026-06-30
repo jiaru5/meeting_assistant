@@ -19,6 +19,7 @@ struct MeetingAssistantNativeApp: App {
 private struct NativeControlPlaneRootView: View {
     @StateObject private var permissionViewModel: PermissionDependencyStatusViewModel
     @StateObject private var recordingViewModel: RecordingControlViewModel
+    @StateObject private var processingViewModel: ProcessingStateViewModel
     @StateObject private var transcriptActionViewModel: TranscriptReviewActionsViewModel
     private let transcriptViewModel: TranscriptReviewViewModel
 
@@ -39,6 +40,16 @@ private struct NativeControlPlaneRootView: View {
                 readinessState: readinessState,
                 title: "UI smoke recording",
                 captureTarget: .screen
+            )
+        )
+        _processingViewModel = StateObject(
+            wrappedValue: ProcessingStateViewModel(
+                commandClient: ProcessingCommandFakeClient(
+                    transcriptScript: configuration.processingTranscriptScript,
+                    speakerLabelsScript: configuration.processingSpeakerLabelsScript
+                ),
+                readinessState: readinessState,
+                defaultSessionID: configuration.sessionID
             )
         )
         transcriptViewModel = TranscriptReviewViewModel(input: configuration.transcriptInput)
@@ -67,6 +78,10 @@ private struct NativeControlPlaneRootView: View {
                 Divider()
 
                 RecordingControlView(viewModel: recordingViewModel)
+
+                Divider()
+
+                ProcessingStateView(viewModel: processingViewModel)
 
                 Divider()
 
@@ -195,6 +210,8 @@ private struct NativeAppWindowPlacement {
 private struct NativeControlPlaneFixtureConfiguration {
     let dependencyResponse: DependencyCheckResponse
     let recordingScript: FakeRecordingCommandClient.Script
+    let processingTranscriptScript: ProcessingCommandFakeClient.TranscriptScript
+    let processingSpeakerLabelsScript: ProcessingCommandFakeClient.SpeakerLabelsScript
     let sessionID: String
     let transcriptInput: TranscriptReviewInput
     let exportScript: TranscriptActionFakeCommandClient.ExportScript
@@ -224,6 +241,11 @@ private struct NativeControlPlaneFixtureConfiguration {
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .readyFixture,
                 recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(
+                    labelStatus: "transcript_only",
+                    degradationReason: "speaker labels degraded from workspace fixture"
+                ),
                 sessionID: transcriptSessionID,
                 transcriptInput: transcriptInput,
                 exportScript: .success(content: "Workspace transcript content copied from deterministic fixture."),
@@ -242,6 +264,8 @@ private struct NativeControlPlaneFixtureConfiguration {
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .readyFixture,
                 recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
                 sessionID: "session-app-ui-smoke",
                 transcriptInput: .missingFixture,
                 exportScript: .success(content: "Ready fixture transcript content."),
@@ -256,6 +280,8 @@ private struct NativeControlPlaneFixtureConfiguration {
                     code: "permission_denied",
                     message: "Screen Recording permission is missing."
                 ),
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
                 sessionID: "session-app-ui-start-failure",
                 transcriptInput: .missingFixture,
                 exportScript: .success(content: "Start failure fixture transcript content."),
@@ -270,6 +296,8 @@ private struct NativeControlPlaneFixtureConfiguration {
                     code: "capture_failed",
                     message: "Recording could not be saved."
                 ),
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
                 sessionID: "session-app-ui-stop-failure",
                 transcriptInput: .missingFixture,
                 exportScript: .success(content: "Stop failure fixture transcript content."),
@@ -281,6 +309,8 @@ private struct NativeControlPlaneFixtureConfiguration {
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .readyFixture,
                 recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
                 sessionID: "session-app-ui-transcript",
                 transcriptInput: .reviewFixture,
                 exportScript: .success(content: "Transcript Review Fixture copy content."),
@@ -292,6 +322,8 @@ private struct NativeControlPlaneFixtureConfiguration {
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .readyFixture,
                 recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
                 sessionID: "session-app-ui-empty-transcript",
                 transcriptInput: .emptyFixture,
                 exportScript: .success(content: "Empty transcript fixture copy content."),
@@ -303,6 +335,11 @@ private struct NativeControlPlaneFixtureConfiguration {
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .readyFixture,
                 recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(
+                    labelStatus: "transcript_only",
+                    degradationReason: "speaker labeling runtime unavailable"
+                ),
                 sessionID: "session-app-ui-transcript-only",
                 transcriptInput: .transcriptOnlyFixture,
                 exportScript: .success(content: "Transcript-only fixture copy content."),
@@ -314,6 +351,8 @@ private struct NativeControlPlaneFixtureConfiguration {
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .readyFixture,
                 recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
                 sessionID: "session-app-ui-transcript",
                 transcriptInput: .reviewFixture,
                 exportScript: .success(content: "Copy fixture transcript content."),
@@ -325,6 +364,8 @@ private struct NativeControlPlaneFixtureConfiguration {
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .readyFixture,
                 recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
                 sessionID: "session-app-ui-transcript",
                 transcriptInput: .reviewFixture,
                 exportScript: .failure(
@@ -339,6 +380,8 @@ private struct NativeControlPlaneFixtureConfiguration {
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .readyFixture,
                 recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
                 sessionID: "session-app-ui-transcript",
                 transcriptInput: .reviewFixture,
                 exportScript: .success(exportPackageID: "export-package-app-fixture"),
@@ -350,6 +393,8 @@ private struct NativeControlPlaneFixtureConfiguration {
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .readyFixture,
                 recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
                 sessionID: "session-app-ui-transcript",
                 transcriptInput: .reviewFixture,
                 exportScript: .success(exportPackageID: "export-package-app-fixture"),
@@ -361,6 +406,8 @@ private struct NativeControlPlaneFixtureConfiguration {
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .readyFixture,
                 recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
                 sessionID: "session-app-ui-transcript",
                 transcriptInput: .reviewFixture,
                 exportScript: .failure(
@@ -375,6 +422,8 @@ private struct NativeControlPlaneFixtureConfiguration {
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .readyFixture,
                 recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
                 sessionID: "session-app-ui-transcript",
                 transcriptInput: .reviewFixture,
                 exportScript: .success(content: "Delete success fixture copy content."),
@@ -393,6 +442,8 @@ private struct NativeControlPlaneFixtureConfiguration {
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .readyFixture,
                 recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
                 sessionID: "session-app-ui-transcript",
                 transcriptInput: .reviewFixture,
                 exportScript: .success(content: "Delete failure fixture copy content."),
@@ -403,10 +454,69 @@ private struct NativeControlPlaneFixtureConfiguration {
                 exportDestinationPath: "/tmp/delete-failure.md",
                 workspaceDir: nil
             )
+        case "processing-success":
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .readyFixture,
+                recordingScript: .success,
+                processingTranscriptScript: .success(
+                    transcriptID: "transcript-app-processing",
+                    artifactID: "artifact-app-transcript",
+                    segmentCount: 2
+                ),
+                processingSpeakerLabelsScript: .success(
+                    labelStatus: "labels_available",
+                    speakerLabelsArtifactID: "artifact-app-speakers"
+                ),
+                sessionID: "session-app-ui-processing",
+                transcriptInput: .missingFixture,
+                exportScript: .success(content: "Processing success fixture copy content."),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/processing-success.md",
+                workspaceDir: nil
+            )
+        case "processing-transcript-only":
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .readyFixture,
+                recordingScript: .success,
+                processingTranscriptScript: .success(
+                    transcriptID: "transcript-app-processing",
+                    artifactID: "artifact-app-transcript",
+                    segmentCount: 1
+                ),
+                processingSpeakerLabelsScript: .success(
+                    labelStatus: "transcript_only",
+                    speakerLabelsArtifactID: "artifact-app-speakers",
+                    degradationReason: "speaker labeling runtime unavailable"
+                ),
+                sessionID: "session-app-ui-processing",
+                transcriptInput: .missingFixture,
+                exportScript: .success(content: "Processing transcript-only fixture copy content."),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/processing-transcript-only.md",
+                workspaceDir: nil
+            )
+        case "processing-failure":
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .readyFixture,
+                recordingScript: .success,
+                processingTranscriptScript: .failure(
+                    code: "processing_failed",
+                    message: "Transcript adapter failed."
+                ),
+                processingSpeakerLabelsScript: .success(),
+                sessionID: "session-app-ui-processing",
+                transcriptInput: .missingFixture,
+                exportScript: .success(content: "Processing failure fixture copy content."),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/processing-failure.md",
+                workspaceDir: nil
+            )
         default:
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .blockedFixture,
                 recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
                 sessionID: "session-app-ui-blocked",
                 transcriptInput: .missingFixture,
                 exportScript: .success(content: "Blocked fixture transcript content."),

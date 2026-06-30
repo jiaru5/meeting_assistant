@@ -44,6 +44,15 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         XCTAssertFalse(button("ma.recording.startButton", in: app).isEnabled)
         XCTAssertTrue(button("ma.recording.stopButton", in: app).exists)
         XCTAssertFalse(button("ma.recording.stopButton", in: app).isEnabled)
+        assertElement(
+            "ma.processing.status",
+            in: app,
+            contains: "Processing is blocked until required dependencies are available."
+        )
+        XCTAssertTrue(button("ma.processing.startButton", in: app).exists)
+        XCTAssertFalse(button("ma.processing.startButton", in: app).isEnabled)
+        XCTAssertTrue(button("ma.processing.retryButton", in: app).exists)
+        XCTAssertFalse(button("ma.processing.retryButton", in: app).isEnabled)
     }
 
     func testReadyFixtureStartsAndStopsFakeRecordingFromLaunchedAppBundle() {
@@ -210,6 +219,62 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         assertElement("ma.transcriptAction.error", in: failureApp, contains: "path_conflict")
     }
 
+    func testProcessingSuccessAndTranscriptOnlyDegradationFromLaunchedAppBundle() {
+        let successApp = launchApp(fixture: "processing-success")
+
+        tapProcessingButton("ma.processing.startButton", in: successApp)
+
+        assertElement("ma.processing.status", in: successApp, contains: "Processing complete.")
+        assertElement(
+            "ma.processing.transcriptStatus",
+            in: successApp,
+            contains: "Transcript transcript-app-processing generated with 2 segments."
+        )
+        assertElement(
+            "ma.processing.speakerLabelStatus",
+            in: successApp,
+            contains: "Speaker labels artifact artifact-app-speakers is available."
+        )
+        assertElement(
+            "ma.processing.success",
+            in: successApp,
+            contains: "Generated transcript and speaker labels for session session-app-ui-processing."
+        )
+        assertDoesNotExist("ma.processing.error", in: successApp)
+
+        let degradedApp = launchApp(fixture: "processing-transcript-only")
+
+        tapProcessingButton("ma.processing.startButton", in: degradedApp)
+
+        assertElement(
+            "ma.processing.status",
+            in: degradedApp,
+            contains: "Processing completed with transcript-only speaker labels."
+        )
+        assertElement(
+            "ma.processing.degradation",
+            in: degradedApp,
+            contains: "speaker labeling runtime unavailable"
+        )
+        assertDoesNotExist("ma.processing.error", in: degradedApp)
+    }
+
+    func testProcessingFailureKeepsRetryAvailableFromLaunchedAppBundle() {
+        let app = launchApp(fixture: "processing-failure")
+
+        tapProcessingButton("ma.processing.startButton", in: app)
+
+        assertElement("ma.processing.status", in: app, contains: "Processing failed.")
+        assertElement("ma.processing.error", in: app, contains: "Transcript adapter failed.")
+        assertElement("ma.processing.error", in: app, contains: "processing_failed")
+        XCTAssertTrue(button("ma.processing.retryButton", in: app).isEnabled)
+
+        tapProcessingButton("ma.processing.retryButton", in: app)
+
+        assertElement("ma.processing.status", in: app, contains: "Processing failed.")
+        assertElement("ma.processing.error", in: app, contains: "Transcript adapter failed.")
+    }
+
     private func launchApp(
         fixture: String? = nil,
         workspaceURL: URL? = nil,
@@ -348,18 +413,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        XCTAssertTrue(
-            app.wait(for: .runningForeground, timeout: 10),
-            "Expected app to be foreground before tapping \(identifier).",
-            file: file,
-            line: line
-        )
-        XCTAssertTrue(
-            appWindow(in: app).waitForExistence(timeout: 5),
-            "Expected app window before tapping \(identifier).",
-            file: file,
-            line: line
-        )
+        bringAppToForeground(app, beforeTapping: identifier, file: file, line: line)
         let control = button(identifier, in: app)
         waitForHittable(control, file: file, line: line)
         control.click()
@@ -393,12 +447,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        XCTAssertTrue(
-            app.wait(for: .runningForeground, timeout: 10),
-            "Expected app to be foreground before tapping \(identifier).",
-            file: file,
-            line: line
-        )
+        bringAppToForeground(app, beforeTapping: identifier, file: file, line: line)
         var control = button(identifier, in: app)
         if !control.isHittable {
             scrollTowardTranscriptActions(in: app, targetIdentifier: identifier)
@@ -408,22 +457,74 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         control.click()
     }
 
+    private func tapProcessingButton(
+        _ identifier: String,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        bringAppToForeground(app, beforeTapping: identifier, file: file, line: line)
+        var control = button(identifier, in: app)
+        if !control.isHittable {
+            scrollTowardButton(in: app, targetIdentifier: identifier)
+            control = button(identifier, in: app)
+        }
+        waitForHittable(control, file: file, line: line)
+        control.click()
+    }
+
+    private func bringAppToForeground(
+        _ app: XCUIApplication,
+        beforeTapping identifier: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        if app.state != .runningForeground {
+            app.activate()
+        }
+        XCTAssertTrue(
+            app.wait(for: .runningForeground, timeout: 10),
+            "Expected app to be foreground before tapping \(identifier).",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            appWindow(in: app).waitForExistence(timeout: 5),
+            "Expected app window before tapping \(identifier).",
+            file: file,
+            line: line
+        )
+    }
+
     private func scrollTowardTranscriptActions(
         in app: XCUIApplication,
         targetIdentifier: String
     ) {
-        let scrollView = app.scrollViews.firstMatch
+        scrollTowardButton(in: app, targetIdentifier: targetIdentifier)
+    }
+
+    private func scrollTowardButton(
+        in app: XCUIApplication,
+        targetIdentifier: String
+    ) {
+        let scrollView = app.scrollViews
+            .containing(.button, identifier: targetIdentifier)
+            .firstMatch
         guard scrollView.exists else {
             return
         }
 
-        for _ in 0..<5 {
+        for _ in 0..<8 {
             let element = app
                 .descendants(matching: .button)
                 .matching(identifier: targetIdentifier)
                 .firstMatch
             if element.exists && element.isHittable {
                 return
+            }
+            if app.state != .runningForeground {
+                app.activate()
+                _ = app.wait(for: .runningForeground, timeout: 5)
             }
             scrollView.swipeUp()
         }
