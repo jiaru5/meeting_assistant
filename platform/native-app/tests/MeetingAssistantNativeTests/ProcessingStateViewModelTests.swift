@@ -87,7 +87,7 @@ struct ProcessingStateViewModelTests {
                 warnings: ["transcript warning"]
             ),
             speakerLabelsScript: .success(
-                labelStatus: "labels_available",
+                labelStatus: "labeled",
                 speakerLabelsArtifactID: "artifact-speakers-processing",
                 warnings: ["speaker warning"]
             )

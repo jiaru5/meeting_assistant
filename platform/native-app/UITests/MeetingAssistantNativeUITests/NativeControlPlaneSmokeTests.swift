@@ -426,7 +426,7 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
                 segmentCount: 2
             ),
             speakerLabelsScript: .success(
-                labelStatus: "labels_available",
+                labelStatus: "labeled",
                 speakerLabelsArtifactID: "artifact-hosted-speakers"
             )
         )

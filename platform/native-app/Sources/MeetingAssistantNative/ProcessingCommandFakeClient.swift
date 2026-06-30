@@ -18,7 +18,7 @@ public actor ProcessingCommandFakeClient: ProcessingCommandClient {
 
     public enum SpeakerLabelsScript: Equatable, Sendable {
         case success(
-            labelStatus: String = "labels_available",
+            labelStatus: String = "labeled",
             speakerLabelsArtifactID: String? = "artifact-speaker-labels-fake",
             degradationReason: String? = nil,
             warnings: [String] = []

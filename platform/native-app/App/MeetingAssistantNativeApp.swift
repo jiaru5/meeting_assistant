@@ -464,7 +464,7 @@ private struct NativeControlPlaneFixtureConfiguration {
                     segmentCount: 2
                 ),
                 processingSpeakerLabelsScript: .success(
-                    labelStatus: "labels_available",
+                    labelStatus: "labeled",
                     speakerLabelsArtifactID: "artifact-app-speakers"
                 ),
                 sessionID: "session-app-ui-processing",
