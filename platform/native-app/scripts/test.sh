@@ -11,24 +11,28 @@ from pathlib import Path
 metadata = json.loads(Path("component.json").read_text(encoding="utf-8"))
 if metadata.get("kind") != "project-component":
     raise SystemExit("native-app test failed: component kind must be project-component")
-if metadata.get("business_behavior") != "permission_dependency_status_fake_recording_transcript_review_and_actions":
-    raise SystemExit("native-app test failed: business behavior must be permission_dependency_status_fake_recording_transcript_review_and_actions")
+if metadata.get("business_behavior") != "permission_dependency_status_fake_recording_processing_state_transcript_review_and_actions":
+    raise SystemExit("native-app test failed: business behavior must be permission_dependency_status_fake_recording_processing_state_transcript_review_and_actions")
 if metadata.get("allowed_before_project_mode") is not False:
     raise SystemExit("native-app test failed: project component cannot be allowed before project mode")
 if "read_only_workspace_transcript_loading" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app test failed: missing read-only workspace transcript loading capability")
 if "fake_transcript_action_command_client" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app test failed: missing fake transcript action capability")
+if "processing_command_consumer" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app test failed: missing processing command consumer capability")
 
 architecture = Path("tests/ArchitectureTest.md").read_text(encoding="utf-8")
 required_phrases = (
     "Component: `native-app`",
     "VS-MA-12 boundary",
     "VS-MA-13 fake recording boundary",
+    "VS-MA-16 native processing state consumer boundary",
     "VS-MA-17 read-only transcript review boundary",
     "read-only workspace transcript loading boundary",
     "VS-MA-18/VS-MA-19 deterministic transcript action consumer boundary",
     "ma.transcriptAction.*",
+    "ma.processing.*",
     "check_dependencies",
     "session.json",
     "transcript.json",
@@ -59,10 +63,16 @@ required_paths = (
     Path("Sources/MeetingAssistantNative/TranscriptActionFakeCommandClient.swift"),
     Path("Sources/MeetingAssistantNative/TranscriptReviewActionsViewModel.swift"),
     Path("Sources/MeetingAssistantNative/TranscriptReviewActionsView.swift"),
+    Path("Sources/MeetingAssistantNative/ProcessingCommandClient.swift"),
+    Path("Sources/MeetingAssistantNative/ProcessingCommandProcessRunner.swift"),
+    Path("Sources/MeetingAssistantNative/ProcessingCommandFakeClient.swift"),
+    Path("Sources/MeetingAssistantNative/ProcessingStateViewModel.swift"),
+    Path("Sources/MeetingAssistantNative/ProcessingStateView.swift"),
     Path("tests/MeetingAssistantNativeTests/PermissionDependencyStatusViewModelTests.swift"),
     Path("tests/MeetingAssistantNativeTests/RecordingControlViewModelTests.swift"),
     Path("tests/MeetingAssistantNativeTests/TranscriptReviewViewModelTests.swift"),
     Path("tests/MeetingAssistantNativeTests/TranscriptReviewActionsViewModelTests.swift"),
+    Path("tests/MeetingAssistantNativeTests/ProcessingStateViewModelTests.swift"),
     Path("UITests/MeetingAssistantNativeUITests/NativeControlPlaneSmokeTests.swift"),
     Path("UITests/MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests.swift"),
 )

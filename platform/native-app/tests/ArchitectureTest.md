@@ -15,6 +15,14 @@ VS-MA-13 fake recording boundary:
 3. It may expose stable recording accessibility identifiers for status, start, stop, error and saved-summary regions.
 4. It must not implement real capture, ScreenCaptureKit, AVCapture, audio capture, transcription, speaker labeling, external model calls, public normalize audio commands or dependency downloads.
 
+VS-MA-16 native processing state consumer boundary:
+
+1. This component may express `generate_transcript` and `generate_speaker_labels` through Swift command request/response models, a production `Process` runner, deterministic fake client, processing state view model and SwiftUI status view.
+2. The production runner may call only public command names and frozen flags from `06-api-contracts.md`, and must parse stdout JSON as the only product contract source.
+3. The native processing consumer may validate frozen response fields and display idle, blocked, generating transcript, generating speaker labels, completed, degraded and failed states.
+4. It may expose stable `ma.processing.*` accessibility identifiers for heading, status, start, retry, transcript status, speaker-label status, success, error, degradation and warnings.
+5. It must not read `processing-cli` provider internals, add command fields, add `--format`, mutate artifacts directly, implement real capture, call external GPT/Qwen/API, automatically download dependencies, use real pasteboard, show a real file picker or delete files directly.
+
 VS-MA-17 read-only transcript review boundary:
 
 1. This component may implement a read-only transcript review consumer for deterministic UI/state verification.

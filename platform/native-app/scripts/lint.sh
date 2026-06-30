@@ -36,10 +36,16 @@ required = [
     "Sources/MeetingAssistantNative/TranscriptActionFakeCommandClient.swift",
     "Sources/MeetingAssistantNative/TranscriptReviewActionsViewModel.swift",
     "Sources/MeetingAssistantNative/TranscriptReviewActionsView.swift",
+    "Sources/MeetingAssistantNative/ProcessingCommandClient.swift",
+    "Sources/MeetingAssistantNative/ProcessingCommandProcessRunner.swift",
+    "Sources/MeetingAssistantNative/ProcessingCommandFakeClient.swift",
+    "Sources/MeetingAssistantNative/ProcessingStateViewModel.swift",
+    "Sources/MeetingAssistantNative/ProcessingStateView.swift",
     "tests/MeetingAssistantNativeTests/PermissionDependencyStatusViewModelTests.swift",
     "tests/MeetingAssistantNativeTests/RecordingControlViewModelTests.swift",
     "tests/MeetingAssistantNativeTests/TranscriptReviewViewModelTests.swift",
     "tests/MeetingAssistantNativeTests/TranscriptReviewActionsViewModelTests.swift",
+    "tests/MeetingAssistantNativeTests/ProcessingStateViewModelTests.swift",
     "UITests/MeetingAssistantNativeUITests/NativeControlPlaneSmokeTests.swift",
     "UITests/MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests.swift",
     "sbom/native-app.cdx.json",
@@ -53,13 +59,15 @@ if metadata.get("id") != "native-app":
     raise SystemExit("native-app lint failed: component id mismatch")
 if metadata.get("kind") != "project-component":
     raise SystemExit("native-app lint failed: component kind must be project-component")
-expected_behavior = "permission_dependency_status_fake_recording_transcript_review_and_actions"
+expected_behavior = "permission_dependency_status_fake_recording_processing_state_transcript_review_and_actions"
 if metadata.get("business_behavior") != expected_behavior:
     raise SystemExit(f"native-app lint failed: business behavior must be {expected_behavior}")
 if "read_only_workspace_transcript_loading" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app lint failed: missing read-only workspace transcript loading capability")
 if "fake_transcript_action_command_client" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app lint failed: missing fake transcript action capability")
+if "processing_command_consumer" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app lint failed: missing processing command consumer capability")
 
 project = (root / "MeetingAssistantNative.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
 required_project_snippets = [
@@ -75,6 +83,11 @@ required_project_snippets = [
     "TranscriptActionFakeCommandClient.swift",
     "TranscriptReviewActionsViewModel.swift",
     "TranscriptReviewActionsView.swift",
+    "ProcessingCommandClient.swift",
+    "ProcessingCommandProcessRunner.swift",
+    "ProcessingCommandFakeClient.swift",
+    "ProcessingStateViewModel.swift",
+    "ProcessingStateView.swift",
 ]
 missing_project_snippets = [snippet for snippet in required_project_snippets if snippet not in project]
 if missing_project_snippets:
