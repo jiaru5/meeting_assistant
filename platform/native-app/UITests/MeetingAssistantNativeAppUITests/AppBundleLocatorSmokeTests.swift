@@ -10,6 +10,9 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
 
     override func tearDown() {
         launchedApp?.terminate()
+        if let launchedApp {
+            _ = launchedApp.wait(for: .notRunning, timeout: 5)
+        }
         launchedApp = nil
     }
 
@@ -46,19 +49,11 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         let app = launchApp(fixture: "ready")
 
         assertElement("ma.permissionDependency.summary", in: app, contains: "Permissions and required dependencies are ready.")
-        let startButton = button("ma.recording.startButton", in: app)
-        waitForEnabled(startButton)
-        app.activate()
-        dismissSpotlightIfPresent()
-        startButton.click()
+        tapButton("ma.recording.startButton", in: app)
 
         assertElement("ma.recording.status", in: app, contains: "Recording in progress.")
         assertElement("ma.recording.sessionID", in: app, contains: "session-app-ui-smoke")
-        let stopButton = button("ma.recording.stopButton", in: app)
-        waitForEnabled(stopButton)
-        app.activate()
-        dismissSpotlightIfPresent()
-        stopButton.click()
+        tapButton("ma.recording.stopButton", in: app)
 
         assertElement("ma.recording.status", in: app, contains: "Recording saved.")
         assertElement("ma.recording.savedSummary", in: app, contains: "Saved 2 recording artifacts.")
@@ -67,11 +62,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
     func testStartFailureFixtureShowsStableErrorLocatorFromLaunchedAppBundle() {
         let app = launchApp(fixture: "start-failure")
 
-        let startButton = button("ma.recording.startButton", in: app)
-        waitForEnabled(startButton)
-        app.activate()
-        dismissSpotlightIfPresent()
-        startButton.click()
+        tapButton("ma.recording.startButton", in: app)
 
         assertElement("ma.recording.status", in: app, contains: "Recording failed.")
         assertElement("ma.recording.error", in: app, contains: "Screen Recording permission is missing.")
@@ -137,6 +128,8 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             app.launchEnvironment["MA_NATIVE_TRANSCRIPT_WORKSPACE"] = workspaceURL.path
             app.launchEnvironment["MA_NATIVE_TRANSCRIPT_SESSION_ID"] = sessionID
         }
+        app.terminate()
+        _ = app.wait(for: .notRunning, timeout: 5)
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10), "Expected app bundle to run foreground.")
         XCTAssertTrue(appWindow(in: app).waitForExistence(timeout: 5), "Expected app bundle window to exist.")
@@ -153,7 +146,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
     }
 
     private func button(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
-        let element = appWindow(in: app)
+        let element = app
             .descendants(matching: .button)
             .matching(identifier: identifier)
             .firstMatch
@@ -162,7 +155,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
     }
 
     private func element(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
-        let element = appWindow(in: app)
+        let element = app
             .descendants(matching: .any)
             .matching(identifier: identifier)
             .firstMatch
@@ -213,11 +206,34 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let element = appWindow(in: app)
+        let element = app
             .descendants(matching: .any)
             .matching(identifier: identifier)
             .firstMatch
         XCTAssertFalse(element.waitForExistence(timeout: 1), "Expected element \(identifier) not to exist.", file: file, line: line)
+    }
+
+    private func tapButton(
+        _ identifier: String,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertTrue(
+            app.wait(for: .runningForeground, timeout: 10),
+            "Expected app to be foreground before tapping \(identifier).",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            appWindow(in: app).waitForExistence(timeout: 5),
+            "Expected app window before tapping \(identifier).",
+            file: file,
+            line: line
+        )
+        let control = button(identifier, in: app)
+        waitForHittable(control, file: file, line: line)
+        control.click()
     }
 
     private func waitForEnabled(
@@ -229,6 +245,17 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         let result = XCTWaiter.wait(for: [expectation], timeout: 5)
         XCTAssertEqual(result, .completed, "Expected \(element) to become enabled.", file: file, line: line)
+    }
+
+    private func waitForHittable(
+        _ element: XCUIElement,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let predicate = NSPredicate(format: "exists == true AND enabled == true AND hittable == true")
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        let result = XCTWaiter.wait(for: [expectation], timeout: 10)
+        XCTAssertEqual(result, .completed, "Expected \(element) to become hittable.", file: file, line: line)
     }
 
     private func createWorkspaceTranscriptOnlyFixture() throws -> (workspaceURL: URL, sessionID: String) {

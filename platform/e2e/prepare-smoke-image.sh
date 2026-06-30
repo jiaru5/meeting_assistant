@@ -2,12 +2,24 @@
 set -euo pipefail
 
 target_image="${MEETING_ASSISTANT_SMOKE_IMAGE:-meeting-assistant-smoke:local}"
+image_probe_attempts="${MEETING_ASSISTANT_SMOKE_IMAGE_PROBE_ATTEMPTS:-15}"
+
+case "$image_probe_attempts" in
+  *[!0-9]*|"")
+    echo "prepare-smoke-image failed: MEETING_ASSISTANT_SMOKE_IMAGE_PROBE_ATTEMPTS must be a positive integer." >&2
+    exit 2
+    ;;
+  0)
+    echo "prepare-smoke-image failed: MEETING_ASSISTANT_SMOKE_IMAGE_PROBE_ATTEMPTS must be greater than zero." >&2
+    exit 2
+    ;;
+esac
 
 image_exists() {
   local image="$1"
   local attempt
 
-  for attempt in 1 2 3; do
+  for ((attempt = 1; attempt <= image_probe_attempts; attempt += 1)); do
     if docker image inspect "$image" >/dev/null 2>&1; then
       return 0
     fi
