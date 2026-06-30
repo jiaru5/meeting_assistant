@@ -28,4 +28,12 @@
 4. `TranscriptReviewView` 暴露 `ma.transcript.*` accessibility identifier，供 Swift Testing 和 XCUITest 稳定断言。
 5. `MeetingAssistantNativeApp` 通过 deterministic `MA_NATIVE_APP_SMOKE_FIXTURE=transcript-review|transcript-empty` fixture、`MA_NATIVE_TRANSCRIPT_WORKSPACE` + `MA_NATIVE_TRANSCRIPT_SESSION_ID` 临时 workspace fixture，以及测试专用 `MA_NATIVE_APP_TEST_DISPLAY` 窗口定位 env 验证 app-bundle locator，不调用真实 CLI、helper、capture、runtime、provider、网络或下载。
 
-当前目录仍不得实现真实录制、屏幕捕获、系统音频捕获、麦克风捕获、转写、speaker labeling、外部模型调用、公开 `normalize_audio` 命令、复制/导出 transcript、删除会话或自动依赖下载。VS-MA-13 fake recording 和 app-bundle locator smoke 证据只能用于 `PV-MA-001`、`PV-MA-002`、`PV-MA-005` 的 partial 状态，不能替代 VS-MA-14 的真实 native capture、真实 macOS 权限负向用例或真实 runtime/model smoke。VS-MA-17 read-only transcript review 证据只能证明 native UI 可消费确定性 transcript/speaker label fixture 并显示回查状态，不能替代真实 processing runtime、copy/export 或 delete_session 证据。
+当前已实现 VS-MA-18/VS-MA-19 deterministic native action consumer 边界：
+
+1. `TranscriptActionCommandClient` 只表达已冻结的 `export_transcript` 和 `delete_session` 调用模型；copy 使用 `export_type=plain_text` 且 `target_path=nil`，export 使用注入的目标路径，delete 使用 `confirm=true`。
+2. `TranscriptActionFakeCommandClient` 只返回 deterministic fake response，并记录请求用于测试断言；不调用 `processing-cli`、helper、provider、网络 API、外部 GPT/Qwen/API、真实 clipboard、真实文件 picker 或直接删除文件。
+3. `TranscriptReviewActionsViewModel` 覆盖用户主动触发的 copying、exporting、delete confirmation、deleting、success、failure、cancel 状态；copy 只在成功 content 返回后写入注入 clipboard；export cancel/no destination 不发命令；delete cancel 不发命令；delete failure summary 保持可见。
+4. `TranscriptReviewActionsView` 暴露 `ma.transcriptAction.*` accessibility identifier，覆盖 copy/export/delete 按钮、状态、成功、失败、delete prompt、confirm 和 cancel。
+5. `MeetingAssistantNativeApp` 通过 deterministic `MA_NATIVE_APP_SMOKE_FIXTURE=transcript-action-*` fixture 验证 app-bundle locator 和用户触发状态，不调用真实 CLI、helper、capture、runtime、provider、网络、下载、真实 pasteboard 或真实文件删除。
+
+当前目录仍不得实现真实录制、屏幕捕获、系统音频捕获、麦克风捕获、转写、speaker labeling、外部模型调用、公开 `normalize_audio` 命令、真实 clipboard mutation、真实导出目标 picker、直接文件删除或自动依赖下载。VS-MA-13 fake recording 和 app-bundle locator smoke 证据只能用于 `PV-MA-001`、`PV-MA-002`、`PV-MA-005` 的 partial 状态，不能替代 VS-MA-14 的真实 native capture、真实 macOS 权限负向用例或真实 runtime/model smoke。VS-MA-17 read-only transcript review 证据只能证明 native UI 可消费确定性 transcript/speaker label fixture 并显示回查状态，不能替代真实 processing runtime。VS-MA-18/VS-MA-19 native action 证据只能证明 deterministic native consumer UI、fake command boundary、injected clipboard/destination 和确认/取消状态，不证明 processing provider、真实 pasteboard、真实文件 picker 或真实删除执行。

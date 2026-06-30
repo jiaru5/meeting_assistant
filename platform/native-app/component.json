@@ -2,7 +2,7 @@
   "id": "native-app",
   "kind": "project-component",
   "scope": "platform",
-  "business_behavior": "permission_dependency_status_fake_recording_and_transcript_review",
+  "business_behavior": "permission_dependency_status_fake_recording_transcript_review_and_actions",
   "allowed_before_project_mode": false,
   "planned_runtime": "Swift/SwiftUI native control surface",
   "allowed_capabilities": [
@@ -11,7 +11,9 @@
     "fake_recording_state_machine",
     "fake_recording_control_view",
     "read_only_transcript_review_view",
-    "read_only_workspace_transcript_loading"
+    "read_only_workspace_transcript_loading",
+    "fake_transcript_action_command_client",
+    "transcript_copy_export_delete_action_view"
   ],
   "forbidden_capabilities": [
     "real_recording",
@@ -22,8 +24,8 @@
     "external_model_api",
     "automatic_downloads",
     "public_normalize_audio_command",
-    "copy_transcript",
-    "export_transcript",
-    "delete_session"
+    "real_clipboard_mutation",
+    "real_export_destination_picker",
+    "direct_file_delete"
   ]
 }

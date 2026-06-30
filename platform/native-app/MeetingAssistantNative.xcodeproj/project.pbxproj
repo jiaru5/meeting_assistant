@@ -21,6 +21,10 @@
 		C00000000000000000000012 /* TranscriptReviewViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000014 /* TranscriptReviewViewModel.swift */; };
 		C00000000000000000000013 /* TranscriptReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000015 /* TranscriptReviewView.swift */; };
 		C00000000000000000000014 /* TranscriptReviewWorkspaceLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000016 /* TranscriptReviewWorkspaceLoader.swift */; };
+		C00000000000000000000015 /* TranscriptActionCommandClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000017 /* TranscriptActionCommandClient.swift */; };
+		C00000000000000000000016 /* TranscriptActionFakeCommandClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000018 /* TranscriptActionFakeCommandClient.swift */; };
+		C00000000000000000000017 /* TranscriptReviewActionsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000019 /* TranscriptReviewActionsViewModel.swift */; };
+		C00000000000000000000018 /* TranscriptReviewActionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000020 /* TranscriptReviewActionsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -50,6 +54,10 @@
 		B00000000000000000000014 /* TranscriptReviewViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptReviewViewModel.swift; sourceTree = "<group>"; };
 		B00000000000000000000015 /* TranscriptReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptReviewView.swift; sourceTree = "<group>"; };
 		B00000000000000000000016 /* TranscriptReviewWorkspaceLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptReviewWorkspaceLoader.swift; sourceTree = "<group>"; };
+		B00000000000000000000017 /* TranscriptActionCommandClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptActionCommandClient.swift; sourceTree = "<group>"; };
+		B00000000000000000000018 /* TranscriptActionFakeCommandClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptActionFakeCommandClient.swift; sourceTree = "<group>"; };
+		B00000000000000000000019 /* TranscriptReviewActionsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptReviewActionsViewModel.swift; sourceTree = "<group>"; };
+		B00000000000000000000020 /* TranscriptReviewActionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptReviewActionsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -112,6 +120,10 @@
 				B00000000000000000000016 /* TranscriptReviewWorkspaceLoader.swift */,
 				B00000000000000000000014 /* TranscriptReviewViewModel.swift */,
 				B00000000000000000000015 /* TranscriptReviewView.swift */,
+				B00000000000000000000017 /* TranscriptActionCommandClient.swift */,
+				B00000000000000000000018 /* TranscriptActionFakeCommandClient.swift */,
+				B00000000000000000000019 /* TranscriptReviewActionsViewModel.swift */,
+				B00000000000000000000020 /* TranscriptReviewActionsView.swift */,
 			);
 			path = Sources/MeetingAssistantNative;
 			sourceTree = "<group>";
@@ -243,6 +255,10 @@
 				C00000000000000000000014 /* TranscriptReviewWorkspaceLoader.swift in Sources */,
 				C00000000000000000000012 /* TranscriptReviewViewModel.swift in Sources */,
 				C00000000000000000000013 /* TranscriptReviewView.swift in Sources */,
+				C00000000000000000000015 /* TranscriptActionCommandClient.swift in Sources */,
+				C00000000000000000000016 /* TranscriptActionFakeCommandClient.swift in Sources */,
+				C00000000000000000000017 /* TranscriptReviewActionsViewModel.swift in Sources */,
+				C00000000000000000000018 /* TranscriptReviewActionsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

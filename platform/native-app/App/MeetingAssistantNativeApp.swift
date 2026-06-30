@@ -19,6 +19,7 @@ struct MeetingAssistantNativeApp: App {
 private struct NativeControlPlaneRootView: View {
     @StateObject private var permissionViewModel: PermissionDependencyStatusViewModel
     @StateObject private var recordingViewModel: RecordingControlViewModel
+    @StateObject private var transcriptActionViewModel: TranscriptReviewActionsViewModel
     private let transcriptViewModel: TranscriptReviewViewModel
 
     init(configuration: NativeControlPlaneFixtureConfiguration) {
@@ -41,6 +42,20 @@ private struct NativeControlPlaneRootView: View {
             )
         )
         transcriptViewModel = TranscriptReviewViewModel(input: configuration.transcriptInput)
+        _transcriptActionViewModel = StateObject(
+            wrappedValue: TranscriptReviewActionsViewModel(
+                input: configuration.transcriptInput,
+                commandClient: TranscriptActionFakeCommandClient(
+                    exportScript: configuration.exportScript,
+                    deleteScript: configuration.deleteScript
+                ),
+                clipboard: TranscriptActionMemoryClipboard(),
+                destinationSelector: TranscriptActionStaticDestinationSelector(
+                    targetPath: configuration.exportDestinationPath
+                ),
+                workspaceDir: configuration.workspaceDir
+            )
+        )
     }
 
     var body: some View {
@@ -56,6 +71,12 @@ private struct NativeControlPlaneRootView: View {
                 Divider()
 
                 TranscriptReviewView(viewModel: transcriptViewModel)
+
+                if transcriptActionViewModel.state.isAvailable {
+                    Divider()
+
+                    TranscriptReviewActionsView(viewModel: transcriptActionViewModel)
+                }
             }
             .padding(20)
             .frame(minWidth: 760, minHeight: 640, alignment: .topLeading)
@@ -176,6 +197,10 @@ private struct NativeControlPlaneFixtureConfiguration {
     let recordingScript: FakeRecordingCommandClient.Script
     let sessionID: String
     let transcriptInput: TranscriptReviewInput
+    let exportScript: TranscriptActionFakeCommandClient.ExportScript
+    let deleteScript: TranscriptActionFakeCommandClient.DeleteScript
+    let exportDestinationPath: String?
+    let workspaceDir: String?
 
     var readinessState: PermissionDependencyStatusState {
         PermissionDependencyStatusState.from(dependencyResponse)
@@ -200,7 +225,11 @@ private struct NativeControlPlaneFixtureConfiguration {
                 dependencyResponse: .readyFixture,
                 recordingScript: .success,
                 sessionID: transcriptSessionID,
-                transcriptInput: transcriptInput
+                transcriptInput: transcriptInput,
+                exportScript: .success(content: "Workspace transcript content copied from deterministic fixture."),
+                deleteScript: .success(retainedExternalExports: ["/tmp/workspace-transcript.md"]),
+                exportDestinationPath: "\(workspacePath)/exports/\(transcriptSessionID).md",
+                workspaceDir: workspacePath
             )
         }
 
@@ -214,7 +243,11 @@ private struct NativeControlPlaneFixtureConfiguration {
                 dependencyResponse: .readyFixture,
                 recordingScript: .success,
                 sessionID: "session-app-ui-smoke",
-                transcriptInput: .missingFixture
+                transcriptInput: .missingFixture,
+                exportScript: .success(content: "Ready fixture transcript content."),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/ready-fixture-transcript.md",
+                workspaceDir: nil
             )
         case "start-failure":
             return NativeControlPlaneFixtureConfiguration(
@@ -224,7 +257,11 @@ private struct NativeControlPlaneFixtureConfiguration {
                     message: "Screen Recording permission is missing."
                 ),
                 sessionID: "session-app-ui-start-failure",
-                transcriptInput: .missingFixture
+                transcriptInput: .missingFixture,
+                exportScript: .success(content: "Start failure fixture transcript content."),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/start-failure-transcript.md",
+                workspaceDir: nil
             )
         case "stop-failure":
             return NativeControlPlaneFixtureConfiguration(
@@ -234,35 +271,148 @@ private struct NativeControlPlaneFixtureConfiguration {
                     message: "Recording could not be saved."
                 ),
                 sessionID: "session-app-ui-stop-failure",
-                transcriptInput: .missingFixture
+                transcriptInput: .missingFixture,
+                exportScript: .success(content: "Stop failure fixture transcript content."),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/stop-failure-transcript.md",
+                workspaceDir: nil
             )
         case "transcript-review":
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .readyFixture,
                 recordingScript: .success,
                 sessionID: "session-app-ui-transcript",
-                transcriptInput: .reviewFixture
+                transcriptInput: .reviewFixture,
+                exportScript: .success(content: "Transcript Review Fixture copy content."),
+                deleteScript: .success(retainedExternalExports: ["/tmp/transcript-review.md"]),
+                exportDestinationPath: "/tmp/transcript-review.md",
+                workspaceDir: nil
             )
         case "transcript-empty":
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .readyFixture,
                 recordingScript: .success,
                 sessionID: "session-app-ui-empty-transcript",
-                transcriptInput: .emptyFixture
+                transcriptInput: .emptyFixture,
+                exportScript: .success(content: "Empty transcript fixture copy content."),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/transcript-empty.md",
+                workspaceDir: nil
             )
         case "transcript-only":
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .readyFixture,
                 recordingScript: .success,
                 sessionID: "session-app-ui-transcript-only",
-                transcriptInput: .transcriptOnlyFixture
+                transcriptInput: .transcriptOnlyFixture,
+                exportScript: .success(content: "Transcript-only fixture copy content."),
+                deleteScript: .success(retainedExternalExports: ["/tmp/transcript-only.md"]),
+                exportDestinationPath: "/tmp/transcript-only.md",
+                workspaceDir: nil
+            )
+        case "transcript-action-copy-success":
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .readyFixture,
+                recordingScript: .success,
+                sessionID: "session-app-ui-transcript",
+                transcriptInput: .reviewFixture,
+                exportScript: .success(content: "Copy fixture transcript content."),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/copy-success.md",
+                workspaceDir: nil
+            )
+        case "transcript-action-copy-failure":
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .readyFixture,
+                recordingScript: .success,
+                sessionID: "session-app-ui-transcript",
+                transcriptInput: .reviewFixture,
+                exportScript: .failure(
+                    code: "artifact_missing",
+                    message: "Transcript artifact is missing."
+                ),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/copy-failure.md",
+                workspaceDir: nil
+            )
+        case "transcript-action-export-success":
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .readyFixture,
+                recordingScript: .success,
+                sessionID: "session-app-ui-transcript",
+                transcriptInput: .reviewFixture,
+                exportScript: .success(exportPackageID: "export-package-app-fixture"),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/meeting-assistant-export.md",
+                workspaceDir: nil
+            )
+        case "transcript-action-export-cancel":
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .readyFixture,
+                recordingScript: .success,
+                sessionID: "session-app-ui-transcript",
+                transcriptInput: .reviewFixture,
+                exportScript: .success(exportPackageID: "export-package-app-fixture"),
+                deleteScript: .success(),
+                exportDestinationPath: nil,
+                workspaceDir: nil
+            )
+        case "transcript-action-export-failure":
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .readyFixture,
+                recordingScript: .success,
+                sessionID: "session-app-ui-transcript",
+                transcriptInput: .reviewFixture,
+                exportScript: .failure(
+                    code: "path_conflict",
+                    message: "Export target already exists."
+                ),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/meeting-assistant-export.md",
+                workspaceDir: nil
+            )
+        case "transcript-action-delete-success":
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .readyFixture,
+                recordingScript: .success,
+                sessionID: "session-app-ui-transcript",
+                transcriptInput: .reviewFixture,
+                exportScript: .success(content: "Delete success fixture copy content."),
+                deleteScript: .success(
+                    deletedItems: [
+                        "artifacts/transcript.json",
+                        "artifacts/speaker_labels.json",
+                        "logs/processing.log",
+                    ],
+                    retainedExternalExports: ["/tmp/meeting-assistant-export.md"]
+                ),
+                exportDestinationPath: "/tmp/delete-success.md",
+                workspaceDir: nil
+            )
+        case "transcript-action-delete-failure":
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .readyFixture,
+                recordingScript: .success,
+                sessionID: "session-app-ui-transcript",
+                transcriptInput: .reviewFixture,
+                exportScript: .success(content: "Delete failure fixture copy content."),
+                deleteScript: .failure(
+                    code: "path_conflict",
+                    message: "Session path escaped the workspace."
+                ),
+                exportDestinationPath: "/tmp/delete-failure.md",
+                workspaceDir: nil
             )
         default:
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .blockedFixture,
                 recordingScript: .success,
                 sessionID: "session-app-ui-blocked",
-                transcriptInput: .missingFixture
+                transcriptInput: .missingFixture,
+                exportScript: .success(content: "Blocked fixture transcript content."),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/blocked-fixture-transcript.md",
+                workspaceDir: nil
             )
         }
     }

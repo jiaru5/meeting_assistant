@@ -114,6 +114,102 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         assertElement("ma.transcript.degradation", in: app, contains: "speaker labeling skipped")
     }
 
+    func testTranscriptActionCopySuccessAndFailureAreUserTriggeredFromLaunchedAppBundle() {
+        let successApp = launchApp(fixture: "transcript-action-copy-success")
+
+        assertElement("ma.transcriptAction.heading", in: successApp, contains: "Transcript Actions")
+        assertElement("ma.transcriptAction.status", in: successApp, contains: "Transcript actions are ready.")
+        tapTranscriptActionButton("ma.transcriptAction.copyButton", in: successApp)
+
+        assertElement("ma.transcriptAction.status", in: successApp, contains: "Copy complete.")
+        assertElement(
+            "ma.transcriptAction.success",
+            in: successApp,
+            contains: "Copied plain text transcript for session session-app-ui-transcript."
+        )
+        assertDoesNotExist("ma.transcriptAction.error", in: successApp)
+
+        let failureApp = launchApp(fixture: "transcript-action-copy-failure")
+
+        tapTranscriptActionButton("ma.transcriptAction.copyButton", in: failureApp)
+
+        assertElement("ma.transcriptAction.status", in: failureApp, contains: "Copy failed.")
+        assertElement("ma.transcriptAction.error", in: failureApp, contains: "Transcript artifact is missing.")
+        assertElement("ma.transcriptAction.error", in: failureApp, contains: "artifact_missing")
+    }
+
+    func testTranscriptActionExportSuccessCancelAndFailureAreUserTriggeredFromLaunchedAppBundle() {
+        let successApp = launchApp(fixture: "transcript-action-export-success")
+
+        tapTranscriptActionButton("ma.transcriptAction.exportButton", in: successApp)
+
+        assertElement("ma.transcriptAction.status", in: successApp, contains: "Export complete.")
+        assertElement(
+            "ma.transcriptAction.success",
+            in: successApp,
+            contains: "Exported markdown transcript to /tmp/meeting-assistant-export.md."
+        )
+
+        let cancelApp = launchApp(fixture: "transcript-action-export-cancel")
+
+        tapTranscriptActionButton("ma.transcriptAction.exportButton", in: cancelApp)
+
+        assertElement(
+            "ma.transcriptAction.status",
+            in: cancelApp,
+            contains: "Export cancelled. No command was sent."
+        )
+        assertDoesNotExist("ma.transcriptAction.success", in: cancelApp)
+        assertDoesNotExist("ma.transcriptAction.error", in: cancelApp)
+
+        let failureApp = launchApp(fixture: "transcript-action-export-failure")
+
+        tapTranscriptActionButton("ma.transcriptAction.exportButton", in: failureApp)
+
+        assertElement("ma.transcriptAction.status", in: failureApp, contains: "Export failed.")
+        assertElement("ma.transcriptAction.error", in: failureApp, contains: "Export target already exists.")
+        assertElement("ma.transcriptAction.error", in: failureApp, contains: "path_conflict")
+    }
+
+    func testTranscriptActionDeleteConfirmCancelSuccessAndFailureFromLaunchedAppBundle() {
+        let successApp = launchApp(fixture: "transcript-action-delete-success")
+
+        tapTranscriptActionButton("ma.transcriptAction.deleteButton", in: successApp)
+
+        assertExists("ma.transcriptAction.deletePrompt", in: successApp)
+        assertElement("ma.transcriptAction.deletePromptText", in: successApp, contains: "session-app-ui-transcript")
+        assertElement("ma.transcriptAction.deletePromptText", in: successApp, contains: "External exports are retained.")
+        tapTranscriptActionButton("ma.transcriptAction.deleteCancelButton", in: successApp)
+
+        assertElement(
+            "ma.transcriptAction.status",
+            in: successApp,
+            contains: "Delete cancelled. No command was sent."
+        )
+        assertDoesNotExist("ma.transcriptAction.deletePrompt", in: successApp)
+
+        tapTranscriptActionButton("ma.transcriptAction.deleteButton", in: successApp)
+        tapTranscriptActionButton("ma.transcriptAction.deleteConfirmButton", in: successApp)
+
+        assertElement("ma.transcriptAction.status", in: successApp, contains: "Delete complete.")
+        assertElement(
+            "ma.transcriptAction.success",
+            in: successApp,
+            contains: "Deleted session session-app-ui-transcript. Removed 3 items. Retained 1 external export."
+        )
+
+        let failureApp = launchApp(fixture: "transcript-action-delete-failure")
+
+        tapTranscriptActionButton("ma.transcriptAction.deleteButton", in: failureApp)
+        assertExists("ma.transcriptAction.deletePrompt", in: failureApp)
+        assertElement("ma.transcriptAction.deletePromptText", in: failureApp, contains: "External exports are retained.")
+        tapTranscriptActionButton("ma.transcriptAction.deleteConfirmButton", in: failureApp)
+
+        assertElement("ma.transcriptAction.status", in: failureApp, contains: "Delete failed.")
+        assertElement("ma.transcriptAction.error", in: failureApp, contains: "Session path escaped the workspace.")
+        assertElement("ma.transcriptAction.error", in: failureApp, contains: "path_conflict")
+    }
+
     private func launchApp(
         fixture: String? = nil,
         workspaceURL: URL? = nil,
@@ -289,6 +385,48 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         let result = XCTWaiter.wait(for: [expectation], timeout: 10)
         XCTAssertEqual(result, .completed, "Expected \(element) to become hittable.", file: file, line: line)
+    }
+
+    private func tapTranscriptActionButton(
+        _ identifier: String,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertTrue(
+            app.wait(for: .runningForeground, timeout: 10),
+            "Expected app to be foreground before tapping \(identifier).",
+            file: file,
+            line: line
+        )
+        var control = button(identifier, in: app)
+        if !control.isHittable {
+            scrollTowardTranscriptActions(in: app, targetIdentifier: identifier)
+            control = button(identifier, in: app)
+        }
+        waitForHittable(control, file: file, line: line)
+        control.click()
+    }
+
+    private func scrollTowardTranscriptActions(
+        in app: XCUIApplication,
+        targetIdentifier: String
+    ) {
+        let scrollView = app.scrollViews.firstMatch
+        guard scrollView.exists else {
+            return
+        }
+
+        for _ in 0..<5 {
+            let element = app
+                .descendants(matching: .button)
+                .matching(identifier: targetIdentifier)
+                .firstMatch
+            if element.exists && element.isHittable {
+                return
+            }
+            scrollView.swipeUp()
+        }
     }
 
     private func createWorkspaceTranscriptOnlyFixture() throws -> (workspaceURL: URL, sessionID: String) {
