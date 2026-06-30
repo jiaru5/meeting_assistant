@@ -1,4 +1,5 @@
 import CryptoKit
+import AppKit
 import XCTest
 
 final class AppBundleLocatorSmokeTests: XCTestCase {
@@ -121,6 +122,9 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         dismissSpotlightIfPresent()
         let app = XCUIApplication()
         app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
+        if builtInScreen() != nil {
+            app.launchEnvironment["MA_NATIVE_APP_TEST_DISPLAY"] = "built-in"
+        }
         if let fixture {
             app.launchEnvironment["MA_NATIVE_APP_SMOKE_FIXTURE"] = fixture
         }
@@ -133,6 +137,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10), "Expected app bundle to run foreground.")
         XCTAssertTrue(appWindow(in: app).waitForExistence(timeout: 5), "Expected app bundle window to exist.")
+        assertWindowIsOnBuiltInScreen(app)
         launchedApp = app
         return app
     }
@@ -165,6 +170,34 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
 
     private func appWindow(in app: XCUIApplication) -> XCUIElement {
         app.windows.firstMatch
+    }
+
+    private func assertWindowIsOnBuiltInScreen(
+        _ app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let screen = builtInScreen() else {
+            return
+        }
+
+        let windowFrame = appWindow(in: app).frame
+        let windowCenter = CGPoint(x: windowFrame.midX, y: windowFrame.midY)
+        XCTAssertTrue(
+            screen.frame.contains(windowCenter),
+            "Expected app bundle window center \(windowCenter) to be on built-in screen \(screen.localizedName) frame \(screen.frame), actual window frame \(windowFrame).",
+            file: file,
+            line: line
+        )
+    }
+
+    private func builtInScreen() -> NSScreen? {
+        NSScreen.screens.first { screen in
+            guard let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+                return false
+            }
+            return CGDisplayIsBuiltin(CGDirectDisplayID(screenNumber.uint32Value)) != 0
+        }
     }
 
     private func assertElement(

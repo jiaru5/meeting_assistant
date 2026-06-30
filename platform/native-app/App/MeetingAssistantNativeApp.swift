@@ -1,13 +1,16 @@
 import Foundation
+import AppKit
 import SwiftUI
 
 @main
 struct MeetingAssistantNativeApp: App {
     private let configuration = NativeControlPlaneFixtureConfiguration.fromLaunchContext()
+    private let windowPlacement = NativeAppWindowPlacement.fromLaunchContext()
 
     var body: some Scene {
         WindowGroup("Meeting Assistant Native") {
             NativeControlPlaneRootView(configuration: configuration)
+                .background(WindowPlacementView(placement: windowPlacement))
         }
         .defaultSize(width: 900, height: 760)
     }
@@ -65,6 +68,106 @@ private struct StaticDependencyCheckRunner: DependencyCheckRunning {
 
     func checkDependencies(workspaceURL: URL?) async throws -> DependencyCheckResponse {
         response
+    }
+}
+
+private struct WindowPlacementView: NSViewRepresentable {
+    let placement: NativeAppWindowPlacement?
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        placeWindow(for: view, context: context)
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        placeWindow(for: view, context: context)
+    }
+
+    private func placeWindow(for view: NSView, context: Context) {
+        guard let placement, !context.coordinator.didPlaceWindow else {
+            return
+        }
+        let coordinator = context.coordinator
+        DispatchQueue.main.async { [weak view, weak coordinator] in
+            guard let coordinator, !coordinator.didPlaceWindow, let window = view?.window else {
+                return
+            }
+            placement.apply(to: window)
+            coordinator.didPlaceWindow = true
+        }
+    }
+
+    final class Coordinator {
+        var didPlaceWindow = false
+    }
+}
+
+private struct NativeAppWindowPlacement {
+    let displaySelector: String
+
+    static func fromLaunchContext(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> NativeAppWindowPlacement? {
+        guard let selector = environment["MA_NATIVE_APP_TEST_DISPLAY"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !selector.isEmpty else {
+            return nil
+        }
+
+        return NativeAppWindowPlacement(displaySelector: selector)
+    }
+
+    func apply(to window: NSWindow?) {
+        guard let window, let targetScreen = Self.screen(matching: displaySelector) else {
+            return
+        }
+
+        let visibleFrame = targetScreen.visibleFrame
+        let currentFrame = window.frame
+        let targetSize = NSSize(
+            width: min(currentFrame.width, visibleFrame.width),
+            height: min(currentFrame.height, visibleFrame.height)
+        )
+        let targetFrame = NSRect(
+            x: visibleFrame.midX - targetSize.width / 2,
+            y: visibleFrame.midY - targetSize.height / 2,
+            width: targetSize.width,
+            height: targetSize.height
+        )
+
+        if !targetFrame.equalTo(currentFrame) {
+            window.setFrame(targetFrame, display: true)
+        }
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    private static func screen(matching selector: String) -> NSScreen? {
+        let normalizedSelector = normalize(selector)
+        if ["builtin", "built-in", "internal", "color-lcd", "colorlcd"].contains(normalizedSelector) {
+            return NSScreen.screens.first(where: isBuiltIn)
+        }
+
+        return NSScreen.screens.first {
+            normalize($0.localizedName).contains(normalizedSelector)
+        }
+    }
+
+    private static func isBuiltIn(_ screen: NSScreen) -> Bool {
+        guard let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+            return false
+        }
+        return CGDisplayIsBuiltin(CGDirectDisplayID(screenNumber.uint32Value)) != 0
+    }
+
+    private static func normalize(_ value: String) -> String {
+        value
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "_", with: "-")
     }
 }
 
