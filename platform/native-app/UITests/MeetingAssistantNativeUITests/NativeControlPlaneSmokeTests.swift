@@ -266,6 +266,137 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         SwiftUIViewSourceContract.assertTranscriptReviewViewUsesAccessibleStates()
     }
 
+    func testTranscriptActionsAreHostedWithStableUserTriggeredStates() async {
+        let client = TranscriptActionFakeCommandClient(
+            exportScript: .success(content: "Hosted copy content."),
+            deleteScript: .success(
+                deletedItems: [
+                    "artifacts/transcript.json",
+                    "logs/processing.log",
+                ],
+                retainedExternalExports: ["/tmp/hosted-export.md"]
+            )
+        )
+        let clipboard = TranscriptActionMemoryClipboard()
+        let selector = TranscriptActionStaticDestinationSelector(targetPath: "/tmp/hosted-export.md")
+        let viewModel = TranscriptReviewActionsViewModel(
+            input: transcriptActionInput(),
+            commandClient: client,
+            clipboard: clipboard,
+            destinationSelector: selector,
+            workspaceDir: "/tmp/hosted-workspace"
+        )
+        let host = HostedSwiftUIView(TranscriptReviewActionsView(viewModel: viewModel))
+
+        host.assertHosted()
+        XCTAssertEqual(viewModel.state.phase, .ready)
+        XCTAssertEqual(viewModel.state.statusText, "Transcript actions are ready.")
+        assertTranscriptActionLocators()
+        SwiftUIViewSourceContract.assertTranscriptActionViewUsesAccessibleStates()
+
+        await viewModel.copyTranscript()
+        host.flush()
+
+        let copiedContent = await clipboard.latestContentSnapshot()
+        XCTAssertEqual(copiedContent, "Hosted copy content.")
+        XCTAssertEqual(viewModel.state.statusText, "Copy complete.")
+        XCTAssertEqual(
+            viewModel.state.successSummary,
+            "Copied plain text transcript for session session-actions."
+        )
+
+        await viewModel.exportTranscript()
+        host.flush()
+
+        let destinationRequests = await selector.requestSnapshot()
+        let exportRequests = await client.exportRequestSnapshot()
+        XCTAssertEqual(destinationRequests.count, 1)
+        XCTAssertEqual(exportRequests.count, 2)
+        XCTAssertEqual(viewModel.state.statusText, "Export complete.")
+        XCTAssertEqual(
+            viewModel.state.successSummary,
+            "Exported markdown transcript to /tmp/hosted-export.md."
+        )
+
+        viewModel.requestDeleteConfirmation()
+        host.flush()
+
+        XCTAssertTrue(viewModel.state.isDeletePromptVisible)
+        XCTAssertEqual(
+            viewModel.state.deletePromptText,
+            "Delete session Hosted Action Transcript (session-actions)? This removes application-managed files in the session workspace. External exports are retained."
+        )
+
+        viewModel.cancelDelete()
+        host.flush()
+
+        let deleteRequestsAfterCancel = await client.deleteRequestSnapshot()
+        XCTAssertTrue(deleteRequestsAfterCancel.isEmpty)
+        XCTAssertEqual(viewModel.state.statusText, "Delete cancelled. No command was sent.")
+
+        viewModel.requestDeleteConfirmation()
+        await viewModel.confirmDelete()
+        host.flush()
+
+        let deleteRequestsAfterConfirm = await client.deleteRequestSnapshot()
+        XCTAssertEqual(deleteRequestsAfterConfirm.count, 1)
+        XCTAssertEqual(viewModel.state.statusText, "Delete complete.")
+        XCTAssertEqual(
+            viewModel.state.successSummary,
+            "Deleted session session-actions. Removed 2 items. Retained 1 external export."
+        )
+    }
+
+    func testTranscriptActionFailuresAreHostedWithPersistentDeleteFailure() async {
+        let client = TranscriptActionFakeCommandClient(
+            exportScript: .failure(
+                code: "path_conflict",
+                message: "Export target already exists."
+            ),
+            deleteScript: .failure(
+                code: "path_conflict",
+                message: "Session path escaped the workspace."
+            )
+        )
+        let viewModel = TranscriptReviewActionsViewModel(
+            input: transcriptActionInput(),
+            commandClient: client,
+            clipboard: TranscriptActionMemoryClipboard(),
+            destinationSelector: TranscriptActionStaticDestinationSelector(targetPath: "/tmp/hosted-export.md")
+        )
+        let host = HostedSwiftUIView(TranscriptReviewActionsView(viewModel: viewModel))
+
+        await viewModel.copyTranscript()
+        host.flush()
+
+        XCTAssertEqual(viewModel.state.statusText, "Copy failed.")
+        XCTAssertEqual(
+            viewModel.state.failureSummary,
+            "Copy failed: Export target already exists. (path_conflict)"
+        )
+
+        viewModel.requestDeleteConfirmation()
+        await viewModel.confirmDelete()
+        host.flush()
+
+        XCTAssertEqual(viewModel.state.statusText, "Delete failed.")
+        XCTAssertEqual(
+            viewModel.state.failureSummary,
+            "Delete failed: Session path escaped the workspace. (path_conflict)"
+        )
+
+        viewModel.requestDeleteConfirmation()
+        viewModel.cancelDelete()
+        host.flush()
+
+        XCTAssertEqual(
+            viewModel.state.failureSummary,
+            "Delete failed: Session path escaped the workspace. (path_conflict)"
+        )
+        assertTranscriptActionLocators()
+        SwiftUIViewSourceContract.assertTranscriptActionViewUsesAccessibleStates()
+    }
+
     func testStopFailureIsHostedWithStableFailureState() async {
         let client = FakeRecordingCommandClient(
             script: .stopFailure(
@@ -301,6 +432,7 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         assertPermissionDependencyLocators()
         assertRecordingLocators()
         assertTranscriptLocators()
+        assertTranscriptActionLocators()
     }
 
     private func assertPermissionDependencyLocators(
@@ -446,6 +578,72 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
             line: line
         )
     }
+
+    private func assertTranscriptActionLocators(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(
+            TranscriptActionAccessibilityID.heading,
+            "ma.transcriptAction.heading",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            TranscriptActionAccessibilityID.status,
+            "ma.transcriptAction.status",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            TranscriptActionAccessibilityID.copyButton,
+            "ma.transcriptAction.copyButton",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            TranscriptActionAccessibilityID.exportButton,
+            "ma.transcriptAction.exportButton",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            TranscriptActionAccessibilityID.deleteButton,
+            "ma.transcriptAction.deleteButton",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            TranscriptActionAccessibilityID.successSummary,
+            "ma.transcriptAction.success",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            TranscriptActionAccessibilityID.errorSummary,
+            "ma.transcriptAction.error",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            TranscriptActionAccessibilityID.deletePrompt,
+            "ma.transcriptAction.deletePrompt",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            TranscriptActionAccessibilityID.deleteConfirmButton,
+            "ma.transcriptAction.deleteConfirmButton",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            TranscriptActionAccessibilityID.deleteCancelButton,
+            "ma.transcriptAction.deleteCancelButton",
+            file: file,
+            line: line
+        )
+    }
 }
 
 private struct UnusedDependencyCheckRunner: DependencyCheckRunning {
@@ -566,6 +764,37 @@ private enum SwiftUIViewSourceContract {
         )
     }
 
+    static func assertTranscriptActionViewUsesAccessibleStates(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let source = readSource("TranscriptReviewActionsView.swift", file: file, line: line)
+        assertSource(
+            source,
+            contains: [
+                "Text(\"Transcript Actions\")",
+                "Button(\"Copy Transcript\")",
+                "Button(\"Export Markdown\")",
+                "Button(\"Delete Session\")",
+                "Button(\"Confirm Delete\")",
+                "Button(\"Cancel Delete\")",
+                ".accessibilityIdentifier(TranscriptActionAccessibilityID.heading)",
+                ".accessibilityIdentifier(TranscriptActionAccessibilityID.status)",
+                ".accessibilityIdentifier(TranscriptActionAccessibilityID.copyButton)",
+                ".accessibilityIdentifier(TranscriptActionAccessibilityID.exportButton)",
+                ".accessibilityIdentifier(TranscriptActionAccessibilityID.deleteButton)",
+                ".accessibilityIdentifier(TranscriptActionAccessibilityID.successSummary)",
+                ".accessibilityIdentifier(TranscriptActionAccessibilityID.errorSummary)",
+                ".accessibilityIdentifier(TranscriptActionAccessibilityID.deletePrompt)",
+                ".accessibilityIdentifier(TranscriptActionAccessibilityID.deletePromptText)",
+                ".accessibilityIdentifier(TranscriptActionAccessibilityID.deleteConfirmButton)",
+                ".accessibilityIdentifier(TranscriptActionAccessibilityID.deleteCancelButton)",
+            ],
+            file: file,
+            line: line
+        )
+    }
+
     private static func readSource(
         _ filename: String,
         file: StaticString,
@@ -672,5 +901,25 @@ private func dependencyCheck(
         required: required,
         ok: ok,
         message: message ?? "\(id) is \(status)."
+    )
+}
+
+private func transcriptActionInput() -> TranscriptReviewInput {
+    TranscriptReviewInput(
+        sessionTitle: "Hosted Action Transcript",
+        transcript: TranscriptReviewTranscript(
+            id: "transcript-actions",
+            sessionID: "session-actions",
+            sourceArtifactID: "artifact-normalized-audio",
+            status: "succeeded",
+            segments: [
+                TranscriptReviewSegment(
+                    segmentID: "seg-action",
+                    startMS: 0,
+                    endMS: 2_000,
+                    text: "Hosted transcript action text."
+                ),
+            ]
+        )
     )
 }

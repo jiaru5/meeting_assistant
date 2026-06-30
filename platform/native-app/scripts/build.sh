@@ -30,7 +30,7 @@ xcodebuild build \
   -scheme "MeetingAssistantNative" \
   -destination 'platform=macOS' \
   -derivedDataPath "$tmp_dir/DerivedData"
-printf '%s\n' "native-app VS-MA-12/VS-MA-13/VS-MA-17 build: Swift permission/dependency status, fake recording target, read-only workspace transcript loader, and app bundle compiled." > build/build-report.txt
+printf '%s\n' "native-app VS-MA-12/VS-MA-13/VS-MA-17/VS-MA-18/VS-MA-19 build: Swift permission/dependency status, fake recording target, read-only workspace transcript loader, deterministic transcript actions, and app bundle compiled." > build/build-report.txt
 
 test -f component.json
 test -f README.md
