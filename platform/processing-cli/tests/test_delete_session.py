@@ -15,6 +15,15 @@ from meeting_assistant_cli.export_transcript import run_export_transcript
 from meeting_assistant_cli.workspace_contract import acquire_session_lock, create_session, register_artifact, session_directory
 
 
+@contextlib.contextmanager
+def external_side_effect_sentinels():
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(mock.patch("socket.create_connection", side_effect=AssertionError("unexpected external side effect")))
+        stack.enter_context(mock.patch("urllib.request.urlopen", side_effect=AssertionError("unexpected external side effect")))
+        stack.enter_context(mock.patch("subprocess.run", side_effect=AssertionError("unexpected external side effect")))
+        yield
+
+
 def create_session_with_transcript(workspace: Path) -> Path:
     create_session(workspace, source_type="native_recording", session_id="session-1", status="transcribed")
     session_dir = session_directory(workspace, "session-1")
@@ -23,7 +32,7 @@ def create_session_with_transcript(workspace: Path) -> Path:
         "session_id": "session-1",
         "source_artifact_id": "artifact-mixed_audio",
         "status": "succeeded",
-        "segments": [{"segment_id": "segment-0001", "start_ms": 0, "end_ms": 1000, "text": "line"}],
+        "segments": [{"segment_id": "segment-0001", "start_ms": 0, "end_ms": 1000, "text": "private transcript phrase"}],
         "created_at": "2026-06-27T00:00:00Z",
     }
     transcript_path = session_dir / "artifacts" / "transcript.json"
@@ -58,6 +67,8 @@ class DeleteSessionTests(unittest.TestCase):
             external_exists = external_export.exists()
             event_path = workspace.resolve(strict=False) / "events" / "meeting_session.deleted.v1.jsonl"
             event = json.loads(event_path.read_text(encoding="utf-8").splitlines()[-1])
+            response_json = json.dumps(response, ensure_ascii=False, sort_keys=True)
+            event_json = json.dumps(event, ensure_ascii=False, sort_keys=True)
 
         self.assertTrue(export_response["ok"])
         self.assertTrue(response["ok"])
@@ -66,11 +77,18 @@ class DeleteSessionTests(unittest.TestCase):
         self.assertTrue(external_exists)
         self.assertIn("session.json", response["deleted_items"])
         self.assertIn("artifacts/transcript.json", response["deleted_items"])
+        for item in response["deleted_items"]:
+            item_path = Path(item)
+            self.assertFalse(item_path.is_absolute())
+            self.assertNotIn("..", item_path.parts)
         self.assertEqual(response["retained_external_exports"], [str(external_export.resolve(strict=False))])
         self.assertEqual(event["event_name"], "meeting_session.deleted.v1")
         self.assertEqual(event["session_id"], "session-1")
         self.assertTrue(event["result"]["deleted"])
+        self.assertEqual(event["result"]["deleted_items"], response["deleted_items"])
         self.assertEqual(event["result"]["retained_external_exports"], [str(external_export.resolve(strict=False))])
+        self.assertNotIn("private transcript phrase", response_json)
+        self.assertNotIn("private transcript phrase", event_json)
 
     def test_confirm_false_returns_invalid_input_without_deleting(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -93,6 +111,17 @@ class DeleteSessionTests(unittest.TestCase):
 
         self.assertFalse(response["ok"])
         self.assertEqual(response["code"], "not_found")
+
+    def test_delete_success_does_not_use_external_process_or_network_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            create_session_with_transcript(workspace)
+
+            with external_side_effect_sentinels():
+                response = run_delete_session("session-1", workspace=workspace, confirm=True)
+
+        self.assertTrue(response["ok"])
+        self.assertTrue(response["deleted"])
 
     def test_locked_session_returns_path_conflict_without_deleting(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -323,6 +352,34 @@ class DeleteSessionTests(unittest.TestCase):
         self.assertEqual(exit_code, 2)
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["code"], "invalid_input")
+
+    def test_cli_missing_session_uses_not_found_exit_code_and_single_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                exit_code = main(
+                    [
+                        "delete_session",
+                        "--session-id",
+                        "missing-session",
+                        "--workspace-dir",
+                        str(workspace),
+                        "--confirm",
+                        "true",
+                    ]
+                )
+
+            output = stdout.getvalue().strip()
+            payload = json.loads(output)
+
+        self.assertEqual(exit_code, 3)
+        self.assertEqual(len(output.splitlines()), 1)
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["command"], "delete_session")
+        self.assertEqual(payload["code"], "not_found")
 
     def test_cli_delete_session_unknown_arg_emits_contract_json(self) -> None:
         stdout = io.StringIO()

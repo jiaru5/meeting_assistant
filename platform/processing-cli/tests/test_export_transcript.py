@@ -14,6 +14,15 @@ from meeting_assistant_cli.export_transcript import run_export_transcript
 from meeting_assistant_cli.workspace_contract import create_session, load_session, register_artifact, session_directory, sha256_file
 
 
+@contextlib.contextmanager
+def external_side_effect_sentinels():
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(mock.patch("socket.create_connection", side_effect=AssertionError("unexpected external side effect")))
+        stack.enter_context(mock.patch("urllib.request.urlopen", side_effect=AssertionError("unexpected external side effect")))
+        stack.enter_context(mock.patch("subprocess.run", side_effect=AssertionError("unexpected external side effect")))
+        yield
+
+
 def create_transcript_session(workspace: Path) -> Path:
     create_session(workspace, source_type="native_recording", session_id="session-1", status="transcribed")
     session_dir = session_directory(workspace, "session-1")
@@ -104,6 +113,22 @@ class TranscriptExportTests(unittest.TestCase):
         self.assertEqual(payload["id"], "transcript-1")
         self.assertEqual(payload["segments"][0]["text"], "first line")
 
+    def test_export_success_does_not_use_external_process_or_network_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            create_transcript_session(workspace)
+            target = root / "exports" / "transcript.txt"
+            target.parent.mkdir()
+
+            with external_side_effect_sentinels():
+                response = run_export_transcript("session-1", "plain_text", workspace=workspace, target_path=target)
+
+            target_text = target.read_text(encoding="utf-8")
+
+        self.assertTrue(response["ok"])
+        self.assertIn("first line", target_text)
+
     def test_existing_export_target_returns_path_conflict_without_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -119,6 +144,68 @@ class TranscriptExportTests(unittest.TestCase):
         self.assertFalse(response["ok"])
         self.assertEqual(response["code"], "path_conflict")
         self.assertEqual(target_text, "keep me")
+
+    def test_transcript_artifact_symlink_returns_path_conflict_without_creating_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_transcript_session(workspace)
+            transcript_path = session_dir / "artifacts" / "transcript.json"
+            outside_transcript = root / "outside-transcript.json"
+            outside_text = transcript_path.read_text(encoding="utf-8")
+            outside_transcript.write_text(outside_text, encoding="utf-8")
+            transcript_path.unlink()
+            transcript_path.symlink_to(outside_transcript)
+            target = root / "exports" / "transcript.txt"
+            target.parent.mkdir()
+
+            response = run_export_transcript("session-1", "plain_text", workspace=workspace, target_path=target)
+
+            outside_after = outside_transcript.read_text(encoding="utf-8")
+            target_exists = target.exists()
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertFalse(target_exists)
+        self.assertEqual(outside_after, outside_text)
+
+    def test_transcript_checksum_drift_returns_path_conflict_without_creating_or_overwriting_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_transcript_session(workspace)
+            transcript_path = session_dir / "artifacts" / "transcript.json"
+            transcript_path.write_text(
+                transcript_path.read_text(encoding="utf-8").replace("first line", "changed line"),
+                encoding="utf-8",
+            )
+            new_target = root / "exports" / "transcript.txt"
+            new_target.parent.mkdir()
+            existing_target = root / "existing-transcript.txt"
+            existing_target.write_text("keep me", encoding="utf-8")
+
+            new_target_response = run_export_transcript(
+                "session-1",
+                "plain_text",
+                workspace=workspace,
+                target_path=new_target,
+            )
+            existing_target_response = run_export_transcript(
+                "session-1",
+                "plain_text",
+                workspace=workspace,
+                target_path=existing_target,
+            )
+
+            existing_target_text = existing_target.read_text(encoding="utf-8")
+            new_target_exists = new_target.exists()
+
+        self.assertFalse(new_target_response["ok"])
+        self.assertEqual(new_target_response["code"], "path_conflict")
+        self.assertFalse(new_target_exists)
+        self.assertFalse(existing_target_response["ok"])
+        self.assertEqual(existing_target_response["code"], "path_conflict")
+        self.assertEqual(existing_target_text, "keep me")
 
     def test_target_export_is_removed_when_session_metadata_recording_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -190,6 +277,71 @@ class TranscriptExportTests(unittest.TestCase):
         self.assertEqual(payload["command"], "export_transcript")
         self.assertEqual(payload["target_path"], str(target.resolve(strict=False)))
         self.assertIn("first line", target_text)
+
+    def test_cli_missing_transcript_uses_artifact_missing_exit_code_and_single_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            create_session(workspace, source_type="native_recording", session_id="session-1", status="recorded")
+            old_env = os.environ.copy()
+            os.environ["MEETING_ASSISTANT_WORKSPACE"] = str(workspace)
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    exit_code = main(["export_transcript", "--session-id", "session-1", "--export-type", "plain_text"])
+            finally:
+                os.environ.clear()
+                os.environ.update(old_env)
+
+            output = stdout.getvalue().strip()
+            payload = json.loads(output)
+
+        self.assertEqual(exit_code, 3)
+        self.assertEqual(len(output.splitlines()), 1)
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["command"], "export_transcript")
+        self.assertEqual(payload["code"], "artifact_missing")
+
+    def test_cli_existing_target_uses_path_conflict_exit_code_without_overwrite(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            create_transcript_session(workspace)
+            target = root / "transcript.txt"
+            target.write_text("keep me", encoding="utf-8")
+            old_env = os.environ.copy()
+            os.environ["MEETING_ASSISTANT_WORKSPACE"] = str(workspace)
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    exit_code = main(
+                        [
+                            "export_transcript",
+                            "--session-id",
+                            "session-1",
+                            "--export-type",
+                            "plain_text",
+                            "--target-path",
+                            str(target),
+                        ]
+                    )
+            finally:
+                os.environ.clear()
+                os.environ.update(old_env)
+
+            output = stdout.getvalue().strip()
+            payload = json.loads(output)
+            target_text = target.read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 3)
+        self.assertEqual(len(output.splitlines()), 1)
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["command"], "export_transcript")
+        self.assertEqual(payload["code"], "path_conflict")
+        self.assertEqual(target_text, "keep me")
 
     def test_cli_invalid_export_enum_emits_contract_json(self) -> None:
         stdout = io.StringIO()

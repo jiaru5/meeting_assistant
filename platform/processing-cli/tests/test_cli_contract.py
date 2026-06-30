@@ -290,6 +290,7 @@ class CliContractTests(unittest.TestCase):
 
     def test_export_transcript_rejects_missing_export_type_invalid_export_enum_and_unknown_argument(self) -> None:
         cases = [
+            (["export_transcript", "--export-type", "plain_text"], "--session-id"),
             (["export_transcript", "--session-id", "session-1"], "--export-type"),
             (["export_transcript", "--session-id", "session-1", "--export-type", "html"], "invalid choice"),
             (
@@ -316,6 +317,7 @@ class CliContractTests(unittest.TestCase):
 
     def test_delete_session_rejects_missing_confirm_invalid_confirm_enum_and_unknown_argument(self) -> None:
         cases = [
+            (["delete_session", "--confirm", "true"], "--session-id"),
             (["delete_session", "--session-id", "session-1"], "--confirm"),
             (["delete_session", "--session-id", "session-1", "--confirm", "yes"], "invalid choice"),
             (
