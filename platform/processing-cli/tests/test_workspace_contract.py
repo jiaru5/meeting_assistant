@@ -17,6 +17,7 @@ from meeting_assistant_cli.workspace_contract import (
     session_directory,
     sha256_file,
     verify_registered_artifacts,
+    write_session,
 )
 
 
@@ -280,6 +281,94 @@ class WorkspaceContractTests(unittest.TestCase):
                 load_session(session_dir)
 
         self.assertEqual(raised.exception.code, "processing_failed")
+
+    def test_write_session_rejects_session_json_symlink_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            create_session(workspace, source_type="native_recording", session_id="session-1")
+            session_dir = workspace / "sessions" / "session-1"
+            outside = root / "outside-session.json"
+            outside.write_text('{"outside": true}\n', encoding="utf-8")
+            session_path = session_dir / "session.json"
+            session_path.unlink()
+            session_path.symlink_to(outside)
+
+            with self.assertRaises(ContractError) as raised:
+                write_session(session_dir, {"id": "session-1", "artifacts": []})
+
+            outside_text = outside.read_text(encoding="utf-8")
+            session_is_symlink = session_path.is_symlink()
+
+        self.assertEqual(raised.exception.code, "path_conflict")
+        self.assertEqual(outside_text, '{"outside": true}\n')
+        self.assertTrue(session_is_symlink)
+
+    def test_write_session_rejects_session_json_hardlink_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            create_session(workspace, source_type="native_recording", session_id="session-1")
+            session_dir = workspace / "sessions" / "session-1"
+            outside = root / "outside-session.json"
+            outside.write_text('{"outside": true}\n', encoding="utf-8")
+            session_path = session_dir / "session.json"
+            session_path.unlink()
+            os.link(outside, session_path)
+
+            with self.assertRaises(ContractError) as raised:
+                write_session(session_dir, {"id": "session-1", "artifacts": []})
+
+            outside_text = outside.read_text(encoding="utf-8")
+
+        self.assertEqual(raised.exception.code, "path_conflict")
+        self.assertEqual(outside_text, '{"outside": true}\n')
+
+    def test_write_session_rejects_temp_symlink_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            create_session(workspace, source_type="native_recording", session_id="session-1")
+            session_dir = workspace / "sessions" / "session-1"
+            original_session = (session_dir / "session.json").read_text(encoding="utf-8")
+            outside = root / "outside-temp.json"
+            outside.write_text('{"outside": true}\n', encoding="utf-8")
+            temp_path = session_dir / ".session.json.tmp"
+            temp_path.symlink_to(outside)
+
+            with self.assertRaises(ContractError) as raised:
+                write_session(session_dir, {"id": "session-1", "artifacts": []})
+
+            outside_text = outside.read_text(encoding="utf-8")
+            final_session = (session_dir / "session.json").read_text(encoding="utf-8")
+            temp_is_symlink = temp_path.is_symlink()
+
+        self.assertEqual(raised.exception.code, "path_conflict")
+        self.assertEqual(outside_text, '{"outside": true}\n')
+        self.assertEqual(final_session, original_session)
+        self.assertTrue(temp_is_symlink)
+
+    def test_write_session_rejects_temp_hardlink_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            create_session(workspace, source_type="native_recording", session_id="session-1")
+            session_dir = workspace / "sessions" / "session-1"
+            original_session = (session_dir / "session.json").read_text(encoding="utf-8")
+            outside = root / "outside-temp.json"
+            outside.write_text('{"outside": true}\n', encoding="utf-8")
+            temp_path = session_dir / ".session.json.tmp"
+            os.link(outside, temp_path)
+
+            with self.assertRaises(ContractError) as raised:
+                write_session(session_dir, {"id": "session-1", "artifacts": []})
+
+            outside_text = outside.read_text(encoding="utf-8")
+            final_session = (session_dir / "session.json").read_text(encoding="utf-8")
+
+        self.assertEqual(raised.exception.code, "path_conflict")
+        self.assertEqual(outside_text, '{"outside": true}\n')
+        self.assertEqual(final_session, original_session)
 
     def test_session_lock_rejects_concurrent_writer_and_releases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

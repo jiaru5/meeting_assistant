@@ -91,11 +91,21 @@ def write_session(session_dir: Path, payload: dict) -> None:
 
 
 def _write_session(session_dir: Path, payload: dict) -> None:
-    session_path = session_json_path(session_dir)
-    _ensure_within(session_dir, session_path)
-    temp_path = session_path.with_name(f".{session_path.name}.tmp")
-    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(temp_path, session_path)
+    session_path = prepare_managed_output_path(
+        session_dir,
+        Path("session.json"),
+        "Session metadata path conflicts with the session boundary.",
+    )
+    temp_path = prepare_managed_output_path(
+        session_dir,
+        Path(".session.json.tmp"),
+        "Session metadata temporary path conflicts with the session boundary.",
+    )
+    try:
+        temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(temp_path, session_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def load_session(session_dir: Path) -> dict:

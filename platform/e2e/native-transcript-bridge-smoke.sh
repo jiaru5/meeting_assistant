@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import subprocess
+import stat
 import sys
 import tempfile
 import wave
@@ -57,6 +58,8 @@ def run_cli(workspace: Path, args: list[str], command: str) -> dict:
         capture_output=True,
         check=False,
     )
+    if "Traceback" in completed.stdout or "Traceback" in completed.stderr:
+        raise AssertionError(f"{command}: response leaked a traceback")
     if completed.returncode != 0:
         raise AssertionError(
             f"{command}: expected exit 0, got {completed.returncode}\n"
@@ -68,6 +71,10 @@ def run_cli(workspace: Path, args: list[str], command: str) -> dict:
     payload = json.loads(lines[0])
     if payload.get("ok") is not True or payload.get("command") != command:
         raise AssertionError(f"{command}: response contract drifted: {payload!r}")
+    if not str(payload.get("request_id", "")).startswith("local-"):
+        raise AssertionError(f"{command}: request_id must be local-*")
+    if not isinstance(payload.get("warnings"), list):
+        raise AssertionError(f"{command}: warnings must be a list")
     return payload
 
 
@@ -85,6 +92,33 @@ def artifact_by_type(session: dict, artifact_type: str) -> dict:
     return matches[0]
 
 
+def assert_managed_regular_file(path: Path, label: str) -> None:
+    if path.is_symlink():
+        raise AssertionError(f"{label}: must not be a symlink")
+    try:
+        stat_result = path.stat()
+    except FileNotFoundError as exc:
+        raise AssertionError(f"{label}: file is missing") from exc
+    if not stat.S_ISREG(stat_result.st_mode):
+        raise AssertionError(f"{label}: must be a regular file")
+    if stat_result.st_nlink != 1:
+        raise AssertionError(f"{label}: must not be a hardlink")
+
+
+def assert_no_temp_leftovers(session_dir: Path) -> None:
+    leftovers = [
+        path
+        for path in session_dir.rglob(".*.tmp")
+        if path.exists() or path.is_symlink()
+    ]
+    if leftovers:
+        raise AssertionError(f"temporary managed output leftovers remain: {[str(path) for path in leftovers]}")
+
+
+def assert_native_readable_session_file(session_dir: Path) -> None:
+    assert_managed_regular_file(session_dir / "session.json", "session.json")
+
+
 def assert_artifact_file(session_dir: Path, artifact: dict, artifact_type: str) -> Path:
     required = {"id", "session_id", "artifact_type", "path", "format", "capture_status", "checksum", "created_at"}
     missing = required - set(artifact)
@@ -97,7 +131,10 @@ def assert_artifact_file(session_dir: Path, artifact: dict, artifact_type: str) 
         path.resolve(strict=False).relative_to(session_dir.resolve(strict=False))
     except ValueError as exc:
         raise AssertionError(f"{artifact_type}: artifact path escapes session dir") from exc
-    if not path.is_file() or sha256(path) != artifact["checksum"]:
+    assert_managed_regular_file(path, f"{artifact_type} artifact")
+    if not str(artifact["checksum"]).startswith("sha256:"):
+        raise AssertionError(f"{artifact_type}: checksum must use sha256 prefix")
+    if sha256(path) != artifact["checksum"]:
         raise AssertionError(f"{artifact_type}: artifact file/checksum drifted")
     return path
 
@@ -202,10 +239,12 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-native-bridge-") as t
     )
     session_id = str(import_response["session_id"])
     session_dir = workspace / "sessions" / session_id
+    assert_native_readable_session_file(session_dir)
     session = load_json(session_dir / "session.json")
     if session["id"] != session_id:
         raise AssertionError("import_media: session id drifted")
     assert_artifact_file(session_dir, artifact_by_type(session, "mixed_audio"), "mixed_audio")
+    assert_no_temp_leftovers(session_dir)
 
     transcript_response = run_cli(
         workspace,
@@ -213,6 +252,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-native-bridge-") as t
         "generate_transcript",
     )
     session = load_json(session_dir / "session.json")
+    assert_native_readable_session_file(session_dir)
     assert_artifact_file(session_dir, artifact_by_type(session, "normalized_audio"), "normalized_audio")
     transcript_artifact = artifact_by_type(session, "transcript_text")
     transcript_path = assert_artifact_file(session_dir, transcript_artifact, "transcript_text")
@@ -221,6 +261,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-native-bridge-") as t
         raise AssertionError("generate_transcript: transcript id drifted")
     if not transcript.get("segments"):
         raise AssertionError("generate_transcript: expected at least one segment")
+    assert_no_temp_leftovers(session_dir)
 
     speaker_response = run_cli(
         workspace,
@@ -238,6 +279,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-native-bridge-") as t
     if speaker_response["label_status"] != "transcript_only":
         raise AssertionError("generate_speaker_labels: expected transcript-only fallback")
     session = load_json(session_dir / "session.json")
+    assert_native_readable_session_file(session_dir)
     speaker_artifact = artifact_by_type(session, "speaker_labels")
     speaker_path = assert_artifact_file(session_dir, speaker_artifact, "speaker_labels")
     speaker_payload = load_json(speaker_path)
@@ -245,6 +287,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-native-bridge-") as t
         raise AssertionError("generate_speaker_labels: speaker fallback payload drifted")
     if sha256(fixture) != fixture_checksum:
         raise AssertionError("processing pipeline changed the source fixture")
+    assert_no_temp_leftovers(session_dir)
 
     swift_root = root / "swift-bridge"
     write_swift_bridge_package(swift_root)

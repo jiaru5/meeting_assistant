@@ -7,10 +7,12 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from meeting_assistant_cli.cli import main
 from meeting_assistant_cli.speaker_labeling import SpeakerLabelAdapter, run_generate_speaker_labels
 from meeting_assistant_cli.workspace_contract import (
+    ContractError,
     create_session,
     load_session,
     register_artifact,
@@ -286,6 +288,113 @@ class SpeakerLabelingTests(unittest.TestCase):
         self.assertEqual(response["code"], "path_conflict")
         self.assertFalse(target_exists)
         self.assertTrue(speaker_is_symlink)
+        self.assertNotIn("speaker_labels", artifact_types)
+
+    def test_speaker_labels_hardlink_destination_returns_path_conflict_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_transcript_session(workspace)
+            outside = root / "outside-speaker-labels.json"
+            outside.write_text('{"outside": true}\n', encoding="utf-8")
+            speaker_path = session_dir / "artifacts" / "speaker_labels.json"
+            os.link(outside, speaker_path)
+
+            response = run_generate_speaker_labels(
+                "session-1",
+                "transcript-1",
+                workspace=workspace,
+                allow_transcript_only_fallback=True,
+            )
+
+            outside_text = outside.read_text(encoding="utf-8")
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertEqual(outside_text, '{"outside": true}\n')
+        self.assertNotIn("speaker_labels", artifact_types)
+
+    def test_speaker_labels_temp_symlink_returns_path_conflict_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_transcript_session(workspace)
+            outside = root / "outside-temp-speaker-labels.json"
+            outside.write_text('{"outside": true}\n', encoding="utf-8")
+            temp_path = session_dir / "artifacts" / ".speaker_labels.json.tmp"
+            temp_path.symlink_to(outside)
+
+            response = run_generate_speaker_labels(
+                "session-1",
+                "transcript-1",
+                workspace=workspace,
+                allow_transcript_only_fallback=True,
+            )
+
+            outside_text = outside.read_text(encoding="utf-8")
+            temp_is_symlink = temp_path.is_symlink()
+            speaker_exists = (session_dir / "artifacts" / "speaker_labels.json").exists()
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertEqual(outside_text, '{"outside": true}\n')
+        self.assertTrue(temp_is_symlink)
+        self.assertFalse(speaker_exists)
+        self.assertNotIn("speaker_labels", artifact_types)
+
+    def test_speaker_labels_temp_hardlink_returns_path_conflict_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_transcript_session(workspace)
+            outside = root / "outside-temp-speaker-labels.json"
+            outside.write_text('{"outside": true}\n', encoding="utf-8")
+            temp_path = session_dir / "artifacts" / ".speaker_labels.json.tmp"
+            os.link(outside, temp_path)
+
+            response = run_generate_speaker_labels(
+                "session-1",
+                "transcript-1",
+                workspace=workspace,
+                allow_transcript_only_fallback=True,
+            )
+
+            outside_text = outside.read_text(encoding="utf-8")
+            speaker_exists = (session_dir / "artifacts" / "speaker_labels.json").exists()
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertEqual(outside_text, '{"outside": true}\n')
+        self.assertFalse(speaker_exists)
+        self.assertNotIn("speaker_labels", artifact_types)
+
+    def test_registration_failure_rolls_back_speaker_file_and_temp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_transcript_session(workspace)
+
+            with mock.patch(
+                "meeting_assistant_cli.speaker_labeling.register_artifact",
+                side_effect=ContractError("processing_failed", "registration failed"),
+            ):
+                response = run_generate_speaker_labels(
+                    "session-1",
+                    "transcript-1",
+                    workspace=workspace,
+                    allow_transcript_only_fallback=True,
+                )
+
+            speaker_exists = (session_dir / "artifacts" / "speaker_labels.json").exists()
+            temp_exists = (session_dir / "artifacts" / ".speaker_labels.json.tmp").exists()
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "processing_failed")
+        self.assertFalse(speaker_exists)
+        self.assertFalse(temp_exists)
         self.assertNotIn("speaker_labels", artifact_types)
 
     def test_repeated_speaker_labeling_reuses_existing_artifact(self) -> None:
