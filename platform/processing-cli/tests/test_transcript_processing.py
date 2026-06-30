@@ -337,6 +337,72 @@ class TranscriptProcessingTests(unittest.TestCase):
         self.assertTrue(transcript_is_symlink)
         self.assertNotIn("transcript_text", artifact_types)
 
+    def test_transcript_hardlink_destination_returns_path_conflict_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+            outside = root / "outside-transcript.json"
+            outside.write_text('{"outside": true}\n', encoding="utf-8")
+            transcript_path = session_dir / "artifacts" / "transcript.json"
+            os.link(outside, transcript_path)
+
+            response = run_generate_transcript("session-1", workspace=workspace)
+
+            outside_text = outside.read_text(encoding="utf-8")
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertEqual(outside_text, '{"outside": true}\n')
+        self.assertNotIn("transcript_text", artifact_types)
+
+    def test_transcript_temp_symlink_returns_path_conflict_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+            outside = root / "outside-temp-transcript.json"
+            outside.write_text('{"outside": true}\n', encoding="utf-8")
+            temp_path = session_dir / "artifacts" / ".transcript.json.tmp"
+            temp_path.symlink_to(outside)
+
+            response = run_generate_transcript("session-1", workspace=workspace)
+
+            outside_text = outside.read_text(encoding="utf-8")
+            temp_is_symlink = temp_path.is_symlink()
+            transcript_exists = (session_dir / "artifacts" / "transcript.json").exists()
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertEqual(outside_text, '{"outside": true}\n')
+        self.assertTrue(temp_is_symlink)
+        self.assertFalse(transcript_exists)
+        self.assertNotIn("transcript_text", artifact_types)
+
+    def test_transcript_temp_hardlink_returns_path_conflict_without_external_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+            outside = root / "outside-temp-transcript.json"
+            outside.write_text('{"outside": true}\n', encoding="utf-8")
+            temp_path = session_dir / "artifacts" / ".transcript.json.tmp"
+            os.link(outside, temp_path)
+
+            response = run_generate_transcript("session-1", workspace=workspace)
+
+            outside_text = outside.read_text(encoding="utf-8")
+            transcript_exists = (session_dir / "artifacts" / "transcript.json").exists()
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "path_conflict")
+        self.assertEqual(outside_text, '{"outside": true}\n')
+        self.assertFalse(transcript_exists)
+        self.assertNotIn("transcript_text", artifact_types)
+
     def test_unsupported_runtime_is_rejected_before_creating_transcript_or_normalized_audio(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -670,11 +736,13 @@ class TranscriptProcessingTests(unittest.TestCase):
                 response = run_generate_transcript("session-1", workspace=workspace)
 
             transcript_exists = (session_dir / "artifacts" / "transcript.json").exists()
+            temp_exists = (session_dir / "artifacts" / ".transcript.json.tmp").exists()
             artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
 
         self.assertFalse(response["ok"])
         self.assertEqual(response["code"], "processing_failed")
         self.assertFalse(transcript_exists)
+        self.assertFalse(temp_exists)
         self.assertNotIn("transcript_text", artifact_types)
 
     def test_post_registration_verification_failure_rolls_back_transcript_file(self) -> None:
@@ -690,11 +758,13 @@ class TranscriptProcessingTests(unittest.TestCase):
                 response = run_generate_transcript("session-1", workspace=workspace)
 
             transcript_exists = (session_dir / "artifacts" / "transcript.json").exists()
+            temp_exists = (session_dir / "artifacts" / ".transcript.json.tmp").exists()
             artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
 
         self.assertFalse(response["ok"])
         self.assertEqual(response["code"], "path_conflict")
         self.assertFalse(transcript_exists)
+        self.assertFalse(temp_exists)
         self.assertNotIn("transcript_text", artifact_types)
 
     def test_cli_generate_transcript_emits_json_success_response(self) -> None:

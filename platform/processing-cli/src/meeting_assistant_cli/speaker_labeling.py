@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import uuid
 from datetime import datetime
@@ -292,6 +293,7 @@ def run_generate_speaker_labels(
     workspace_path = (workspace or default_workspace()).expanduser()
     session_dir: Path | None = None
     destination: Path | None = None
+    temp_path: Path | None = None
     registered_artifact_id: str | None = None
     destination_written = False
 
@@ -345,13 +347,19 @@ def run_generate_speaker_labels(
                 Path("artifacts/speaker_labels.json"),
                 "Speaker labels artifact path conflicts with the session boundary.",
             )
+            temp_path = prepare_managed_output_path(
+                session_dir,
+                Path("artifacts/.speaker_labels.json.tmp"),
+                "Speaker labels temporary artifact path conflicts with the session boundary.",
+            )
             if destination.exists():
                 raise ContractError(
                     "path_conflict",
                     "Unregistered speaker_labels.json already exists; refusing to overwrite it.",
                     path=str(destination),
                 )
-            destination.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            os.replace(temp_path, destination)
             destination_written = True
             artifact = register_artifact(
                 session_dir,
@@ -381,6 +389,8 @@ def run_generate_speaker_labels(
         if session_dir is not None and exc.code != "not_found":
             if registered_artifact_id is not None:
                 _remove_registered_artifact(session_dir, registered_artifact_id)
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
             if destination is not None and destination_written:
                 destination.unlink(missing_ok=True)
             code, message, details = _record_processing_failure(
@@ -398,6 +408,8 @@ def run_generate_speaker_labels(
         if session_dir is not None:
             if registered_artifact_id is not None:
                 _remove_registered_artifact(session_dir, registered_artifact_id)
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
             if destination is not None and destination_written:
                 destination.unlink(missing_ok=True)
             code, message, details = _record_processing_failure(

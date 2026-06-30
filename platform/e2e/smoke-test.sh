@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import subprocess
+import stat
 import sys
 import tempfile
 import wave
@@ -113,6 +114,33 @@ def assert_within(base: Path, candidate: Path, label: str) -> None:
         raise AssertionError(f"{label}: path {candidate} escapes {base}") from exc
 
 
+def assert_managed_regular_file(path: Path, label: str) -> None:
+    if path.is_symlink():
+        raise AssertionError(f"{label}: must not be a symlink")
+    try:
+        stat_result = path.stat()
+    except FileNotFoundError as exc:
+        raise AssertionError(f"{label}: file is missing") from exc
+    if not stat.S_ISREG(stat_result.st_mode):
+        raise AssertionError(f"{label}: must be a regular file")
+    if stat_result.st_nlink != 1:
+        raise AssertionError(f"{label}: must not be a hardlink")
+
+
+def assert_no_temp_leftovers(session_dir: Path) -> None:
+    leftovers = [
+        path
+        for path in session_dir.rglob(".*.tmp")
+        if path.exists() or path.is_symlink()
+    ]
+    if leftovers:
+        raise AssertionError(f"temporary managed output leftovers remain: {[str(path) for path in leftovers]}")
+
+
+def assert_native_readable_session_file(session_dir: Path) -> None:
+    assert_managed_regular_file(session_dir / "session.json", "session.json")
+
+
 def assert_artifact_schema(session_dir: Path, artifact: dict, artifact_type: str) -> Path:
     required = {"id", "session_id", "artifact_type", "path", "format", "capture_status", "created_at"}
     missing = required - set(artifact)
@@ -123,10 +151,11 @@ def assert_artifact_schema(session_dir: Path, artifact: dict, artifact_type: str
     artifact_path = Path(str(artifact["path"]))
     assert_within(session_dir, artifact_path, f"{artifact_type} artifact")
     if artifact["capture_status"] in {"available", "degraded"}:
-        if not artifact_path.is_file():
-            raise AssertionError(f"{artifact_type}: artifact path is not a file")
+        assert_managed_regular_file(artifact_path, f"{artifact_type} artifact")
         if "checksum" not in artifact:
             raise AssertionError(f"{artifact_type}: available artifact must include checksum")
+        if not str(artifact["checksum"]).startswith("sha256:"):
+            raise AssertionError(f"{artifact_type}: checksum must use sha256 prefix")
         if sha256(artifact_path) != artifact["checksum"]:
             raise AssertionError(f"{artifact_type}: checksum mismatch")
     return artifact_path
@@ -159,6 +188,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
         raise AssertionError("import_media: success response source_type drifted")
     session_id = str(import_response["session_id"])
     session_dir = workspace / "sessions" / session_id
+    assert_native_readable_session_file(session_dir)
     session = load_json(session_dir / "session.json")
     if session["id"] != session_id or session["source_type"] != "imported_media":
         raise AssertionError("import_media: session metadata drifted")
@@ -171,6 +201,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
     for derived_name in ("normalized_audio.wav", "transcript.json", "speaker_labels.json"):
         if (session_dir / "artifacts" / derived_name).exists():
             raise AssertionError(f"import_media: unexpected derived artifact {derived_name}")
+    assert_no_temp_leftovers(session_dir)
 
     transcript_response = run_cli(
         workspace,
@@ -182,6 +213,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
     if transcript_response["segment_count"] < 1:
         raise AssertionError("generate_transcript: expected at least one segment")
     session = load_json(session_dir / "session.json")
+    assert_native_readable_session_file(session_dir)
     normalized_artifact = artifact_by_type(session, "normalized_audio")
     transcript_artifact = artifact_by_type(session, "transcript_text")
     normalized_path = assert_artifact_schema(session_dir, normalized_artifact, "normalized_audio")
@@ -205,6 +237,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
         raise AssertionError("generate_transcript: original media checksum changed")
     if normalized_path.read_bytes() != mixed_artifact.read_bytes():
         raise AssertionError("generate_transcript: fixture normalizer should copy WAV/PCM input")
+    assert_no_temp_leftovers(session_dir)
 
     speaker_response = run_cli(
         workspace,
@@ -224,6 +257,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
     if speaker_response["label_status"] != "transcript_only":
         raise AssertionError("generate_speaker_labels: fake/local smoke must use transcript-only fallback")
     session = load_json(session_dir / "session.json")
+    assert_native_readable_session_file(session_dir)
     speaker_artifact = artifact_by_type(session, "speaker_labels")
     speaker_path = assert_artifact_schema(session_dir, speaker_artifact, "speaker_labels")
     speaker_payload = load_json(speaker_path)
@@ -233,6 +267,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
         raise AssertionError("generate_speaker_labels: fallback must be explicit")
     if sha256(fixture) != fixture_checksum or sha256(mixed_artifact) != mixed_checksum:
         raise AssertionError("generate_speaker_labels: original media checksum changed")
+    assert_no_temp_leftovers(session_dir)
 
     export_response = run_cli(
         workspace,
@@ -260,11 +295,13 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
     if not exported_text.startswith("# Transcript") or "Fake transcript generated from local audio." not in exported_text:
         raise AssertionError("export_transcript: markdown content drifted")
     session = load_json(session_dir / "session.json")
+    assert_native_readable_session_file(session_dir)
     exports = session.get("exports", [])
     if len(exports) != 1 or exports[0]["path"] != str(export_target.resolve(strict=False)):
         raise AssertionError("export_transcript: session export summary missing")
     if sha256(fixture) != fixture_checksum or sha256(mixed_artifact) != mixed_checksum:
         raise AssertionError("export_transcript: original media checksum changed")
+    assert_no_temp_leftovers(session_dir)
 
     declined_delete = run_cli(
         workspace,
