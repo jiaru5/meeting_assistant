@@ -30,7 +30,7 @@ xcodebuild build \
   -scheme "MeetingAssistantNative" \
   -destination 'platform=macOS' \
   -derivedDataPath "$tmp_dir/DerivedData"
-printf '%s\n' "native-app VS-MA-12/VS-MA-15/VS-MA-16/VS-MA-17/VS-MA-18/VS-MA-19 build: Swift permission/dependency status, fake recording target, controlled native capture artifact registration, processing state consumer, read-only workspace transcript loader, deterministic transcript actions, and app bundle compiled." > build/build-report.txt
+printf '%s\n' "native-app VS-MA-12/VS-MA-15/VS-MA-16/VS-MA-17/VS-MA-18/VS-MA-19 build: Swift permission/dependency status, fake recording target, controlled native capture artifact registration, Apple ScreenCaptureKit native capture adapter, processing state consumer, read-only workspace transcript loader, deterministic transcript actions, and app bundle compiled." > build/build-report.txt
 
 test -f component.json
 test -f README.md

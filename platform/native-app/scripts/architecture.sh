@@ -9,6 +9,7 @@ grep -q "Component: \`native-app\`" tests/ArchitectureTest.md
 grep -q "VS-MA-12 boundary" tests/ArchitectureTest.md
 grep -q "VS-MA-13 fake recording boundary" tests/ArchitectureTest.md
 grep -q "VS-MA-14/VS-MA-15 controlled native capture artifact registration boundary" tests/ArchitectureTest.md
+grep -q "Apple ScreenCaptureKit native capture adapter exception" tests/ArchitectureTest.md
 grep -q "VS-MA-16 native processing state consumer boundary" tests/ArchitectureTest.md
 grep -q "VS-MA-17 read-only transcript review boundary" tests/ArchitectureTest.md
 grep -q "read-only workspace transcript loading boundary" tests/ArchitectureTest.md
@@ -33,6 +34,7 @@ test -f Sources/MeetingAssistantNative/RecordingCommandClient.swift
 test -f Sources/MeetingAssistantNative/RecordingFakeCommandClient.swift
 test -f Sources/MeetingAssistantNative/NativeCaptureAdapter.swift
 test -f Sources/MeetingAssistantNative/ControlledNativeCaptureAdapter.swift
+test -f Sources/MeetingAssistantNative/AppleScreenCaptureKitNativeCaptureAdapter.swift
 test -f Sources/MeetingAssistantNative/RecordingSessionStore.swift
 test -f Sources/MeetingAssistantNative/NativeRecordingCommandClient.swift
 test -f Sources/MeetingAssistantNative/NativeCapturePermissionChecker.swift
@@ -67,6 +69,8 @@ grep -R -q "ma.recording.artifact" Sources tests App UITests
 grep -R -q "NativeRecordingCommandClient" Sources tests
 grep -R -q "RecordingSessionStore" Sources tests
 grep -R -q "ControlledNativeCaptureAdapter" Sources tests
+grep -R -q "AppleScreenCaptureKitNativeCaptureAdapter" Sources tests
+grep -R -q "producesCombinedRecordingFile" Sources tests
 grep -R -q "ma.processing" Sources tests App UITests
 grep -R -q "ma.transcript" Sources tests App UITests
 grep -R -q "ma.transcriptAction" Sources tests App UITests
@@ -94,8 +98,17 @@ grep -R -q "XCUIApplication" UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MA_NATIVE_APP_SMOKE_FIXTURE" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MeetingAssistantNativeAppUITests" MeetingAssistantNative.xcodeproj/project.pbxproj
 
-if grep -R --include '*.swift' -n -E 'ScreenCaptureKit|AVCapture|CGDisplayStream|SCStream|AVAudioEngine|AVAudioRecorder|normalize_audio|URLSession|NSPasteboard|API_KEY|SECRET|TOKEN' Sources tests App UITests; then
-  echo "native-app architecture check failed: native-app must not implement capture frameworks, processing normalization, external network calls, real pasteboard, or secrets." >&2
+apple_adapter_file='Sources/MeetingAssistantNative/AppleScreenCaptureKitNativeCaptureAdapter.swift'
+apple_framework_forbidden='(^[[:space:]]*import[[:space:]]+(ScreenCaptureKit|AVFoundation|CoreAudio|CoreMediaIO|ReplayKit|Network)\b|SCStream\b|SCRecordingOutput\b|SCContentFilter\b|SCShareableContent\b|AVCapture|CGDisplayStream|AVAudioEngine|AVAudioRecorder|AudioQueue|AudioUnit|AudioDevice)'
+
+if grep -R --include '*.swift' -n -E "$apple_framework_forbidden" Sources tests App UITests |
+  grep -v -F "$apple_adapter_file"; then
+  echo "native-app architecture check failed: Apple capture framework usage is allowed only in AppleScreenCaptureKitNativeCaptureAdapter.swift." >&2
+  exit 1
+fi
+
+if grep -R --include '*.swift' -n -E 'normalize_audio|URLSession|URLRequest|URLSessionConfiguration|NWConnection|NWListener|WebSocket|https?://|NSPasteboard|API_KEY|SECRET|TOKEN' Sources tests App UITests; then
+  echo "native-app architecture check failed: native-app must not implement processing normalization, external network calls, real pasteboard, or secrets." >&2
   exit 1
 fi
 
@@ -145,6 +158,13 @@ if grep -R --include '*.swift' -n -E "$native_capture_file_api_forbidden" \
   Sources/MeetingAssistantNative/ControlledNativeCaptureAdapter.swift \
   Sources/MeetingAssistantNative/NativeRecordingCommandClient.swift; then
   echo "native-app architecture check failed: native capture file mutation/checksum IO must stay inside RecordingSessionStore.swift." >&2
+  exit 1
+fi
+
+apple_adapter_forbidden='Process\b|ProcessInfo\b|NSTask\b|posix_spawn|execv|system[[:space:]]*\(|popen[[:space:]]*\(|meeting_assistant_cli|native-helper|processing-cli|helper[[:space:]]+tool|[Oo][Bb][Ss]|[Bb]lack[Hh]ole|[Ff][Ff]mpeg|generate_transcript|generate_speaker_labels|normalize_audio|import_media|export_transcript|delete_session|check_dependencies|URLSession|URLRequest|URLSessionConfiguration|NWConnection|NWListener|WebSocket|https?://|NSPasteboard|NSOpenPanel|NSSavePanel|RecordingSessionStore|session\.json|artifacts/|sha256|checksum'
+
+if grep -n -E "$apple_adapter_forbidden" "$apple_adapter_file"; then
+  echo "native-app architecture check failed: Apple ScreenCaptureKit adapter must stay inside capture framework/temp-file boundary and must not call helpers/CLIs, processing commands, auxiliary capture tools, network APIs, pasteboard, file pickers, or store-owned metadata/checksum paths." >&2
   exit 1
 fi
 

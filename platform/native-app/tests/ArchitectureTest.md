@@ -13,7 +13,7 @@ VS-MA-13 fake recording boundary:
 1. This component may express `start_native_recording` and `stop_recording` through a Swift protocol, deterministic fake client, view model state machine and SwiftUI control.
 2. The fake recording boundary exists only for UI/state verification and must not call a real helper, CLI, capture API or processing internals.
 3. It may expose stable recording accessibility identifiers for status, start, stop, error and saved-summary regions.
-4. It must not implement uncontrolled real capture, ScreenCaptureKit, AVCapture, audio capture frameworks, transcription, speaker labeling, external model calls, public normalize audio commands or dependency downloads.
+4. It must not implement uncontrolled real capture, non-approved capture framework files, AVCapture, audio capture frameworks outside the named Apple adapter exception, transcription, speaker labeling, external model calls, public normalize audio commands or dependency downloads.
 
 VS-MA-14/VS-MA-15 controlled native capture artifact registration boundary:
 
@@ -26,7 +26,18 @@ VS-MA-14/VS-MA-15 controlled native capture artifact registration boundary:
 7. Repeated stop must return the existing final artifact registry without duplicating entries or re-running the adapter.
 8. It may expose additive recording artifact locators under `ma.recording.artifact.<artifact_type>.status` and `.degradation`, while preserving existing `ma.recording.*` locators and phase/status strings.
 9. The app bundle must default to `FakeRecordingCommandClient`; only the Debug/XCTest-only test hook `MA_NATIVE_RECORDING_CLIENT=controlled` may inject `NativeRecordingCommandClient` with `MA_NATIVE_RECORDING_WORKSPACE` or `MEETING_ASSISTANT_WORKSPACE`; Release builds must ignore this env hook and fall back to fake.
-10. It must not invoke processing providers, native-to-processing commands, ScreenCaptureKit, AVFoundation, CoreAudio, OBS, BlackHole, FFmpeg auxiliary capture, external model APIs, network APIs, downloads, real pasteboard, real file pickers or direct delete behavior.
+10. It must not invoke processing providers, native-to-processing commands, Apple capture frameworks outside `AppleScreenCaptureKitNativeCaptureAdapter.swift`, CoreAudio, OBS, BlackHole, FFmpeg auxiliary capture, external model APIs, network APIs, downloads, real pasteboard, real file pickers or direct delete behavior.
+
+Apple ScreenCaptureKit native capture adapter exception:
+
+1. `AppleScreenCaptureKitNativeCaptureAdapter.swift` is the only native-app Swift file allowed to import `ScreenCaptureKit` and `AVFoundation`, use `SCStream`, `SCContentFilter`, `SCShareableContent`, `SCRecordingOutput` or configure Apple recording output.
+2. The adapter is a VS-MA-14/15 spike implementation of the existing `NativeCaptureAdapter`; it must not add command fields, error codes, exit codes, artifact types, event schema or UI states.
+3. The adapter may use a temporary ScreenCaptureKit recording file only as adapter-local input data. `RecordingSessionStore` remains the only component responsible for final `session.json`, managed artifact paths, `sha256:` checksums, symlink/hardlink/path fail-closed checks and command response materialization.
+4. Because `SCRecordingOutput` produces one combined recording file, the adapter must register the combined file as existing `screen_video` data and express unproven `system_audio`, `microphone_audio` and `mixed_audio` as existing artifact results with `degraded`, `missing` or `failed` plus `degradation_reason`.
+5. If no available combined media file exists at stop, the adapter must fail closed through existing `capture_failed` semantics; it must not invent a successful empty recording.
+6. The adapter may expose only code-level identity and capability summary such as `apple_screencapturekit`, supported screen target, combined-file support and no separate audio artifacts; this is not a command/schema/UI contract.
+7. The adapter must not call OBS, BlackHole, FFmpeg auxiliary capture, helper tools, `processing-cli`, processing commands, external APIs, network APIs, automatic downloads, real pasteboard, real file pickers or direct delete behavior.
+8. The app bundle must not enable this real adapter from a Release env hook. Existing Debug/XCTest-only hooks remain limited to `MA_NATIVE_RECORDING_CLIENT=controlled` and `MA_NATIVE_PROCESSING_CLIENT=process`.
 
 VS-MA-16 native processing state consumer boundary:
 

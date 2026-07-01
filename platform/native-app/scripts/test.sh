@@ -11,7 +11,7 @@ from pathlib import Path
 metadata = json.loads(Path("component.json").read_text(encoding="utf-8"))
 if metadata.get("kind") != "project-component":
     raise SystemExit("native-app test failed: component kind must be project-component")
-expected_behavior = "permission_dependency_status_fake_recording_controlled_native_capture_artifact_registration_processing_state_transcript_review_and_actions"
+expected_behavior = "permission_dependency_status_fake_recording_controlled_and_apple_screencapturekit_native_capture_artifact_registration_processing_state_transcript_review_and_actions"
 if metadata.get("business_behavior") != expected_behavior:
     raise SystemExit(f"native-app test failed: business behavior must be {expected_behavior}")
 if metadata.get("allowed_before_project_mode") is not False:
@@ -24,6 +24,10 @@ if "processing_command_consumer" not in metadata.get("allowed_capabilities", [])
     raise SystemExit("native-app test failed: missing processing command consumer capability")
 if "controlled_native_capture_adapter" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app test failed: missing controlled native capture capability")
+if "apple_screencapturekit_native_capture_adapter" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app test failed: missing Apple ScreenCaptureKit native capture capability")
+if "native_capture_combined_recording_spike" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app test failed: missing combined recording spike capability")
 if "native_capture_artifact_registration" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app test failed: missing native capture artifact registration capability")
 
@@ -33,6 +37,7 @@ required_phrases = (
     "VS-MA-12 boundary",
     "VS-MA-13 fake recording boundary",
     "VS-MA-14/VS-MA-15 controlled native capture artifact registration boundary",
+    "Apple ScreenCaptureKit native capture adapter exception",
     "VS-MA-16 native processing state consumer boundary",
     "VS-MA-17 read-only transcript review boundary",
     "read-only workspace transcript loading boundary",
@@ -41,6 +46,7 @@ required_phrases = (
     "ma.processing.*",
     "MA_NATIVE_RECORDING_CLIENT=controlled",
     "MA_NATIVE_PROCESSING_CLIENT=process",
+    "AppleScreenCaptureKitNativeCaptureAdapter.swift",
     "Debug/XCTest-only",
     "check_dependencies",
     "session.json",
@@ -67,6 +73,7 @@ required_paths = (
     Path("Sources/MeetingAssistantNative/RecordingFakeCommandClient.swift"),
     Path("Sources/MeetingAssistantNative/NativeCaptureAdapter.swift"),
     Path("Sources/MeetingAssistantNative/ControlledNativeCaptureAdapter.swift"),
+    Path("Sources/MeetingAssistantNative/AppleScreenCaptureKitNativeCaptureAdapter.swift"),
     Path("Sources/MeetingAssistantNative/RecordingSessionStore.swift"),
     Path("Sources/MeetingAssistantNative/NativeRecordingCommandClient.swift"),
     Path("Sources/MeetingAssistantNative/NativeCapturePermissionChecker.swift"),
@@ -103,6 +110,7 @@ PY
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 ln -s "$component_dir/Sources" "$tmp_dir/Sources"
+ln -s "$component_dir/App" "$tmp_dir/App"
 ln -s "$component_dir/tests" "$tmp_dir/tests"
 ln -s "$component_dir/UITests" "$tmp_dir/UITests"
 cat > "$tmp_dir/Package.swift" <<'SWIFT'

@@ -181,6 +181,126 @@ struct NativeRecordingCommandClientTests {
     }
 
     @Test
+    func screenCaptureKitAdapterReportsConservativeCapabilities() {
+        let adapter = AppleScreenCaptureKitNativeCaptureAdapter(
+            runtime: FakeAppleScreenCaptureKitRuntime()
+        )
+
+        #expect(adapter.adapterIdentity == "apple_screencapturekit")
+        #expect(adapter.capabilitySummary.adapterID == "apple_screencapturekit")
+        #expect(adapter.capabilitySummary.framework == "ScreenCaptureKit")
+        #expect(adapter.capabilitySummary.supportedCaptureTargets == [.screen])
+        #expect(adapter.capabilitySummary.producedArtifactTypes == NativeCaptureArtifactType.allCases)
+        #expect(adapter.capabilitySummary.producesCombinedRecordingFile == true)
+        #expect(adapter.capabilitySummary.producesSeparateAudioArtifacts == false)
+    }
+
+    @Test
+    func screenCaptureKitAdapterFailsClosedForUnsupportedCaptureTarget() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let runtime = FakeAppleScreenCaptureKitRuntime()
+        let adapter = AppleScreenCaptureKitNativeCaptureAdapter(runtime: runtime)
+        let context = try RecordingSessionStore().makeStartContext(
+            request: StartNativeRecordingRequest(
+                captureTarget: .window,
+                workspaceURL: workspace,
+                captureSystemAudio: true,
+                captureMicrophoneAudio: true
+            ),
+            sessionID: "session-sck-window-fail-closed",
+            startedAt: fixedTimestamp
+        )
+
+        do {
+            try await adapter.start(context)
+            Issue.record("Expected unsupported ScreenCaptureKit target to fail closed.")
+        } catch NativeCaptureAdapterFailure.startFailed(let message) {
+            #expect(message.contains("supports only the screen capture target"))
+        }
+
+        #expect(await runtime.startCalls.isEmpty)
+    }
+
+    @Test
+    func screenCaptureKitCombinedRecordingRegistersPartialAudioDegradation() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let runtime = FakeAppleScreenCaptureKitRuntime(
+            stopBehavior: .recordingData(data("combined-screen-audio-file"))
+        )
+        let adapter = AppleScreenCaptureKitNativeCaptureAdapter(runtime: runtime)
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-sck-combined",
+            adapter: adapter
+        )
+
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let response = try await client.stopRecording(StopRecordingRequest(sessionID: "session-sck-combined"))
+
+        #expect(response.ok == true)
+        #expect(response.status == "recorded")
+        #expect(response.artifacts.map(\.artifactType) == [
+            "screen_video",
+            "system_audio",
+            "microphone_audio",
+            "mixed_audio",
+        ])
+        let screen = try #require(response.artifacts.first { $0.artifactType == "screen_video" })
+        #expect(screen.captureStatus == "available")
+        #expect(screen.format == "mp4")
+        #expect(screen.path == "artifacts/screen_video.mp4")
+        let expectedScreenChecksum = try checksum(
+            for: artifactURL(workspace, "session-sck-combined", "screen_video.mp4")
+        )
+        #expect(screen.checksum == expectedScreenChecksum)
+
+        let system = try #require(response.artifacts.first { $0.artifactType == "system_audio" })
+        let microphone = try #require(response.artifacts.first { $0.artifactType == "microphone_audio" })
+        let mixed = try #require(response.artifacts.first { $0.artifactType == "mixed_audio" })
+        #expect(system.captureStatus == "degraded")
+        #expect(microphone.captureStatus == "degraded")
+        #expect(mixed.captureStatus == "degraded")
+        #expect(system.degradationReason?.contains("combined screen_video file") == true)
+        #expect(microphone.degradationReason?.contains("combined screen_video file") == true)
+        #expect(mixed.degradationReason?.contains("combined recording file") == true)
+
+        let session = try readSessionJSON(workspace: workspace, sessionID: "session-sck-combined")
+        let artifacts = try #require(session["artifacts"] as? [[String: Any]])
+        #expect(artifacts.count == 4)
+        #expect(artifacts.compactMap { $0["checksum"] as? String }.count == 1)
+        #expect(artifacts.compactMap { $0["degradation_reason"] as? String }.count == 3)
+    }
+
+    @Test
+    func screenCaptureKitNoAvailableMediaFailsClosedThroughRecordingClient() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let runtime = FakeAppleScreenCaptureKitRuntime(stopBehavior: .missingRecordingFile)
+        let adapter = AppleScreenCaptureKitNativeCaptureAdapter(runtime: runtime)
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-sck-no-media",
+            adapter: adapter
+        )
+
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let response = try await client.stopRecording(StopRecordingRequest(sessionID: "session-sck-no-media"))
+
+        #expect(response.ok == false)
+        #expect(response.status == "failed")
+        #expect(response.code == .captureFailed)
+        #expect(response.artifacts.count == 4)
+        #expect(response.artifacts.allSatisfy { $0.captureStatus == "failed" })
+        #expect(response.details.allSatisfy { $0.contains("ScreenCaptureKit failed to finish native capture") })
+
+        let session = try readSessionJSON(workspace: workspace, sessionID: "session-sck-no-media")
+        #expect(session["status"] as? String == "failed")
+        #expect((session["artifacts"] as? [[String: Any]])?.count == 4)
+    }
+
+    @Test
     func interruptedPartialCaptureRecordsAvailableArtifactsAndFailsTheRest() async throws {
         let workspace = try temporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
@@ -451,7 +571,7 @@ private func nativeClient(
     workspace: URL,
     sessionID: String,
     permissions: NativeCapturePermissionSnapshot = .granted,
-    adapter: ControlledNativeCaptureAdapter
+    adapter: any NativeCaptureAdapter
 ) -> NativeRecordingCommandClient {
     NativeRecordingCommandClient(
         permissionChecker: StaticNativeCapturePermissionChecker(snapshot: permissions),
@@ -515,6 +635,89 @@ private func checksum(for url: URL) throws -> String {
 
 private enum NativeRecordingCommandClientTestError: Error {
     case invalidSessionJSON
+}
+
+private actor FakeAppleScreenCaptureKitRuntime: AppleScreenCaptureKitRecordingRuntime {
+    enum StartBehavior: Equatable {
+        case success
+        case failure(String)
+    }
+
+    enum StopBehavior: Equatable {
+        case recordingData(Data)
+        case missingRecordingFile
+        case emptyRecordingFile
+        case failure(String)
+    }
+
+    struct StartCall: Equatable {
+        let sessionID: String
+        let outputURL: URL
+        let options: AppleScreenCaptureKitRecordingOptions
+    }
+
+    private let startBehavior: StartBehavior
+    private let stopBehavior: StopBehavior
+    private var outputURLs: [AppleScreenCaptureKitRecordingToken: URL] = [:]
+    private(set) var startCalls: [StartCall] = []
+
+    init(
+        startBehavior: StartBehavior = .success,
+        stopBehavior: StopBehavior = .recordingData(data("screen"))
+    ) {
+        self.startBehavior = startBehavior
+        self.stopBehavior = stopBehavior
+    }
+
+    func startRecording(
+        context: NativeCaptureStartContext,
+        outputURL: URL,
+        options: AppleScreenCaptureKitRecordingOptions
+    ) async throws -> AppleScreenCaptureKitRecordingToken {
+        startCalls.append(
+            StartCall(
+                sessionID: context.sessionID,
+                outputURL: outputURL,
+                options: options
+            )
+        )
+        if case .failure(let message) = startBehavior {
+            throw FakeAppleScreenCaptureKitRuntimeError(message: message)
+        }
+
+        let token = AppleScreenCaptureKitRecordingToken(rawValue: context.sessionID)
+        outputURLs[token] = outputURL
+        return token
+    }
+
+    func stopRecording(
+        _ token: AppleScreenCaptureKitRecordingToken
+    ) async throws -> AppleScreenCaptureKitRecordingFile {
+        guard let outputURL = outputURLs.removeValue(forKey: token) else {
+            throw FakeAppleScreenCaptureKitRuntimeError(message: "unknown fake recording token")
+        }
+
+        switch stopBehavior {
+        case .recordingData(let data):
+            try data.write(to: outputURL)
+        case .missingRecordingFile:
+            break
+        case .emptyRecordingFile:
+            try Data().write(to: outputURL)
+        case .failure(let message):
+            throw FakeAppleScreenCaptureKitRuntimeError(message: message)
+        }
+
+        return AppleScreenCaptureKitRecordingFile(url: outputURL, format: "mp4")
+    }
+}
+
+private struct FakeAppleScreenCaptureKitRuntimeError: Error, LocalizedError, Equatable {
+    let message: String
+
+    var errorDescription: String? {
+        message
+    }
 }
 
 private actor ControlledViewRecordingClient: RecordingCommandClient {

@@ -43,6 +43,7 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
 
         assertPermissionDependencyLocators()
         SwiftUIViewSourceContract.assertPermissionDependencyViewUsesAccessibleStates()
+        SwiftUIViewSourceContract.assertAppBundleReleaseHooksRemainDisabled()
     }
 
     func testRecordingReadinessBlockedIsHostedAndDoesNotStart() async {
@@ -1001,12 +1002,54 @@ private enum SwiftUIViewSourceContract {
         )
     }
 
+    static func assertAppBundleReleaseHooksRemainDisabled(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let source = readAppSource("MeetingAssistantNativeApp.swift", file: file, line: line)
+        assertSource(
+            source,
+            contains: [
+                "MA_NATIVE_RECORDING_CLIENT",
+                "MA_NATIVE_PROCESSING_CLIENT",
+                "isRecordingClientTestHookAllowed",
+                "isProcessClientTestHookAllowed",
+                "#if DEBUG",
+                "#else",
+                "return false",
+                "#endif",
+            ],
+            file: file,
+            line: line
+        )
+        XCTAssertFalse(
+            source.contains("MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit"),
+            "Release or env-driven real recording hook must not be introduced.",
+            file: file,
+            line: line
+        )
+    }
+
     private static func readSource(
         _ filename: String,
         file: StaticString,
         line: UInt
     ) -> String {
         let path = "Sources/MeetingAssistantNative/\(filename)"
+        do {
+            return try String(contentsOfFile: path, encoding: .utf8)
+        } catch {
+            XCTFail("Could not read \(path): \(error)", file: file, line: line)
+            return ""
+        }
+    }
+
+    private static func readAppSource(
+        _ filename: String,
+        file: StaticString,
+        line: UInt
+    ) -> String {
+        let path = "App/\(filename)"
         do {
             return try String(contentsOfFile: path, encoding: .utf8)
         } catch {
