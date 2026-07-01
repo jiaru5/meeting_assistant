@@ -25,6 +25,10 @@ PYTHON = sys.executable
 CLI_ENV_BASE = os.environ.copy()
 
 
+def evidence_marker(stage: str) -> None:
+    print(f"VS-MA-20 provider/e2e marker [non-contract]: import processing chain - {stage}", flush=True)
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -284,6 +288,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
     fixture_checksum = sha256(fixture)
 
     run_check_dependencies_smoke(check_workspace, bin_dir, model_path)
+    evidence_marker("no-auto-download dependency preflight verified")
 
     invalid_delete = run_cli(
         workspace,
@@ -294,6 +299,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
     assert_response_shape(invalid_delete, "delete_session", ok=False, code="invalid_input")
     if workspace.exists():
         raise AssertionError("delete_session invalid path traversal: workspace should not be created")
+    evidence_marker("invalid delete exit-code path verified")
 
     import_response = run_cli(
         workspace,
@@ -320,6 +326,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
         if (session_dir / "artifacts" / derived_name).exists():
             raise AssertionError(f"import_media: unexpected derived artifact {derived_name}")
     assert_no_temp_leftovers(session_dir)
+    evidence_marker("import source/artifact checksum verified")
 
     transcript_response = run_cli(
         workspace,
@@ -360,6 +367,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
     if normalized_path.read_bytes() != mixed_artifact.read_bytes():
         raise AssertionError("generate_transcript: fixture normalizer should copy WAV/PCM input")
     assert_no_temp_leftovers(session_dir)
+    evidence_marker("transcript/normalized artifact verified")
 
     speaker_response = run_cli(
         workspace,
@@ -392,6 +400,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
     if sha256(fixture) != fixture_checksum or sha256(mixed_artifact) != mixed_checksum:
         raise AssertionError("generate_speaker_labels: original media checksum changed")
     assert_no_temp_leftovers(session_dir)
+    evidence_marker("speaker transcript-only fallback/no-auto-upload boundary verified")
 
     export_response = run_cli(
         workspace,
@@ -447,6 +456,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
     if not session_dir.exists():
         raise AssertionError("export_transcript existing target: session must remain")
     assert_no_temp_leftovers(session_dir)
+    evidence_marker("export conflict/retention verified")
 
     declined_delete = run_cli(
         workspace,
@@ -504,6 +514,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
         item_path = Path(str(deleted_item))
         if item_path.is_absolute() or ".." in item_path.parts:
             raise AssertionError(f"delete_session event: deleted item must be relative and contained: {deleted_item}")
+    evidence_marker("delete retention/event verified")
 
 print("p2-c processing local e2e smoke passed.")
 PY

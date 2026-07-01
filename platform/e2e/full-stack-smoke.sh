@@ -41,4 +41,10 @@ run_stage "processing local smoke" "p2-c processing local e2e smoke passed." "./
 run_stage "capture-style processing smoke" "capture-style processing e2e smoke passed." "./platform/e2e/capture-processing-smoke.sh"
 run_stage "native transcript bridge smoke" "processing-to-native transcript bridge e2e smoke passed." "./platform/e2e/native-transcript-bridge-smoke.sh"
 
+echo "VS-MA-20 provider/e2e attribution [non-contract]: import processing chain remains in scope."
+echo "VS-MA-20 provider/e2e attribution [non-contract]: native_recording-style provider chain remains in scope."
+echo "VS-MA-20 provider/e2e attribution [non-contract]: native read bridge checksum remains in scope."
+echo "VS-MA-20 provider/e2e attribution [non-contract]: no-auto-pull precondition remains in scope."
+echo "VS-MA-20 provider/e2e attribution [non-contract]: real native capture, native UI, and release bundle are not proven by this provider smoke."
+
 echo "full-stack e2e smoke passed."
