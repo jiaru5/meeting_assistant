@@ -19,6 +19,7 @@ import wave
 from pathlib import Path
 
 from meeting_assistant_cli.workspace_contract import (
+    acquire_session_lock,
     create_session,
     load_session,
     register_artifact,
@@ -87,6 +88,11 @@ def assert_response_shape(payload: dict, command: str, *, ok: bool, code: str | 
             raise AssertionError(f"{command}: expected code={code}, got {payload['code']!r}")
         if not payload["message"]:
             raise AssertionError(f"{command}: failure message must be explainable")
+
+
+def assert_json_does_not_contain(payload: object, forbidden: str, label: str) -> None:
+    if forbidden and forbidden in json.dumps(payload, ensure_ascii=False, sort_keys=True):
+        raise AssertionError(f"{label}: response must not contain transcript content")
 
 
 def run_cli(workspace: Path, args: list[str], *, expected_exit: int, command: str) -> dict:
@@ -474,6 +480,7 @@ def exercise_default_capture_pipeline(workspace: Path, root: Path) -> None:
         command="export_transcript",
     )
     assert_response_shape(conflict_response, "export_transcript", ok=False, code="path_conflict")
+    assert_json_does_not_contain(conflict_response, transcript_text, "export_transcript existing target")
     if export_target.read_text(encoding="utf-8") != exported_text:
         raise AssertionError("export_transcript existing target: target must not be overwritten")
     if not session_dir.exists():
@@ -486,6 +493,7 @@ def exercise_default_capture_pipeline(workspace: Path, root: Path) -> None:
         command="delete_session",
     )
     assert_response_shape(declined_delete, "delete_session", ok=False, code="invalid_input")
+    assert_json_does_not_contain(declined_delete, transcript_text, "delete_session confirm=false")
     if not session_dir.exists():
         raise AssertionError("delete_session confirm=false: session must remain")
 
@@ -496,6 +504,7 @@ def exercise_default_capture_pipeline(workspace: Path, root: Path) -> None:
         command="delete_session",
     )
     assert_response_shape(delete_response, "delete_session", ok=True)
+    assert_json_does_not_contain(delete_response, transcript_text, "delete_session summary")
     if delete_response["deleted"] is not True or session_dir.exists():
         raise AssertionError("delete_session: session directory must be deleted")
     if not export_target.is_file() or export_target.read_text(encoding="utf-8") != exported_text:
@@ -632,6 +641,92 @@ def exercise_path_boundary_rollback(workspace: Path, root: Path) -> None:
     assert_no_temp_leftovers(session_dir)
 
 
+def exercise_lock_conflict(workspace: Path) -> None:
+    session_id = "capture-lock-conflict"
+    session_dir = create_capture_session(workspace, session_id)
+    original_checksums = capture_artifact_checksums(assert_session_identity(session_dir, session_id=session_id))
+
+    with acquire_session_lock(session_dir):
+        response = run_cli(
+            workspace,
+            ["generate_transcript", "--session-id", session_id],
+            expected_exit=3,
+            command="generate_transcript",
+        )
+
+    assert_response_shape(response, "generate_transcript", ok=False, code="path_conflict")
+    session = assert_session_identity(session_dir, session_id=session_id)
+    artifact_types = {artifact["artifact_type"] for artifact in session.get("artifacts", [])}
+    if "normalized_audio" in artifact_types or "transcript_text" in artifact_types:
+        raise AssertionError("lock conflict: derived artifacts must not be registered")
+    if (session_dir / "artifacts" / "transcript.json").exists():
+        raise AssertionError("lock conflict: transcript.json must not be written")
+    assert_capture_checksums_unchanged(session_dir, original_checksums)
+    assert_no_temp_leftovers(session_dir)
+
+
+def exercise_temp_hardlink_rollback(workspace: Path, root: Path) -> None:
+    session_id = "capture-temp-hardlink"
+    session_dir = create_capture_session(
+        workspace,
+        session_id,
+        system_status="missing",
+        microphone_status="missing",
+    )
+    original_checksums = capture_artifact_checksums(assert_session_identity(session_dir, session_id=session_id))
+    outside = root / "outside-temp-normalized.wav"
+    write_fixture_wav(outside, 97)
+    outside_checksum = sha256_file(outside)
+    temp_path = session_dir / "artifacts" / ".normalized_audio.wav.tmp"
+    os.link(outside, temp_path)
+
+    response = run_cli(
+        workspace,
+        ["generate_transcript", "--session-id", session_id],
+        expected_exit=3,
+        command="generate_transcript",
+    )
+
+    assert_response_shape(response, "generate_transcript", ok=False, code="path_conflict")
+    session = assert_session_identity(session_dir, session_id=session_id)
+    artifact_types = {artifact["artifact_type"] for artifact in session.get("artifacts", [])}
+    if "normalized_audio" in artifact_types or "transcript_text" in artifact_types:
+        raise AssertionError("temp hardlink rollback: derived artifacts must not be registered")
+    if (session_dir / "artifacts" / "normalized_audio.wav").exists() or (session_dir / "artifacts" / "transcript.json").exists():
+        raise AssertionError("temp hardlink rollback: managed derived outputs must not be written")
+    if sha256_file(outside) != outside_checksum:
+        raise AssertionError("temp hardlink rollback: external hardlink target must not be written")
+    if not temp_path.exists() or temp_path.stat().st_nlink < 2:
+        raise AssertionError("temp hardlink rollback: conflicting hardlink should remain for diagnosis")
+    assert_capture_checksums_unchanged(session_dir, original_checksums)
+
+
+def exercise_checksum_drift(workspace: Path) -> None:
+    session_id = "capture-checksum-drift"
+    session_dir = create_capture_session(workspace, session_id)
+    session = assert_session_identity(session_dir, session_id=session_id)
+    original_checksums = capture_artifact_checksums(session)
+    mixed_path = Path(str(artifact_by_type(session, "mixed_audio")["path"]))
+    mixed_path.write_bytes(b"mutated capture bytes")
+
+    response = run_cli(
+        workspace,
+        ["generate_transcript", "--session-id", session_id],
+        expected_exit=3,
+        command="generate_transcript",
+    )
+
+    assert_response_shape(response, "generate_transcript", ok=False, code="path_conflict")
+    session = assert_session_identity(session_dir, session_id=session_id)
+    artifact_types = {artifact["artifact_type"] for artifact in session.get("artifacts", [])}
+    if "normalized_audio" in artifact_types or "transcript_text" in artifact_types:
+        raise AssertionError("checksum drift: derived artifacts must not be registered")
+    if (session_dir / "artifacts" / "normalized_audio.wav").exists() or (session_dir / "artifacts" / "transcript.json").exists():
+        raise AssertionError("checksum drift: derived outputs must not be written")
+    unchanged_types = {key: value for key, value in original_checksums.items() if key != "mixed_audio"}
+    assert_capture_checksums_unchanged(session_dir, unchanged_types)
+
+
 with tempfile.TemporaryDirectory(prefix="meeting-assistant-capture-processing-") as tmp:
     root = Path(tmp)
     workspace = root / "workspace"
@@ -659,6 +754,9 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-capture-processing-")
         unavailable_peer_type="system_audio",
     )
     exercise_path_boundary_rollback(workspace, root)
+    exercise_lock_conflict(workspace)
+    exercise_temp_hardlink_rollback(workspace, root)
+    exercise_checksum_drift(workspace)
 
 print("capture-style processing e2e smoke passed.")
 PY

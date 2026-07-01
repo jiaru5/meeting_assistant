@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -54,8 +55,12 @@ for index, arg in enumerate(args):
         break
 if output_prefix:
     output_path = Path(output_prefix + ".json")
-    if MODE == "invalid_json":
+    if MODE == "missing_output":
+        pass
+    elif MODE == "invalid_json":
         output_path.write_text("not-json", encoding="utf-8")
+    elif MODE == "bad_shape":
+        output_path.write_text(json.dumps({{"transcription": "not-a-list"}}, ensure_ascii=False), encoding="utf-8")
     elif MODE == "invalid_utf8_token_json":
         payload = {{
             "transcription": [{{"offsets": {{"from": 0, "to": 1200}}, "text": "中文 HTTP LLM clean architecture EDA"}}],
@@ -236,6 +241,7 @@ class TranscriptProcessingTests(unittest.TestCase):
         self.assertEqual(response["code"], "artifact_missing")
         self.assertFalse(transcript_exists)
         self.assertIn("local-no-audio", log_text)
+        self.assertEqual(response["details"]["log_path"], str(session_dir / "logs" / "processing.log"))
 
     def test_invalid_adapter_segments_return_processing_failed_without_artifact(self) -> None:
         def invalid_adapter(audio_path: Path, language: str | None, runtime: str | None) -> list[dict]:
@@ -275,6 +281,40 @@ class TranscriptProcessingTests(unittest.TestCase):
         self.assertEqual(final_bytes, original_bytes)
         self.assertFalse(transcript_exists)
         self.assertIn("local-adapter-failure", log_text)
+
+    def test_adapter_exception_failure_text_is_sanitized(self) -> None:
+        sensitive_phrase = "private transcript phrase"
+        secret_value = "sk-testsecret123456"
+        sensitive_path = "/Users/jerry/.local/share/ai-models/whisper.cpp/large-v3/model.bin"
+
+        def failing_adapter(audio_path: Path, language: str | None, runtime: str | None) -> list[dict]:
+            raise RuntimeError(
+                f"{sensitive_phrase} openai_api_key={secret_value} Bearer abcdefghijklmnop {sensitive_path}"
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+
+            response = run_generate_transcript(
+                "session-1",
+                workspace=workspace,
+                request_id="local-sensitive-failure",
+                adapter=failing_adapter,
+            )
+
+            response_json = json.dumps(response, ensure_ascii=False, sort_keys=True)
+            log_text = (session_dir / "logs" / "processing.log").read_text(encoding="utf-8")
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "processing_failed")
+        self.assertNotIn(sensitive_phrase, response_json)
+        self.assertNotIn(secret_value, response_json)
+        self.assertNotIn(sensitive_path, response_json)
+        self.assertNotIn(sensitive_phrase, log_text)
+        self.assertNotIn(secret_value, log_text)
+        self.assertNotIn(sensitive_path, log_text)
+        self.assertIn("local-sensitive-failure", log_text)
 
     def test_adapter_contract_error_returns_processing_failed_without_transcript_artifact(self) -> None:
         def failing_adapter(audio_path: Path, language: str | None, runtime: str | None) -> list[dict]:
@@ -533,8 +573,8 @@ class TranscriptProcessingTests(unittest.TestCase):
         self.assertEqual(response["segment_count"], 1)
         self.assertEqual(payload["segments"][0]["text"], "中文 HTTP LLM clean architecture EDA")
 
-    def test_whisper_cpp_invalid_json_returns_processing_failed_without_transcript(self) -> None:
-        for mode in ("invalid_json", "empty_segments", "bad_offsets"):
+    def test_whisper_cpp_bad_output_returns_processing_failed_without_transcript(self) -> None:
+        for mode in ("invalid_json", "bad_shape", "empty_segments", "bad_offsets"):
             with self.subTest(mode=mode):
                 with tempfile.TemporaryDirectory() as tmp:
                     root = Path(tmp)
@@ -556,6 +596,30 @@ class TranscriptProcessingTests(unittest.TestCase):
                 self.assertEqual(response["code"], "processing_failed")
                 self.assertFalse(transcript_exists)
                 self.assertNotIn("transcript_text", artifact_types)
+
+    def test_whisper_cpp_missing_output_returns_processing_failed_without_transcript(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            runtime_dir = root / "runtime"
+            runtime_dir.mkdir()
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+            env = {
+                "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME": fake_whisper_cli(runtime_dir, "missing_output"),
+                "MEETING_ASSISTANT_TRANSCRIPTION_MODEL": fake_model(runtime_dir),
+            }
+            with mock.patch.dict(os.environ, env, clear=True):
+                response = run_generate_transcript("session-1", workspace=workspace, runtime="whisper_cpp")
+
+            transcript_exists = (session_dir / "artifacts" / "transcript.json").exists()
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "processing_failed")
+        self.assertIn("did not produce JSON output", response["message"])
+        self.assertFalse(transcript_exists)
+        self.assertNotIn("transcript_text", artifact_types)
+        self.assertEqual(response["details"]["log_path"], str(session_dir / "logs" / "processing.log"))
 
     def test_whisper_cpp_runtime_failure_returns_processing_failed_without_transcript(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -579,6 +643,44 @@ class TranscriptProcessingTests(unittest.TestCase):
         self.assertEqual(response["code"], "processing_failed")
         self.assertEqual(response["details"]["exit_code"], 7)
         self.assertFalse(transcript_exists)
+        self.assertNotIn("transcript_text", artifact_types)
+
+    def test_whisper_cpp_timeout_preserves_existing_derived_artifact_without_transcript(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            runtime_dir = root / "runtime"
+            runtime_dir.mkdir()
+            session_dir = create_audio_session(
+                workspace,
+                [
+                    ("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed")),
+                    ("normalized_audio", "normalized_audio.wav", wav_bytes(b"normalized")),
+                ],
+            )
+            normalized_path = session_dir / "artifacts" / "normalized_audio.wav"
+            original_normalized = normalized_path.read_bytes()
+            env = {
+                "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME": fake_whisper_cli(runtime_dir),
+                "MEETING_ASSISTANT_TRANSCRIPTION_MODEL": fake_model(runtime_dir),
+            }
+            timeout = subprocess.TimeoutExpired(cmd=["whisper-cli"], timeout=1)
+            with mock.patch.dict(os.environ, env, clear=True), mock.patch(
+                "meeting_assistant_cli.whisper_cpp_adapter.subprocess.run",
+                side_effect=timeout,
+            ):
+                response = run_generate_transcript("session-1", workspace=workspace, runtime="whisper_cpp")
+
+            final_normalized = normalized_path.read_bytes()
+            transcript_exists = (session_dir / "artifacts" / "transcript.json").exists()
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "processing_failed")
+        self.assertIn("timed out", response["message"])
+        self.assertEqual(final_normalized, original_normalized)
+        self.assertFalse(transcript_exists)
+        self.assertIn("normalized_audio", artifact_types)
         self.assertNotIn("transcript_text", artifact_types)
 
     def test_runtime_request_does_not_reuse_existing_transcript_without_runtime_metadata(self) -> None:

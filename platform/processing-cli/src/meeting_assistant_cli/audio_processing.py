@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, NamedTuple
 
+from .sanitization import redact_sensitive_text, safe_exception_details, sanitize_failure_details
 from .settings import default_workspace
 from .workspace_contract import (
     ContractError,
@@ -53,9 +54,9 @@ def _failure_response(
         "request_id": request_id,
         "stage": "audio_normalization",
         "code": code,
-        "message": message,
+        "message": redact_sensitive_text(message),
         "warnings": [],
-        "details": details or {},
+        "details": sanitize_failure_details(details),
     }
     return response
 
@@ -90,7 +91,8 @@ def _append_processing_log(session_dir: Path, *, request_id: str, code: str, mes
         "Processing log path conflicts with the session boundary.",
         create_parent=True,
     )
-    line = f"{utc_timestamp()} request_id={request_id} stage=audio_normalization code={code} message={message}\n"
+    safe_message = redact_sensitive_text(message)
+    line = f"{utc_timestamp()} request_id={request_id} stage=audio_normalization code={code} message={safe_message}\n"
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(line)
     return log_path
@@ -376,10 +378,10 @@ def run_audio_normalization(
     except Exception as exc:
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)
-        message = f"Audio normalization failed: {exc}" if str(exc) else "Audio normalization failed."
+        message = "Audio normalization failed."
         response_code = "processing_failed"
         response_message = message
-        details = {"error": exc.__class__.__name__, "error_message": str(exc)}
+        details = safe_exception_details(exc)
         if session_dir is not None:
             if registered_artifact_id is not None:
                 _remove_registered_artifact(session_dir, registered_artifact_id)

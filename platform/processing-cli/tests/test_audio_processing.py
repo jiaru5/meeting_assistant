@@ -479,6 +479,7 @@ class AudioProcessingTests(unittest.TestCase):
         self.assertEqual(response["code"], "artifact_missing")
         self.assertFalse(normalized_exists)
         self.assertIn("local-missing-file", log_text)
+        self.assertEqual(response["details"]["log_path"], str(session_dir / "logs" / "processing.log"))
 
     def test_non_wav_source_fails_without_registering_normalized_audio(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -493,6 +494,8 @@ class AudioProcessingTests(unittest.TestCase):
         self.assertFalse(response["ok"])
         self.assertEqual(response["code"], "processing_failed")
         self.assertIn("WAV/PCM", response["message"])
+        self.assertEqual(response["details"]["path"], str(session_dir / "artifacts" / "mixed_audio.mp3"))
+        self.assertEqual(response["details"]["log_path"], str(session_dir / "logs" / "processing.log"))
         self.assertFalse(normalized_exists)
         self.assertNotIn("normalized_audio", artifact_types)
 
@@ -555,8 +558,9 @@ class AudioProcessingTests(unittest.TestCase):
         self.assertEqual(final_checksum, original_checksum)
         self.assertTrue(log_exists)
         self.assertIn("local-failure", log_text)
-        self.assertIn("adapter failed", log_text)
-        self.assertIn("adapter failed", response["message"])
+        self.assertNotIn("adapter failed", log_text)
+        self.assertNotIn("adapter failed", response["message"])
+        self.assertEqual(response["message"], "Audio normalization failed.")
         self.assertNotIn("normalized_audio", artifact_types)
 
     def test_unexpected_adapter_exception_preserves_evidence_and_removes_temp_file(self) -> None:
@@ -581,7 +585,8 @@ class AudioProcessingTests(unittest.TestCase):
         self.assertFalse(response["ok"])
         self.assertEqual(response["code"], "processing_failed")
         self.assertFalse(temp_exists)
-        self.assertIn("unexpected adapter failure", response["message"])
+        self.assertEqual(response["message"], "Audio normalization failed.")
+        self.assertNotIn("unexpected adapter failure", log_text)
         self.assertIn("local-unexpected", log_text)
 
     def test_adapter_contract_error_removes_temp_file_and_writes_processing_evidence(self) -> None:

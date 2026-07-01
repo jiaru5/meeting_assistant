@@ -5,6 +5,7 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Callable
 
 from .transcription_runtime_config import (
     SUPPORTED_TRANSCRIPTION_RUNTIME,
@@ -17,6 +18,8 @@ from .transcription_runtime_config import (
 from .workspace_contract import ContractError
 
 MIXED_LANGUAGE_PROMPT = "HTTP LLM clean architecture EDA"
+WHISPER_CPP_TIMEOUT_SECONDS = 600
+WhisperCppProcessRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 
 def validate_whisper_cpp_config(runtime: str) -> tuple[str, str]:
@@ -53,7 +56,14 @@ def validate_whisper_cpp_config(runtime: str) -> tuple[str, str]:
     return runtime_path, model_path
 
 
-def whisper_cpp_transcript_adapter(audio_path: Path, language: str | None, runtime: str | None) -> list[dict]:
+def whisper_cpp_transcript_adapter(
+    audio_path: Path,
+    language: str | None,
+    runtime: str | None,
+    *,
+    timeout_seconds: int = WHISPER_CPP_TIMEOUT_SECONDS,
+    process_runner: WhisperCppProcessRunner | None = None,
+) -> list[dict]:
     if runtime is None:
         raise ContractError("invalid_input", "whisper.cpp adapter requires an explicit runtime.")
     if not audio_path.is_file():
@@ -79,7 +89,8 @@ def whisper_cpp_transcript_adapter(audio_path: Path, language: str | None, runti
             command.extend(["-l", language])
 
         try:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=600, check=False)
+            runner = process_runner or subprocess.run
+            result = runner(command, capture_output=True, text=True, timeout=timeout_seconds, check=False)
         except subprocess.TimeoutExpired as exc:
             raise ContractError("processing_failed", "whisper.cpp runtime timed out.", runtime=runtime) from exc
         except OSError as exc:

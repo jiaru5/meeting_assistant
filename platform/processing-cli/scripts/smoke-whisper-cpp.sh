@@ -6,26 +6,28 @@ cd "$component_dir"
 
 default_smoke_audio="$HOME/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav"
 smoke_audio="${MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO:-$default_smoke_audio}"
+pass_marker="whisper.cpp smoke passed."
 
 if [ -z "${MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME:-}" ] || [ -z "${MEETING_ASSISTANT_TRANSCRIPTION_MODEL:-}" ]; then
   if [ "${MEETING_ASSISTANT_REQUIRE_WHISPER_CPP_SMOKE:-0}" = "1" ]; then
-    echo "whisper.cpp smoke failed: MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME and MEETING_ASSISTANT_TRANSCRIPTION_MODEL are required." >&2
+    echo "whisper.cpp smoke failed: required runtime/model env is not configured; set MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME and MEETING_ASSISTANT_TRANSCRIPTION_MODEL." >&2
     exit 1
   fi
-  echo "whisper.cpp smoke not run: runtime/model env is not configured."
+  echo "whisper.cpp smoke not run: runtime/model env is not configured; set MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME and MEETING_ASSISTANT_TRANSCRIPTION_MODEL."
   exit 0
 fi
 
 if [ ! -f "$smoke_audio" ]; then
   if [ "${MEETING_ASSISTANT_REQUIRE_WHISPER_CPP_SMOKE:-0}" = "1" ]; then
-    echo "whisper.cpp smoke failed: mixed Chinese-English WAV fixture is required at MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO or $default_smoke_audio." >&2
+    echo "whisper.cpp smoke failed: mixed Chinese-English WAV fixture is required; set MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO or use the documented ~/.local fixture path." >&2
     exit 1
   fi
-  echo "whisper.cpp smoke not run: mixed-language audio fixture is not configured or missing at $default_smoke_audio."
+  echo "whisper.cpp smoke not run: mixed-language audio fixture is missing; set MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO or use the documented ~/.local fixture path."
   exit 0
 fi
 
-PYTHONPATH=src python3 - <<'PY'
+set +e
+smoke_output="$(PYTHONPATH=src python3 - <<'PY'
 import json
 import shutil
 import tempfile
@@ -71,26 +73,45 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-whisper-smoke-") as t
     )
     response = run_generate_transcript("whisper-smoke", workspace=workspace, language="zh", runtime="whisper_cpp")
     if not response.get("ok"):
-        raise SystemExit(json.dumps(response, ensure_ascii=False, sort_keys=True))
+        raise SystemExit(
+            "whisper.cpp smoke failed: generate_transcript returned "
+            + json.dumps(
+                {
+                    "code": response.get("code"),
+                    "message": response.get("message"),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
     transcript_path = Path(str(response["artifacts"][0]["path"]))
     payload = json.loads(transcript_path.read_text(encoding="utf-8"))
     if not payload.get("segments"):
         raise SystemExit("whisper.cpp smoke failed: transcript has no segments")
     transcript = normalized_text(" ".join(str(segment.get("text", "")) for segment in payload["segments"]))
     if re.search(r"[\u4e00-\u9fff]", transcript) is None:
-        raise SystemExit(
-            "whisper.cpp smoke failed: transcript does not contain Chinese text "
-            + json.dumps(transcript, ensure_ascii=False)
-        )
+        raise SystemExit("whisper.cpp smoke failed: transcript validation did not detect Chinese text")
     expected_terms = ["http", "llm", "clean architecture", "eda"]
     missing_terms = [term for term in expected_terms if not includes_term(transcript, term)]
     if missing_terms:
         raise SystemExit(
             "whisper.cpp smoke failed: missing mixed-language terms "
             + json.dumps(missing_terms, ensure_ascii=False)
-            + " in transcript "
-            + json.dumps(transcript, ensure_ascii=False)
         )
 
 print("whisper.cpp smoke passed.")
 PY
+)"
+smoke_status=$?
+set -e
+printf '%s\n' "$smoke_output"
+if [ "$smoke_status" -ne 0 ]; then
+  exit "$smoke_status"
+fi
+case "$smoke_output" in
+  *"$pass_marker"*) ;;
+  *)
+    echo "whisper.cpp smoke failed: runtime completed without pass marker." >&2
+    exit 1
+    ;;
+esac

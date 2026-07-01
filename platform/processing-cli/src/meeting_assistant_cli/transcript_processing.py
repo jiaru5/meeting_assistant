@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .audio_processing import run_audio_normalization
+from .sanitization import redact_sensitive_text, safe_exception_details, sanitize_failure_details
 from .settings import default_workspace
 from .transcription_runtime_config import SUPPORTED_TRANSCRIPTION_RUNTIME
 from .whisper_cpp_adapter import validate_whisper_cpp_config, whisper_cpp_transcript_adapter
@@ -48,9 +49,9 @@ def _failure_response(
         "request_id": request_id,
         "command": "generate_transcript",
         "code": code,
-        "message": message,
+        "message": redact_sensitive_text(message),
         "warnings": [],
-        "details": details or {},
+        "details": sanitize_failure_details(details),
     }
     return response
 
@@ -88,7 +89,8 @@ def _append_processing_log(session_dir: Path, *, request_id: str, code: str, mes
         "Processing log path conflicts with the session boundary.",
         create_parent=True,
     )
-    line = f"{utc_timestamp()} request_id={request_id} command=generate_transcript code={code} message={message}\n"
+    safe_message = redact_sensitive_text(message)
+    line = f"{utc_timestamp()} request_id={request_id} command=generate_transcript code={code} message={safe_message}\n"
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(line)
     return log_path
@@ -475,9 +477,9 @@ def run_generate_transcript(
             )
         return _failure_response(code, message, request_id=assigned_request_id, details=details or None)
     except Exception as exc:
-        message = f"Transcript generation failed: {exc}" if str(exc) else "Transcript generation failed."
+        message = "Transcript generation failed."
         code = "processing_failed"
-        details = {"error": exc.__class__.__name__, "error_message": str(exc)}
+        details = safe_exception_details(exc)
         if session_dir is not None:
             if registered_artifact_id is not None:
                 _remove_registered_artifact(session_dir, registered_artifact_id)
