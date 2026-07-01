@@ -344,6 +344,78 @@ struct ProcessingStateViewModelTests {
             #expect(Bool(false), "Expected ProcessingCommandBridgeError, got \(error).")
         }
     }
+
+    @Test
+    func processRunnerDrivenViewModelCompletesFromStdoutJSON() async throws {
+        let fixture = try ProcessingProcessRunnerFixture(script: .labeledSuccess)
+        let viewModel = ProcessingStateViewModel(
+            commandClient: fixture.runner,
+            readinessState: readyReadinessState(),
+            defaultSessionID: "session-process"
+        )
+
+        await viewModel.start()
+
+        #expect(viewModel.state.phase == .completed)
+        #expect(viewModel.state.statusText == "Processing complete.")
+        #expect(viewModel.state.transcriptID == "transcript-process")
+        #expect(viewModel.state.transcriptArtifactID == "artifact-transcript-process")
+        #expect(viewModel.state.transcriptStatus == "Transcript transcript-process generated with 1 segments.")
+        #expect(viewModel.state.speakerLabelStatus == "Speaker labels artifact artifact-speakers-process is available.")
+        #expect(viewModel.state.successSummary == "Generated transcript and speaker labels for session session-process.")
+        #expect(viewModel.state.errorMessage == nil)
+        #expect(try fixture.recordedInvocationLines() == [
+            "generate_transcript --session-id session-process",
+            "generate_speaker_labels --session-id session-process --transcript-id transcript-process --allow-transcript-only-fallback true",
+        ])
+    }
+
+    @Test
+    func processRunnerDrivenViewModelShowsDegradedStateFromStdoutJSON() async throws {
+        let fixture = try ProcessingProcessRunnerFixture(script: .success)
+        let viewModel = ProcessingStateViewModel(
+            commandClient: fixture.runner,
+            readinessState: readyReadinessState(),
+            defaultSessionID: "session-process"
+        )
+
+        await viewModel.start()
+
+        #expect(viewModel.state.phase == .degraded)
+        #expect(viewModel.state.statusText == "Processing completed with transcript-only speaker labels.")
+        #expect(viewModel.state.transcriptStatus == "Transcript transcript-process generated with 1 segments.")
+        #expect(viewModel.state.degradationReason == "speaker labeling runtime unavailable")
+        #expect(viewModel.state.speakerLabelStatus == "Speaker labels degraded: speaker labeling runtime unavailable")
+        #expect(viewModel.state.errorMessage == nil)
+    }
+
+    @Test
+    func processRunnerDrivenViewModelShowsFailureAndRetryFromStdoutJSON() async throws {
+        let fixture = try ProcessingProcessRunnerFixture(script: .structuredTranscriptFailure)
+        let viewModel = ProcessingStateViewModel(
+            commandClient: fixture.runner,
+            readinessState: readyReadinessState(),
+            defaultSessionID: "session-process"
+        )
+
+        await viewModel.start()
+
+        #expect(viewModel.state.phase == .failed)
+        #expect(viewModel.state.statusText == "Processing failed.")
+        #expect(viewModel.state.errorCode?.rawValue == "processing_failed")
+        #expect(viewModel.state.errorMessage == "Transcript adapter failed.")
+        #expect(viewModel.state.errorDetails == ["exit_code: 5", "stage: transcription"])
+        #expect(viewModel.canRetry)
+
+        await viewModel.retry()
+
+        #expect(viewModel.state.phase == .failed)
+        #expect(viewModel.state.errorCode?.rawValue == "processing_failed")
+        #expect(try fixture.recordedInvocationLines() == [
+            "generate_transcript --session-id session-process",
+            "generate_transcript --session-id session-process",
+        ])
+    }
 }
 
 private func readyReadinessState() -> PermissionDependencyStatusState {
@@ -415,22 +487,27 @@ private func blockedProcessingReadinessState() -> PermissionDependencyStatusStat
 private final class ProcessingProcessRunnerFixture {
     enum Script {
         case success
+        case labeledSuccess
         case structuredTranscriptFailure
         case nonJSONTranscriptFailure
     }
 
     let rootURL: URL
+    let workspaceURL: URL
     let scriptURL: URL
     let argsURL: URL
+    let invocationsURL: URL
     let runner: ProcessingCommandProcessRunner
 
     init(script: Script = .success) throws {
         rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("meeting-assistant-processing-tests-\(UUID().uuidString)", isDirectory: true)
+        workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
         scriptURL = rootURL.appendingPathComponent("meeting-assistant-cli")
         argsURL = rootURL.appendingPathComponent("args.txt")
+        invocationsURL = rootURL.appendingPathComponent("invocations.txt")
 
-        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
         try Self.script(script).write(to: scriptURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
 
@@ -438,6 +515,8 @@ private final class ProcessingProcessRunnerFixture {
             executablePath: scriptURL.path,
             environment: [
                 "MEETING_ASSISTANT_TEST_ARGS_FILE": argsURL.path,
+                "MEETING_ASSISTANT_TEST_INVOCATIONS_FILE": invocationsURL.path,
+                "MEETING_ASSISTANT_WORKSPACE": workspaceURL.path,
             ]
         )
     }
@@ -452,10 +531,16 @@ private final class ProcessingProcessRunnerFixture {
             .map(String.init)
     }
 
+    func recordedInvocationLines() throws -> [String] {
+        try String(contentsOf: invocationsURL, encoding: .utf8)
+            .split(separator: "\n")
+            .map(String.init)
+    }
+
     private static func script(_ script: Script) -> String {
         let transcriptCase: String
         switch script {
-        case .success:
+        case .success, .labeledSuccess:
             transcriptCase = """
                 cat <<JSON
             {
@@ -495,10 +580,26 @@ private final class ProcessingProcessRunnerFixture {
                 exit 5
             """
         }
+        let speakerStatus: String
+        switch script {
+        case .labeledSuccess, .structuredTranscriptFailure, .nonJSONTranscriptFailure:
+            speakerStatus = """
+                "label_status": "labeled",
+                "speaker_labels_artifact_id": "artifact-speakers-process",
+            """
+        case .success:
+            speakerStatus = """
+                "label_status": "transcript_only",
+                "speaker_labels_artifact_id": "artifact-speakers-process",
+                "degradation_reason": "speaker labeling runtime unavailable",
+            """
+        }
 
         return """
         #!/bin/sh
+        : "${MEETING_ASSISTANT_WORKSPACE:?missing workspace}"
         printf '%s\\n' "$@" > "$MEETING_ASSISTANT_TEST_ARGS_FILE"
+        printf '%s\\n' "$*" >> "$MEETING_ASSISTANT_TEST_INVOCATIONS_FILE"
         case "$1" in
           generate_transcript)
         \(transcriptCase)
@@ -511,9 +612,7 @@ private final class ProcessingProcessRunnerFixture {
           "command": "generate_speaker_labels",
           "session_id": "$3",
           "transcript_id": "$5",
-          "label_status": "transcript_only",
-          "speaker_labels_artifact_id": "artifact-speakers-process",
-          "degradation_reason": "speaker labeling runtime unavailable",
+        \(speakerStatus)
           "warnings": []
         }
         JSON

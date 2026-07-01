@@ -41,6 +41,7 @@ test -f Sources/MeetingAssistantNative/ProcessingCommandProcessRunner.swift
 test -f Sources/MeetingAssistantNative/ProcessingCommandFakeClient.swift
 test -f Sources/MeetingAssistantNative/ProcessingStateViewModel.swift
 test -f Sources/MeetingAssistantNative/ProcessingStateView.swift
+test -x test-fixtures/processing-command-fixture.sh
 test -f tests/MeetingAssistantNativeTests/TranscriptReviewActionsViewModelTests.swift
 test -f tests/MeetingAssistantNativeTests/ProcessingStateViewModelTests.swift
 test -f UITests/MeetingAssistantNativeUITests/NativeControlPlaneSmokeTests.swift
@@ -60,6 +61,14 @@ grep -R -q "TranscriptReviewActionsViewModel" Sources tests App UITests
 grep -R -q "TranscriptActionFakeCommandClient" Sources tests App UITests
 grep -R -q "ProcessingStateViewModel" Sources tests App UITests
 grep -R -q "ProcessingCommandFakeClient" Sources tests App UITests
+grep -R -q "ProcessingCommandProcessRunner" Sources tests App UITests
+grep -R -q "MA_NATIVE_PROCESSING_CLIENT" App UITests/MeetingAssistantNativeAppUITests
+grep -R -q "MA_NATIVE_APP_XCTEST" App UITests/MeetingAssistantNativeAppUITests
+grep -R -q "isProcessClientTestHookAllowed" App/MeetingAssistantNativeApp.swift
+grep -R -q "#if DEBUG" App/MeetingAssistantNativeApp.swift
+grep -q "SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;" MeetingAssistantNative.xcodeproj/project.pbxproj
+grep -q '"command": "generate_transcript"' test-fixtures/processing-command-fixture.sh
+grep -q '"command": "generate_speaker_labels"' test-fixtures/processing-command-fixture.sh
 grep -R -q "MA_NATIVE_TRANSCRIPT_WORKSPACE" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "XCTest" UITests
 grep -R -q "NSHostingController" UITests/MeetingAssistantNativeUITests
@@ -102,7 +111,7 @@ fi
 app_bundle_forbidden='meeting_assistant_cli|ProcessingCLIDependencyCheckRunner|DependencyCheckProcessRunner|native-helper|processing-cli|helper[[:space:]]+tool|ScreenCaptureKit|AVCapture|CGDisplayStream|SCStream|AVAudioEngine|AVAudioRecorder|generate_transcript|generate_speaker_labels|normalize_audio|import_media|export_transcript|delete_session|URLSession|URLRequest|NWConnection|NWListener|https?://|curl|wget'
 
 if grep -R --include '*.swift' -n -E "$app_bundle_forbidden" App UITests/MeetingAssistantNativeAppUITests; then
-  echo "native-app architecture check failed: app-bundle smoke must use deterministic in-app fake fixtures and must not call real helpers/CLIs, capture frameworks, processing commands, downloads, or network APIs." >&2
+  echo "native-app architecture check failed: app-bundle smoke must keep processing command strings inside the native-owned shell fixture and must not call provider internals, capture frameworks, downloads, or network APIs." >&2
   exit 1
 fi
 
