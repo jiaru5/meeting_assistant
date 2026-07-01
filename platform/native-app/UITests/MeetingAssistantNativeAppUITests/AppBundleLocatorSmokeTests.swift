@@ -72,7 +72,8 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
     func testControlledNativeRecordingClientWritesSessionArtifactsFromLaunchedAppBundle() throws {
         let recordingFixture = try AppControlledRecordingFixture()
         defer { recordingFixture.cleanup() }
-        let app = launchApp(fixture: "ready", recordingFixture: recordingFixture)
+        let processingFixture = try AppProcessingProcessFixture(mode: "success", workspaceURL: recordingFixture.workspaceURL)
+        let app = launchApp(fixture: "ready", recordingFixture: recordingFixture, processingFixture: processingFixture)
 
         tapButton("ma.recording.startButton", in: app)
 
@@ -108,6 +109,29 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         XCTAssertEqual(artifacts.compactMap { $0["checksum"] as? String }.count, 1)
         XCTAssertEqual(artifacts.compactMap { $0["degradation_reason"] as? String }.count, 3)
         XCTAssertTrue(FileManager.default.fileExists(atPath: recordingFixture.artifactURL("screen_video.mov").path))
+
+        tapProcessingButton("ma.processing.startButton", in: app)
+
+        assertElement("ma.processing.status", in: app, contains: "Processing complete.")
+        assertElement(
+            "ma.processing.transcriptStatus",
+            in: app,
+            contains: "Transcript transcript-process-fixture generated with 2 segments."
+        )
+        assertElement(
+            "ma.processing.speakerLabelStatus",
+            in: app,
+            contains: "Speaker labels artifact artifact-process-speakers is available."
+        )
+        assertElement(
+            "ma.processing.success",
+            in: app,
+            contains: "Generated transcript and speaker labels for session session-app-ui-smoke."
+        )
+        XCTAssertEqual(
+            try processingFixture.invocationLines(),
+            successfulProcessingInvocationLines(sessionID: "session-app-ui-smoke")
+        )
     }
 
     func testStartFailureFixtureShowsStableErrorLocatorFromLaunchedAppBundle() {
@@ -339,6 +363,10 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             contains: "Generated transcript and speaker labels for session session-app-ui-processing."
         )
         assertDoesNotExist("ma.processing.error", in: successApp)
+        XCTAssertEqual(
+            try successFixture.invocationLines(),
+            successfulProcessingInvocationLines(sessionID: "session-app-ui-processing")
+        )
 
         let degradedFixture = try AppProcessingProcessFixture(mode: "degraded")
         let degradedApp = launchApp(fixture: "processing-transcript-only", processingFixture: degradedFixture)
@@ -352,6 +380,10 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         )
         assertElement("ma.processing.degradation", in: degradedApp, contains: "speaker labeling runtime unavailable")
         assertDoesNotExist("ma.processing.error", in: degradedApp)
+        XCTAssertEqual(
+            try degradedFixture.invocationLines(),
+            successfulProcessingInvocationLines(sessionID: "session-app-ui-processing")
+        )
 
         let failureFixture = try AppProcessingProcessFixture(mode: "transcript-failure")
         let failureApp = launchApp(fixture: "processing-failure", processingFixture: failureFixture)
@@ -367,6 +399,10 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
 
         assertElement("ma.processing.status", in: failureApp, contains: "Processing failed.")
         assertElement("ma.processing.error", in: failureApp, contains: "Transcript adapter failed from process fixture.")
+        XCTAssertEqual(
+            try failureFixture.invocationLines(),
+            failedRetryProcessingInvocationLines(sessionID: "session-app-ui-processing")
+        )
     }
 
     private func launchApp(
@@ -603,6 +639,44 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         control.click()
     }
 
+    private func successfulProcessingInvocationLines(sessionID: String) -> [String] {
+        [
+            transcriptInvocationLine(sessionID: sessionID),
+            speakerLabelsInvocationLine(sessionID: sessionID),
+        ]
+    }
+
+    private func failedRetryProcessingInvocationLines(sessionID: String) -> [String] {
+        [
+            transcriptInvocationLine(sessionID: sessionID),
+            transcriptInvocationLine(sessionID: sessionID),
+        ]
+    }
+
+    private func transcriptInvocationLine(sessionID: String) -> String {
+        [
+            processingCommandName("generate", "transcript"),
+            "--session-id",
+            sessionID,
+        ].joined(separator: " ")
+    }
+
+    private func speakerLabelsInvocationLine(sessionID: String) -> String {
+        [
+            processingCommandName("generate", "speaker", "labels"),
+            "--session-id",
+            sessionID,
+            "--transcript-id",
+            "transcript-process-fixture",
+            "--allow-transcript-only-fallback",
+            "true",
+        ].joined(separator: " ")
+    }
+
+    private func processingCommandName(_ parts: String...) -> String {
+        parts.joined(separator: "_")
+    }
+
     private func bringAppToForeground(
         _ app: XCUIApplication,
         beforeTapping identifier: String,
@@ -828,7 +902,7 @@ private final class AppProcessingProcessFixture {
     let cliURL: URL
     let invocationsURL: URL
 
-    init(mode: String, sourceFile: StaticString = #filePath) throws {
+    init(mode: String, workspaceURL externalWorkspaceURL: URL? = nil, sourceFile: StaticString = #filePath) throws {
         self.mode = mode
         let nativeAppRootURL = URL(fileURLWithPath: String(describing: sourceFile))
             .deletingLastPathComponent()
@@ -843,8 +917,9 @@ private final class AppProcessingProcessFixture {
 
         rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("ma-native-processing-app-\(UUID().uuidString)", isDirectory: true)
-        workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        workspaceURL = externalWorkspaceURL ?? rootURL.appendingPathComponent("workspace", isDirectory: true)
         invocationsURL = rootURL.appendingPathComponent("invocations.txt")
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
     }
 
@@ -863,5 +938,13 @@ private final class AppProcessingProcessFixture {
 
     func cleanup() {
         try? FileManager.default.removeItem(at: rootURL)
+    }
+
+    func invocationLines() throws -> [String] {
+        guard FileManager.default.fileExists(atPath: invocationsURL.path) else {
+            return []
+        }
+        let content = try String(contentsOf: invocationsURL, encoding: .utf8)
+        return content.split(whereSeparator: \.isNewline).map(String.init)
     }
 }
