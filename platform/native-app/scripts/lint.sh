@@ -26,6 +26,11 @@ required = [
     "Sources/MeetingAssistantNative/PermissionDependencyStatusView.swift",
     "Sources/MeetingAssistantNative/RecordingCommandClient.swift",
     "Sources/MeetingAssistantNative/RecordingFakeCommandClient.swift",
+    "Sources/MeetingAssistantNative/NativeCaptureAdapter.swift",
+    "Sources/MeetingAssistantNative/ControlledNativeCaptureAdapter.swift",
+    "Sources/MeetingAssistantNative/RecordingSessionStore.swift",
+    "Sources/MeetingAssistantNative/NativeRecordingCommandClient.swift",
+    "Sources/MeetingAssistantNative/NativeCapturePermissionChecker.swift",
     "Sources/MeetingAssistantNative/RecordingControlViewModel.swift",
     "Sources/MeetingAssistantNative/RecordingControlView.swift",
     "Sources/MeetingAssistantNative/TranscriptReviewReadModel.swift",
@@ -43,6 +48,7 @@ required = [
     "Sources/MeetingAssistantNative/ProcessingStateView.swift",
     "test-fixtures/processing-command-fixture.sh",
     "tests/MeetingAssistantNativeTests/PermissionDependencyStatusViewModelTests.swift",
+    "tests/MeetingAssistantNativeTests/NativeRecordingCommandClientTests.swift",
     "tests/MeetingAssistantNativeTests/RecordingControlViewModelTests.swift",
     "tests/MeetingAssistantNativeTests/TranscriptReviewViewModelTests.swift",
     "tests/MeetingAssistantNativeTests/TranscriptReviewActionsViewModelTests.swift",
@@ -60,7 +66,7 @@ if metadata.get("id") != "native-app":
     raise SystemExit("native-app lint failed: component id mismatch")
 if metadata.get("kind") != "project-component":
     raise SystemExit("native-app lint failed: component kind must be project-component")
-expected_behavior = "permission_dependency_status_fake_recording_processing_state_transcript_review_and_actions"
+expected_behavior = "permission_dependency_status_fake_recording_controlled_native_capture_artifact_registration_processing_state_transcript_review_and_actions"
 if metadata.get("business_behavior") != expected_behavior:
     raise SystemExit(f"native-app lint failed: business behavior must be {expected_behavior}")
 if "read_only_workspace_transcript_loading" not in metadata.get("allowed_capabilities", []):
@@ -69,6 +75,10 @@ if "fake_transcript_action_command_client" not in metadata.get("allowed_capabili
     raise SystemExit("native-app lint failed: missing fake transcript action capability")
 if "processing_command_consumer" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app lint failed: missing processing command consumer capability")
+if "controlled_native_capture_adapter" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app lint failed: missing controlled native capture capability")
+if "native_capture_artifact_registration" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app lint failed: missing native capture artifact registration capability")
 
 project = (root / "MeetingAssistantNative.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
 required_project_snippets = [
@@ -89,10 +99,27 @@ required_project_snippets = [
     "ProcessingCommandFakeClient.swift",
     "ProcessingStateViewModel.swift",
     "ProcessingStateView.swift",
+    "NativeCaptureAdapter.swift",
+    "ControlledNativeCaptureAdapter.swift",
+    "RecordingSessionStore.swift",
+    "NativeRecordingCommandClient.swift",
+    "NativeCapturePermissionChecker.swift",
 ]
 missing_project_snippets = [snippet for snippet in required_project_snippets if snippet not in project]
 if missing_project_snippets:
     raise SystemExit(f"native-app lint failed: xcodeproj missing {missing_project_snippets}")
+
+app_source = (root / "App/MeetingAssistantNativeApp.swift").read_text(encoding="utf-8")
+required_app_snippets = [
+    "MA_NATIVE_RECORDING_CLIENT",
+    "MA_NATIVE_RECORDING_WORKSPACE",
+    "NativeRecordingCommandClient",
+    "isRecordingClientTestHookAllowed",
+    "MA_NATIVE_PROCESSING_CLIENT",
+]
+missing_app_snippets = [snippet for snippet in required_app_snippets if snippet not in app_source]
+if missing_app_snippets:
+    raise SystemExit(f"native-app lint failed: app bundle missing test hook snippets {missing_app_snippets}")
 PY
 
 echo "native-app lint passed."

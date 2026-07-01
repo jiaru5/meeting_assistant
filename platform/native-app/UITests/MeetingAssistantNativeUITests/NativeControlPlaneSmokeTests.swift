@@ -615,6 +615,18 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
             file: file,
             line: line
         )
+        XCTAssertEqual(
+            RecordingAccessibilityID.artifactStatus("screen_video"),
+            "ma.recording.artifact.screen_video.status",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            RecordingAccessibilityID.artifactDegradation("mixed_audio"),
+            "ma.recording.artifact.mixed_audio.degradation",
+            file: file,
+            line: line
+        )
     }
 
     private func assertTranscriptLocators(
@@ -898,6 +910,9 @@ private enum SwiftUIViewSourceContract {
                 ".accessibilityIdentifier(RecordingControlAccessibilityID.sessionID)",
                 ".accessibilityIdentifier(RecordingControlAccessibilityID.success)",
                 ".accessibilityIdentifier(RecordingControlAccessibilityID.failure)",
+                ".accessibilityIdentifier(",
+                "RecordingControlAccessibilityID.artifactStatus(artifact.artifactType)",
+                "RecordingControlAccessibilityID.artifactDegradation(artifact.artifactType)",
             ],
             file: file,
             line: line

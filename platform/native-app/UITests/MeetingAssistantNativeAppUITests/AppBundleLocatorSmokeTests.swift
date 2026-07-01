@@ -69,6 +69,47 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         assertElement("ma.recording.savedSummary", in: app, contains: "Saved 2 recording artifacts.")
     }
 
+    func testControlledNativeRecordingClientWritesSessionArtifactsFromLaunchedAppBundle() throws {
+        let recordingFixture = try AppControlledRecordingFixture()
+        defer { recordingFixture.cleanup() }
+        let app = launchApp(fixture: "ready", recordingFixture: recordingFixture)
+
+        tapButton("ma.recording.startButton", in: app)
+
+        assertElement("ma.recording.status", in: app, contains: "Recording in progress.")
+        assertElement("ma.recording.sessionID", in: app, contains: recordingFixture.sessionID)
+        tapButton("ma.recording.stopButton", in: app)
+
+        assertElement("ma.recording.status", in: app, contains: "Recording saved.")
+        assertElement("ma.recording.savedSummary", in: app, contains: "Saved 1 recording artifact.")
+        assertElement("ma.recording.artifact.screen_video.status", in: app, contains: "screen_video: available")
+        assertElement("ma.recording.artifact.system_audio.status", in: app, contains: "system_audio: missing")
+        assertElement(
+            "ma.recording.artifact.system_audio.degradation",
+            in: app,
+            contains: "system audio unavailable in controlled app fixture"
+        )
+        assertElement("ma.recording.artifact.microphone_audio.status", in: app, contains: "microphone_audio: degraded")
+        assertElement(
+            "ma.recording.artifact.microphone_audio.degradation",
+            in: app,
+            contains: "microphone audio degraded in controlled app fixture"
+        )
+        assertElement("ma.recording.artifact.mixed_audio.status", in: app, contains: "mixed_audio: missing")
+
+        let session = try recordingFixture.sessionMetadata()
+        XCTAssertEqual(session["id"] as? String, recordingFixture.sessionID)
+        XCTAssertEqual(session["source_type"] as? String, "native_recording")
+        XCTAssertEqual(session["status"] as? String, "recorded")
+        XCTAssertEqual(session["workspace_dir"] as? String, recordingFixture.sessionRootURL.path)
+        let artifacts = try XCTUnwrap(session["artifacts"] as? [[String: Any]])
+        XCTAssertEqual(artifacts.count, 4)
+        XCTAssertEqual(artifacts.filter { $0["capture_status"] as? String == "available" }.count, 1)
+        XCTAssertEqual(artifacts.compactMap { $0["checksum"] as? String }.count, 1)
+        XCTAssertEqual(artifacts.compactMap { $0["degradation_reason"] as? String }.count, 3)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recordingFixture.artifactURL("screen_video.mov").path))
+    }
+
     func testStartFailureFixtureShowsStableErrorLocatorFromLaunchedAppBundle() {
         let app = launchApp(fixture: "start-failure")
 
@@ -332,9 +373,16 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         fixture: String? = nil,
         workspaceURL: URL? = nil,
         sessionID: String? = nil,
+        recordingFixture: AppControlledRecordingFixture? = nil,
         processingFixture: AppProcessingProcessFixture? = nil
     ) -> XCUIApplication {
         dismissSpotlightIfPresent()
+        launchedApp?.terminate()
+        if let launchedApp {
+            _ = launchedApp.wait(for: .notRunning, timeout: 5)
+        }
+        launchedApp = nil
+
         let app = XCUIApplication()
         app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
         if builtInScreen() != nil {
@@ -346,6 +394,9 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         if let workspaceURL, let sessionID {
             app.launchEnvironment["MA_NATIVE_TRANSCRIPT_WORKSPACE"] = workspaceURL.path
             app.launchEnvironment["MA_NATIVE_TRANSCRIPT_SESSION_ID"] = sessionID
+        }
+        if let recordingFixture {
+            recordingFixture.applyLaunchEnvironment(to: app)
         }
         if let processingFixture {
             processingFixture.applyLaunchEnvironment(to: app)
@@ -381,10 +432,17 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
     }
 
     private func element(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
-        let element = app
+        var element = app
             .descendants(matching: .any)
             .matching(identifier: identifier)
             .firstMatch
+        if !element.waitForExistence(timeout: 2) {
+            scrollTowardElement(in: app, targetIdentifier: identifier)
+            element = app
+                .descendants(matching: .any)
+                .matching(identifier: identifier)
+                .firstMatch
+        }
         XCTAssertTrue(element.waitForExistence(timeout: 5), "Expected element \(identifier) to exist.")
         return element
     }
@@ -602,6 +660,31 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         }
     }
 
+    private func scrollTowardElement(
+        in app: XCUIApplication,
+        targetIdentifier: String
+    ) {
+        let scrollView = app.scrollViews.firstMatch
+        guard scrollView.exists else {
+            return
+        }
+
+        for _ in 0..<8 {
+            let element = app
+                .descendants(matching: .any)
+                .matching(identifier: targetIdentifier)
+                .firstMatch
+            if element.exists {
+                return
+            }
+            if app.state != .runningForeground {
+                app.activate()
+                _ = app.wait(for: .runningForeground, timeout: 5)
+            }
+            scrollView.swipeUp()
+        }
+    }
+
     private func createWorkspaceTranscriptOnlyFixture() throws -> (workspaceURL: URL, sessionID: String) {
         let sessionID = "session-app-workspace-transcript"
         let workspaceURL = FileManager.default.temporaryDirectory
@@ -690,6 +773,51 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         let digest = SHA256.hash(data: data)
         let hex = digest.map { String(format: "%02x", $0) }.joined()
         return "sha256:\(hex)"
+    }
+}
+
+private final class AppControlledRecordingFixture {
+    let rootURL: URL
+    let workspaceURL: URL
+    let sessionID = "session-app-ui-smoke"
+
+    var sessionRootURL: URL {
+        workspaceURL
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+    }
+
+    init() throws {
+        rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ma-native-recording-app-\(UUID().uuidString)", isDirectory: true)
+        workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        cleanup()
+    }
+
+    func applyLaunchEnvironment(to app: XCUIApplication) {
+        app.launchEnvironment["MA_NATIVE_RECORDING_CLIENT"] = "controlled"
+        app.launchEnvironment["MA_NATIVE_APP_XCTEST"] = "1"
+        app.launchEnvironment["MA_NATIVE_RECORDING_WORKSPACE"] = workspaceURL.path
+    }
+
+    func sessionMetadata() throws -> [String: Any] {
+        let data = try Data(contentsOf: sessionRootURL.appendingPathComponent("session.json"))
+        let payload = try JSONSerialization.jsonObject(with: data)
+        return try XCTUnwrap(payload as? [String: Any])
+    }
+
+    func artifactURL(_ filename: String) -> URL {
+        sessionRootURL
+            .appendingPathComponent("artifacts", isDirectory: true)
+            .appendingPathComponent(filename, isDirectory: false)
+    }
+
+    func cleanup() {
+        try? FileManager.default.removeItem(at: rootURL)
     }
 }
 

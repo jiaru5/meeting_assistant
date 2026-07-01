@@ -69,6 +69,8 @@ public struct RecordingCommandArtifact: Equatable, Identifiable, Sendable {
     public let path: String?
     public let captureStatus: String
     public let degradationReason: String?
+    public let createdAt: String?
+    public let checksum: String?
 
     public init(
         id: String,
@@ -77,7 +79,9 @@ public struct RecordingCommandArtifact: Equatable, Identifiable, Sendable {
         format: String? = nil,
         path: String? = nil,
         captureStatus: String = "available",
-        degradationReason: String? = nil
+        degradationReason: String? = nil,
+        createdAt: String? = nil,
+        checksum: String? = nil
     ) {
         self.id = id
         self.sessionID = sessionID
@@ -86,6 +90,8 @@ public struct RecordingCommandArtifact: Equatable, Identifiable, Sendable {
         self.path = path
         self.captureStatus = captureStatus
         self.degradationReason = degradationReason
+        self.createdAt = createdAt
+        self.checksum = checksum
     }
 }
 

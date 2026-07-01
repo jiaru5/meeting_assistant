@@ -11,6 +11,14 @@ public enum RecordingAccessibilityID {
     public static let success = savedSummary
 
     public static let error = errorSummary
+
+    public static func artifactStatus(_ artifactType: String) -> String {
+        "ma.recording.artifact.\(artifactType).status"
+    }
+
+    public static func artifactDegradation(_ artifactType: String) -> String {
+        "ma.recording.artifact.\(artifactType).degradation"
+    }
 }
 
 public enum RecordingControlAccessibilityID {
@@ -25,6 +33,14 @@ public enum RecordingControlAccessibilityID {
     public static let success = RecordingAccessibilityID.savedSummary
     public static let failure = RecordingAccessibilityID.error
     public static let warnings = "ma.recording.warnings"
+
+    public static func artifactStatus(_ artifactType: String) -> String {
+        RecordingAccessibilityID.artifactStatus(artifactType)
+    }
+
+    public static func artifactDegradation(_ artifactType: String) -> String {
+        RecordingAccessibilityID.artifactDegradation(artifactType)
+    }
 }
 
 public struct RecordingControlView: View {
@@ -85,6 +101,29 @@ public struct RecordingControlView: View {
                     .foregroundStyle(.secondary)
                     .accessibilityLabel(savedSummary)
                     .accessibilityIdentifier(RecordingControlAccessibilityID.success)
+            }
+
+            if !viewModel.state.artifacts.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(viewModel.state.artifacts) { artifact in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(artifact.artifactType): \(artifact.captureStatus)")
+                                .accessibilityLabel("\(artifact.artifactType): \(artifact.captureStatus)")
+                                .accessibilityIdentifier(
+                                    RecordingControlAccessibilityID.artifactStatus(artifact.artifactType)
+                                )
+                            if let degradationReason = artifact.degradationReason {
+                                Text(degradationReason)
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityLabel(degradationReason)
+                                    .accessibilityIdentifier(
+                                        RecordingControlAccessibilityID.artifactDegradation(artifact.artifactType)
+                                    )
+                            }
+                        }
+                    }
+                }
+                .font(.caption)
             }
 
             if let errorMessage = viewModel.state.errorMessage {

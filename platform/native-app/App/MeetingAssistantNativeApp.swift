@@ -25,6 +25,8 @@ private struct NativeControlPlaneRootView: View {
 
     init(configuration: NativeControlPlaneFixtureConfiguration) {
         let readinessState = configuration.readinessState
+        let recordingWorkspaceURL = configuration.recordingWorkspaceURL()
+        let recordingCommandClient = configuration.makeRecordingCommandClient()
         let processingCommandClient = configuration.makeProcessingCommandClient()
         _permissionViewModel = StateObject(
             wrappedValue: PermissionDependencyStatusViewModel(
@@ -34,13 +36,11 @@ private struct NativeControlPlaneRootView: View {
         )
         _recordingViewModel = StateObject(
             wrappedValue: RecordingControlViewModel(
-                commandClient: FakeRecordingCommandClient(
-                    script: configuration.recordingScript,
-                    sessionID: configuration.sessionID
-                ),
+                commandClient: recordingCommandClient,
                 readinessState: readinessState,
                 title: "UI smoke recording",
-                captureTarget: .screen
+                captureTarget: .screen,
+                workspaceURL: recordingWorkspaceURL
             )
         )
         _processingViewModel = StateObject(
@@ -291,6 +291,37 @@ private struct NativeControlPlaneFixtureConfiguration {
 
     var readinessState: PermissionDependencyStatusState {
         PermissionDependencyStatusState.from(dependencyResponse)
+    }
+
+    func makeRecordingCommandClient(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        arguments: [String] = CommandLine.arguments
+    ) -> any RecordingCaptureControlling {
+        let workspaceURL = recordingWorkspaceURL(environment: environment, arguments: arguments)
+        switch NativeRecordingClientMode.fromLaunchEnvironment(environment, workspaceURL: workspaceURL) {
+        case .fake:
+            return FakeRecordingCommandClient(
+                script: recordingScript,
+                sessionID: sessionID
+            )
+        case .controlled:
+            return NativeRecordingCommandClient(
+                permissionChecker: StaticNativeCapturePermissionChecker(snapshot: .granted),
+                captureAdapter: ControlledNativeCaptureAdapter(
+                    stopBehavior: .success(artifacts: Self.controlledRecordingArtifacts)
+                ),
+                sessionIDProvider: { sessionID },
+                timestampProvider: { "2026-07-01T00:00:00Z" },
+                requestIDProvider: { command in "app-controlled-\(command.rawValue)" }
+            )
+        }
+    }
+
+    func recordingWorkspaceURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        arguments: [String] = CommandLine.arguments
+    ) -> URL? {
+        Self.recordingWorkspaceURL(environment: environment, arguments: arguments)
     }
 
     func makeProcessingCommandClient(
@@ -636,6 +667,71 @@ private struct NativeControlPlaneFixtureConfiguration {
             .first { $0.hasPrefix(prefix) }
             .map { String($0.dropFirst(prefix.count)) }
     }
+
+    private static func recordingWorkspaceURL(
+        environment: [String: String],
+        arguments: [String]
+    ) -> URL? {
+        let workspacePath = environment["MA_NATIVE_RECORDING_WORKSPACE"]
+            ?? environment["MEETING_ASSISTANT_WORKSPACE"]
+            ?? argumentValue(named: "--ma-native-recording-workspace", in: arguments)
+        guard let workspacePath = workspacePath?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !workspacePath.isEmpty else {
+            return nil
+        }
+        return URL(fileURLWithPath: workspacePath, isDirectory: true)
+    }
+
+    private static var controlledRecordingArtifacts: [NativeCaptureArtifactResult] {
+        [
+            .available(
+                .screenVideo,
+                format: "mov",
+                data: Data("controlled app screen video".utf8)
+            ),
+            .missing(
+                .systemAudio,
+                reason: "system audio unavailable in controlled app fixture"
+            ),
+            .degraded(
+                .microphoneAudio,
+                reason: "microphone audio degraded in controlled app fixture"
+            ),
+            .missing(
+                .mixedAudio,
+                reason: "mixed audio missing because controlled app fixture lacks one input"
+            ),
+        ]
+    }
+}
+
+private enum NativeRecordingClientMode {
+    case fake
+    case controlled
+
+    static func fromLaunchEnvironment(
+        _ environment: [String: String],
+        workspaceURL: URL?
+    ) -> NativeRecordingClientMode {
+        let rawValue = environment["MA_NATIVE_RECORDING_CLIENT"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard rawValue == "controlled",
+              workspaceURL != nil,
+              isRecordingClientTestHookAllowed(environment)
+        else {
+            return .fake
+        }
+        return .controlled
+    }
+
+    private static func isRecordingClientTestHookAllowed(_ environment: [String: String]) -> Bool {
+        #if DEBUG
+        return isNativeAppXCTestEnvironment(environment)
+        #else
+        return false
+        #endif
+    }
 }
 
 private enum NativeProcessingClientMode {
@@ -654,18 +750,18 @@ private enum NativeProcessingClientMode {
 
     private static func isProcessClientTestHookAllowed(_ environment: [String: String]) -> Bool {
         #if DEBUG
-        return isXCTestEnvironment(environment)
+        return isNativeAppXCTestEnvironment(environment)
         #else
         return false
         #endif
     }
+}
 
-    private static func isXCTestEnvironment(_ environment: [String: String]) -> Bool {
-        environment["MA_NATIVE_APP_XCTEST"] == "1"
-            || environment["XCTestConfigurationFilePath"] != nil
-            || environment["XCTestBundlePath"] != nil
-            || environment["XCInjectBundleInto"] != nil
-    }
+private func isNativeAppXCTestEnvironment(_ environment: [String: String]) -> Bool {
+    environment["MA_NATIVE_APP_XCTEST"] == "1"
+        || environment["XCTestConfigurationFilePath"] != nil
+        || environment["XCTestBundlePath"] != nil
+        || environment["XCInjectBundleInto"] != nil
 }
 
 private extension TranscriptReviewInput {

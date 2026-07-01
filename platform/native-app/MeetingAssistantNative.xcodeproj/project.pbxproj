@@ -26,10 +26,15 @@
 		C00000000000000000000017 /* TranscriptReviewActionsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000019 /* TranscriptReviewActionsViewModel.swift */; };
 		C00000000000000000000018 /* TranscriptReviewActionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000020 /* TranscriptReviewActionsView.swift */; };
 		C00000000000000000000019 /* ProcessingCommandClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000021 /* ProcessingCommandClient.swift */; };
-		C00000000000000000000020 /* ProcessingCommandProcessRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000022 /* ProcessingCommandProcessRunner.swift */; };
-		C00000000000000000000021 /* ProcessingCommandFakeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000023 /* ProcessingCommandFakeClient.swift */; };
-		C00000000000000000000022 /* ProcessingStateViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000024 /* ProcessingStateViewModel.swift */; };
-		C00000000000000000000023 /* ProcessingStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000025 /* ProcessingStateView.swift */; };
+			C00000000000000000000020 /* ProcessingCommandProcessRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000022 /* ProcessingCommandProcessRunner.swift */; };
+			C00000000000000000000021 /* ProcessingCommandFakeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000023 /* ProcessingCommandFakeClient.swift */; };
+			C00000000000000000000022 /* ProcessingStateViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000024 /* ProcessingStateViewModel.swift */; };
+			C00000000000000000000023 /* ProcessingStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000025 /* ProcessingStateView.swift */; };
+			C00000000000000000000024 /* NativeCaptureAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000026 /* NativeCaptureAdapter.swift */; };
+			C00000000000000000000025 /* ControlledNativeCaptureAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000027 /* ControlledNativeCaptureAdapter.swift */; };
+			C00000000000000000000026 /* RecordingSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000028 /* RecordingSessionStore.swift */; };
+			C00000000000000000000027 /* NativeRecordingCommandClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000029 /* NativeRecordingCommandClient.swift */; };
+			C00000000000000000000028 /* NativeCapturePermissionChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000030 /* NativeCapturePermissionChecker.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -65,9 +70,14 @@
 		B00000000000000000000020 /* TranscriptReviewActionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptReviewActionsView.swift; sourceTree = "<group>"; };
 		B00000000000000000000021 /* ProcessingCommandClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingCommandClient.swift; sourceTree = "<group>"; };
 		B00000000000000000000022 /* ProcessingCommandProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingCommandProcessRunner.swift; sourceTree = "<group>"; };
-		B00000000000000000000023 /* ProcessingCommandFakeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingCommandFakeClient.swift; sourceTree = "<group>"; };
-		B00000000000000000000024 /* ProcessingStateViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingStateViewModel.swift; sourceTree = "<group>"; };
-		B00000000000000000000025 /* ProcessingStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingStateView.swift; sourceTree = "<group>"; };
+			B00000000000000000000023 /* ProcessingCommandFakeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingCommandFakeClient.swift; sourceTree = "<group>"; };
+			B00000000000000000000024 /* ProcessingStateViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingStateViewModel.swift; sourceTree = "<group>"; };
+			B00000000000000000000025 /* ProcessingStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingStateView.swift; sourceTree = "<group>"; };
+			B00000000000000000000026 /* NativeCaptureAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCaptureAdapter.swift; sourceTree = "<group>"; };
+			B00000000000000000000027 /* ControlledNativeCaptureAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlledNativeCaptureAdapter.swift; sourceTree = "<group>"; };
+			B00000000000000000000028 /* RecordingSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingSessionStore.swift; sourceTree = "<group>"; };
+			B00000000000000000000029 /* NativeRecordingCommandClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRecordingCommandClient.swift; sourceTree = "<group>"; };
+			B00000000000000000000030 /* NativeCapturePermissionChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCapturePermissionChecker.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -123,9 +133,14 @@
 				B00000000000000000000004 /* PermissionDependencyStatusViewModel.swift */,
 				B00000000000000000000005 /* PermissionDependencyStatusView.swift */,
 				B00000000000000000000006 /* RecordingCommandClient.swift */,
-				B00000000000000000000007 /* RecordingFakeCommandClient.swift */,
-				B00000000000000000000008 /* RecordingControlViewModel.swift */,
-				B00000000000000000000009 /* RecordingControlView.swift */,
+					B00000000000000000000007 /* RecordingFakeCommandClient.swift */,
+					B00000000000000000000026 /* NativeCaptureAdapter.swift */,
+					B00000000000000000000027 /* ControlledNativeCaptureAdapter.swift */,
+					B00000000000000000000028 /* RecordingSessionStore.swift */,
+					B00000000000000000000029 /* NativeRecordingCommandClient.swift */,
+					B00000000000000000000030 /* NativeCapturePermissionChecker.swift */,
+					B00000000000000000000008 /* RecordingControlViewModel.swift */,
+					B00000000000000000000009 /* RecordingControlView.swift */,
 				B00000000000000000000013 /* TranscriptReviewReadModel.swift */,
 				B00000000000000000000016 /* TranscriptReviewWorkspaceLoader.swift */,
 				B00000000000000000000014 /* TranscriptReviewViewModel.swift */,
@@ -262,10 +277,15 @@
 				C00000000000000000000003 /* DependencyCheckProcessRunner.swift in Sources */,
 				C00000000000000000000004 /* PermissionDependencyStatusViewModel.swift in Sources */,
 				C00000000000000000000005 /* PermissionDependencyStatusView.swift in Sources */,
-				C00000000000000000000006 /* RecordingCommandClient.swift in Sources */,
-				C00000000000000000000007 /* RecordingFakeCommandClient.swift in Sources */,
-				C00000000000000000000008 /* RecordingControlViewModel.swift in Sources */,
-				C00000000000000000000009 /* RecordingControlView.swift in Sources */,
+					C00000000000000000000006 /* RecordingCommandClient.swift in Sources */,
+					C00000000000000000000007 /* RecordingFakeCommandClient.swift in Sources */,
+					C00000000000000000000024 /* NativeCaptureAdapter.swift in Sources */,
+					C00000000000000000000025 /* ControlledNativeCaptureAdapter.swift in Sources */,
+					C00000000000000000000026 /* RecordingSessionStore.swift in Sources */,
+					C00000000000000000000027 /* NativeRecordingCommandClient.swift in Sources */,
+					C00000000000000000000028 /* NativeCapturePermissionChecker.swift in Sources */,
+					C00000000000000000000008 /* RecordingControlViewModel.swift in Sources */,
+					C00000000000000000000009 /* RecordingControlView.swift in Sources */,
 				C00000000000000000000011 /* TranscriptReviewReadModel.swift in Sources */,
 				C00000000000000000000014 /* TranscriptReviewWorkspaceLoader.swift in Sources */,
 				C00000000000000000000012 /* TranscriptReviewViewModel.swift in Sources */,
