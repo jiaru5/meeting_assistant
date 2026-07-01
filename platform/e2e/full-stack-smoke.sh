@@ -4,24 +4,40 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
-if ! processing_output="$(./platform/e2e/smoke-test.sh)"; then
-  printf '%s\n' "$processing_output"
-  exit 1
-fi
-printf '%s\n' "$processing_output"
-case "$processing_output" in
-  *"p2-c processing local e2e smoke passed."*) ;;
-  *) echo "processing local smoke success marker missing" >&2; exit 1 ;;
-esac
+run_stage() {
+  local stage="$1"
+  local marker="$2"
+  local command_path="$3"
+  local output
+  local exit_code
 
-if ! bridge_output="$(./platform/e2e/native-transcript-bridge-smoke.sh)"; then
-  printf '%s\n' "$bridge_output"
-  exit 1
-fi
-printf '%s\n' "$bridge_output"
-case "$bridge_output" in
-  *"processing-to-native transcript bridge e2e smoke passed."*) ;;
-  *) echo "native bridge smoke success marker missing" >&2; exit 1 ;;
-esac
+  echo "full-stack e2e smoke stage starting: $stage"
+  set +e
+  output="$("$command_path" 2>&1)"
+  exit_code=$?
+  set -e
+  printf '%s\n' "$output"
+
+  if ((exit_code != 0)); then
+    echo "full-stack e2e smoke failed: stage=$stage exit_code=$exit_code expected_marker=$marker" >&2
+    case "$output" in
+      *"$marker"*) echo "full-stack e2e smoke diagnostic: marker was present despite non-zero exit." >&2 ;;
+      *) echo "full-stack e2e smoke diagnostic: missing marker=$marker" >&2 ;;
+    esac
+    exit "$exit_code"
+  fi
+
+  case "$output" in
+    *"$marker"*) ;;
+    *)
+      echo "full-stack e2e smoke failed: stage=$stage exit_code=0 missing marker=$marker" >&2
+      exit 1
+      ;;
+  esac
+  echo "full-stack e2e smoke stage passed: $stage"
+}
+
+run_stage "processing local smoke" "p2-c processing local e2e smoke passed." "./platform/e2e/smoke-test.sh"
+run_stage "native transcript bridge smoke" "processing-to-native transcript bridge e2e smoke passed." "./platform/e2e/native-transcript-bridge-smoke.sh"
 
 echo "full-stack e2e smoke passed."

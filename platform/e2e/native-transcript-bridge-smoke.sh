@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import stat
 import sys
@@ -48,6 +49,12 @@ def write_fixture_wav(path: Path) -> None:
 
 def run_cli(workspace: Path, args: list[str], command: str) -> dict:
     env = CLI_ENV_BASE.copy()
+    for env_name in (
+        "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME",
+        "MEETING_ASSISTANT_TRANSCRIPTION_MODEL",
+        "MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO",
+    ):
+        env.pop(env_name, None)
     env["MEETING_ASSISTANT_WORKSPACE"] = str(workspace)
     env["PYTHONPATH"] = f"{ROOT / 'platform/processing-cli/src'}{os.pathsep}{env.get('PYTHONPATH', '')}"
     completed = subprocess.run(
@@ -179,8 +186,8 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
-guard CommandLine.arguments.count == 3 else {
-    fail("usage: NativeTranscriptBridgeSmoke <workspace> <session-id>")
+guard CommandLine.arguments.count == 4 else {
+    fail("usage: NativeTranscriptBridgeSmoke <workspace> <session-id> <transcript-id>")
 }
 
 let workspaceURL = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
@@ -198,11 +205,32 @@ do {
 guard let transcript = input.transcript else {
     fail("native workspace loader returned missing transcript")
 }
+guard transcript.id == CommandLine.arguments[3] else {
+    fail("native workspace loader returned mismatched transcript id")
+}
 guard transcript.sessionID == sessionID else {
     fail("native workspace loader returned mismatched session")
 }
+guard transcript.segments.count == 1 else {
+    fail("native workspace loader segment count drifted")
+}
+guard let firstSegment = transcript.segments.first else {
+    fail("native workspace loader returned no first segment")
+}
+guard firstSegment.segmentID == "segment-0001" else {
+    fail("native workspace loader segment id drifted")
+}
+guard firstSegment.startMS == 0 && firstSegment.endMS == 1000 else {
+    fail("native workspace loader timestamp drifted")
+}
 guard transcript.segments.contains(where: { $0.text.contains("Fake transcript generated from local audio.") }) else {
     fail("native workspace loader did not expose processing transcript text")
+}
+guard input.speakerLabels?.sessionID == sessionID else {
+    fail("native workspace loader returned mismatched speaker label session")
+}
+guard input.speakerLabels?.labels.isEmpty == true && input.speakerLabels?.segmentMapping.isEmpty == true else {
+    fail("native workspace loader should expose transcript-only speaker fallback without labels")
 }
 
 let viewModel = TranscriptReviewViewModel(input: input)
@@ -212,8 +240,18 @@ guard viewModel.state.contentState == .available else {
 guard viewModel.state.segments.count == transcript.segments.count else {
     fail("native transcript view model segment count drifted")
 }
+guard viewModel.state.segments.map(\\.id) == transcript.segments.map(\\.segmentID) else {
+    fail("native transcript view model segment id/order drifted")
+}
+guard let firstVisibleSegment = viewModel.state.segments.first,
+      firstVisibleSegment.timestampLabel == "00:00-00:01" else {
+    fail("native transcript view model timestamp label drifted")
+}
 guard viewModel.state.segments.contains(where: { $0.text.contains("Fake transcript generated from local audio.") }) else {
     fail("native transcript view model did not expose transcript text")
+}
+guard viewModel.state.segments.allSatisfy({ $0.speakerDisplayLabel == nil }) else {
+    fail("native transcript view model should show no verified speaker labels in fallback")
 }
 guard let degradation = viewModel.state.degradationReason, !degradation.isEmpty else {
     fail("native transcript view model did not expose transcript-only degradation")
@@ -259,8 +297,21 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-native-bridge-") as t
     transcript = load_json(transcript_path)
     if transcript["id"] != transcript_response["transcript_id"]:
         raise AssertionError("generate_transcript: transcript id drifted")
-    if not transcript.get("segments"):
+    if transcript["session_id"] != session_id:
+        raise AssertionError("generate_transcript: transcript session id drifted")
+    segments = transcript.get("segments")
+    if not segments:
         raise AssertionError("generate_transcript: expected at least one segment")
+    if [segment["segment_id"] for segment in segments] != sorted(segment["segment_id"] for segment in segments):
+        raise AssertionError("generate_transcript: segment ids should be deterministic for the fake adapter")
+    previous = None
+    for segment in segments:
+        if segment["start_ms"] >= segment["end_ms"]:
+            raise AssertionError("generate_transcript: invalid segment timestamp")
+        current = (segment["start_ms"], segment["end_ms"])
+        if previous is not None and current < previous:
+            raise AssertionError("generate_transcript: segments are not sorted")
+        previous = current
     assert_no_temp_leftovers(session_dir)
 
     speaker_response = run_cli(
@@ -285,14 +336,24 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-native-bridge-") as t
     speaker_payload = load_json(speaker_path)
     if speaker_payload["session_id"] != session_id or not speaker_payload.get("degradation_reason"):
         raise AssertionError("generate_speaker_labels: speaker fallback payload drifted")
+    if speaker_payload["labels"] != [] or speaker_payload["segment_mapping"] != []:
+        raise AssertionError("generate_speaker_labels: transcript-only fallback should not claim speaker mappings")
     if sha256(fixture) != fixture_checksum:
         raise AssertionError("processing pipeline changed the source fixture")
     assert_no_temp_leftovers(session_dir)
 
+    processing_artifact_checksums = {
+        "session.json": sha256(session_dir / "session.json"),
+        "transcript.json": sha256(transcript_path),
+        "speaker_labels.json": sha256(speaker_path),
+    }
+
     swift_root = root / "swift-bridge"
     write_swift_bridge_package(swift_root)
+    if not shutil.which("swift"):
+        raise AssertionError("native Swift bridge cannot run: swift executable was not found; install Xcode or Command Line Tools")
     completed = subprocess.run(
-        ["swift", "run", "NativeTranscriptBridgeSmoke", str(workspace), session_id],
+        ["swift", "run", "NativeTranscriptBridgeSmoke", str(workspace), session_id, str(transcript["id"])],
         cwd=swift_root,
         text=True,
         capture_output=True,
@@ -305,6 +366,13 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-native-bridge-") as t
         )
     if "native transcript bridge smoke passed." not in completed.stdout:
         raise AssertionError(f"native Swift bridge success marker missing: {completed.stdout!r}")
+    after_bridge_checksums = {
+        "session.json": sha256(session_dir / "session.json"),
+        "transcript.json": sha256(transcript_path),
+        "speaker_labels.json": sha256(speaker_path),
+    }
+    if after_bridge_checksums != processing_artifact_checksums:
+        raise AssertionError("native Swift bridge changed processing artifacts")
 
 print("processing-to-native transcript bridge e2e smoke passed.")
 PY
