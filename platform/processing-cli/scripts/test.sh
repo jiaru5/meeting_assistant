@@ -127,4 +127,6 @@ esac
 
 ../e2e/smoke-test.sh
 
+../e2e/capture-processing-smoke.sh
+
 echo "processing-cli tests passed."

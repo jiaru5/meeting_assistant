@@ -38,6 +38,7 @@ run_stage() {
 }
 
 run_stage "processing local smoke" "p2-c processing local e2e smoke passed." "./platform/e2e/smoke-test.sh"
+run_stage "capture-style processing smoke" "capture-style processing e2e smoke passed." "./platform/e2e/capture-processing-smoke.sh"
 run_stage "native transcript bridge smoke" "processing-to-native transcript bridge e2e smoke passed." "./platform/e2e/native-transcript-bridge-smoke.sh"
 
 echo "full-stack e2e smoke passed."
