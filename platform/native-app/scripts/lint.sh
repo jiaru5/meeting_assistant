@@ -41,6 +41,7 @@ required = [
     "Sources/MeetingAssistantNative/ProcessingCommandFakeClient.swift",
     "Sources/MeetingAssistantNative/ProcessingStateViewModel.swift",
     "Sources/MeetingAssistantNative/ProcessingStateView.swift",
+    "test-fixtures/processing-command-fixture.sh",
     "tests/MeetingAssistantNativeTests/PermissionDependencyStatusViewModelTests.swift",
     "tests/MeetingAssistantNativeTests/RecordingControlViewModelTests.swift",
     "tests/MeetingAssistantNativeTests/TranscriptReviewViewModelTests.swift",

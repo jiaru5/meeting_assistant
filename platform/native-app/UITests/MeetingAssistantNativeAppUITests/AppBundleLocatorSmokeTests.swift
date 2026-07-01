@@ -275,10 +275,64 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         assertElement("ma.processing.error", in: app, contains: "Transcript adapter failed.")
     }
 
+    func testProcessingProcessRunnerLaunchEnvironmentDrivesAppBundleProcessingStates() throws {
+        let successFixture = try AppProcessingProcessFixture(mode: "success")
+        let successApp = launchApp(fixture: "processing-success", processingFixture: successFixture)
+
+        tapProcessingButton("ma.processing.startButton", in: successApp)
+
+        assertElement("ma.processing.status", in: successApp, contains: "Processing complete.")
+        assertElement(
+            "ma.processing.transcriptStatus",
+            in: successApp,
+            contains: "Transcript transcript-process-fixture generated with 2 segments."
+        )
+        assertElement(
+            "ma.processing.speakerLabelStatus",
+            in: successApp,
+            contains: "Speaker labels artifact artifact-process-speakers is available."
+        )
+        assertElement(
+            "ma.processing.success",
+            in: successApp,
+            contains: "Generated transcript and speaker labels for session session-app-ui-processing."
+        )
+        assertDoesNotExist("ma.processing.error", in: successApp)
+
+        let degradedFixture = try AppProcessingProcessFixture(mode: "degraded")
+        let degradedApp = launchApp(fixture: "processing-transcript-only", processingFixture: degradedFixture)
+
+        tapProcessingButton("ma.processing.startButton", in: degradedApp)
+
+        assertElement(
+            "ma.processing.status",
+            in: degradedApp,
+            contains: "Processing completed with transcript-only speaker labels."
+        )
+        assertElement("ma.processing.degradation", in: degradedApp, contains: "speaker labeling runtime unavailable")
+        assertDoesNotExist("ma.processing.error", in: degradedApp)
+
+        let failureFixture = try AppProcessingProcessFixture(mode: "transcript-failure")
+        let failureApp = launchApp(fixture: "processing-failure", processingFixture: failureFixture)
+
+        tapProcessingButton("ma.processing.startButton", in: failureApp)
+
+        assertElement("ma.processing.status", in: failureApp, contains: "Processing failed.")
+        assertElement("ma.processing.error", in: failureApp, contains: "Transcript adapter failed from process fixture.")
+        assertElement("ma.processing.error", in: failureApp, contains: "processing_failed")
+        XCTAssertTrue(button("ma.processing.retryButton", in: failureApp).isEnabled)
+
+        tapProcessingButton("ma.processing.retryButton", in: failureApp)
+
+        assertElement("ma.processing.status", in: failureApp, contains: "Processing failed.")
+        assertElement("ma.processing.error", in: failureApp, contains: "Transcript adapter failed from process fixture.")
+    }
+
     private func launchApp(
         fixture: String? = nil,
         workspaceURL: URL? = nil,
-        sessionID: String? = nil
+        sessionID: String? = nil,
+        processingFixture: AppProcessingProcessFixture? = nil
     ) -> XCUIApplication {
         dismissSpotlightIfPresent()
         let app = XCUIApplication()
@@ -293,9 +347,15 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             app.launchEnvironment["MA_NATIVE_TRANSCRIPT_WORKSPACE"] = workspaceURL.path
             app.launchEnvironment["MA_NATIVE_TRANSCRIPT_SESSION_ID"] = sessionID
         }
+        if let processingFixture {
+            processingFixture.applyLaunchEnvironment(to: app)
+        }
         app.terminate()
         _ = app.wait(for: .notRunning, timeout: 5)
         app.launch()
+        if !app.wait(for: .runningForeground, timeout: 5) {
+            app.activate()
+        }
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10), "Expected app bundle to run foreground.")
         XCTAssertTrue(appWindow(in: app).waitForExistence(timeout: 5), "Expected app bundle window to exist.")
         assertWindowIsOnBuiltInScreen(app)
@@ -342,10 +402,22 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             return
         }
 
-        let windowFrame = appWindow(in: app).frame
+        let window = appWindow(in: app)
+        let predicate = NSPredicate { object, _ in
+            guard let window = object as? XCUIElement else {
+                return false
+            }
+            let frame = window.frame
+            let center = CGPoint(x: frame.midX, y: frame.midY)
+            return screen.frame.contains(center)
+        }
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: window)
+        let result = XCTWaiter.wait(for: [expectation], timeout: 8)
+        let windowFrame = window.frame
         let windowCenter = CGPoint(x: windowFrame.midX, y: windowFrame.midY)
-        XCTAssertTrue(
-            screen.frame.contains(windowCenter),
+        XCTAssertEqual(
+            result,
+            .completed,
             "Expected app bundle window center \(windowCenter) to be on built-in screen \(screen.localizedName) frame \(screen.frame), actual window frame \(windowFrame).",
             file: file,
             line: line
@@ -618,5 +690,50 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         let digest = SHA256.hash(data: data)
         let hex = digest.map { String(format: "%02x", $0) }.joined()
         return "sha256:\(hex)"
+    }
+}
+
+private final class AppProcessingProcessFixture {
+    let mode: String
+    let rootURL: URL
+    let workspaceURL: URL
+    let cliURL: URL
+    let invocationsURL: URL
+
+    init(mode: String, sourceFile: StaticString = #filePath) throws {
+        self.mode = mode
+        let nativeAppRootURL = URL(fileURLWithPath: String(describing: sourceFile))
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        cliURL = nativeAppRootURL
+            .appendingPathComponent("test-fixtures", isDirectory: true)
+            .appendingPathComponent("processing-command-fixture.sh")
+        guard FileManager.default.isExecutableFile(atPath: cliURL.path) else {
+            throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: cliURL.path])
+        }
+
+        rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ma-native-processing-app-\(UUID().uuidString)", isDirectory: true)
+        workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        invocationsURL = rootURL.appendingPathComponent("invocations.txt")
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        cleanup()
+    }
+
+    func applyLaunchEnvironment(to app: XCUIApplication) {
+        app.launchEnvironment["MA_NATIVE_PROCESSING_CLIENT"] = "process"
+        app.launchEnvironment["MA_NATIVE_APP_XCTEST"] = "1"
+        app.launchEnvironment["MEETING_ASSISTANT_CLI_PATH"] = cliURL.path
+        app.launchEnvironment["MEETING_ASSISTANT_WORKSPACE"] = workspaceURL.path
+        app.launchEnvironment["MA_NATIVE_PROCESSING_FIXTURE_MODE"] = mode
+        app.launchEnvironment["MA_NATIVE_PROCESSING_FIXTURE_INVOCATIONS"] = invocationsURL.path
+    }
+
+    func cleanup() {
+        try? FileManager.default.removeItem(at: rootURL)
     }
 }

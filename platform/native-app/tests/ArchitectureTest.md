@@ -21,7 +21,9 @@ VS-MA-16 native processing state consumer boundary:
 2. The production runner may call only public command names and frozen flags from `06-api-contracts.md`, and must parse stdout JSON as the only product contract source.
 3. The native processing consumer may validate frozen response fields and display idle, blocked, generating transcript, generating speaker labels, completed, degraded and failed states.
 4. It may expose stable `ma.processing.*` accessibility identifiers for heading, status, start, retry, transcript status, speaker-label status, success, error, degradation and warnings.
-5. It must not read `processing-cli` provider internals, add command fields, add `--format`, mutate artifacts directly, implement real capture, call external GPT/Qwen/API, automatically download dependencies, use real pasteboard, show a real file picker or delete files directly.
+5. The app bundle must default to `ProcessingCommandFakeClient`; only the Debug/XCTest-only test hook `MA_NATIVE_PROCESSING_CLIENT=process` may inject `ProcessingCommandProcessRunner` with `MEETING_ASSISTANT_CLI_PATH` and `MEETING_ASSISTANT_WORKSPACE`; Release builds must ignore this env hook and fall back to fake.
+6. The app-bundle process-runner smoke may use only the native-owned `test-fixtures/processing-command-fixture.sh`, which emits frozen CMD-MA-005/006 stdout JSON for controlled success, transcript-only degradation and structured failure cases.
+7. It must not read `processing-cli` provider internals, add command fields, add `--format`, mutate artifacts directly, implement real capture, call external GPT/Qwen/API, automatically download dependencies, use real pasteboard, show a real file picker or delete files directly.
 
 VS-MA-17 read-only transcript review boundary:
 
