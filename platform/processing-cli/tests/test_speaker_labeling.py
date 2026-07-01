@@ -201,6 +201,81 @@ class SpeakerLabelingTests(unittest.TestCase):
         self.assertEqual(payload["label_status"], "transcript_only")
         self.assertEqual(payload["segment_mapping"], [])
 
+    def test_adapter_failure_degradation_reason_is_sanitized(self) -> None:
+        sensitive_phrase = "private transcript phrase"
+        secret_value = "sk-speakersecret123456"
+        sensitive_path = "/Users/jerry/.local/share/ai-models/speaker/model.bin"
+
+        def sensitive_failure_adapter(transcript: dict, audio_path: Path | None) -> dict:
+            raise RuntimeError(
+                f"{sensitive_phrase} api_token={secret_value} Bearer abcdefghijklmnop {sensitive_path}"
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            create_transcript_session(workspace)
+
+            response = run_generate_speaker_labels(
+                "session-1",
+                "transcript-1",
+                workspace=workspace,
+                allow_transcript_only_fallback=True,
+                adapter=sensitive_failure_adapter,
+            )
+
+            payload = speaker_payload(response)
+            response_json = json.dumps(response, ensure_ascii=False, sort_keys=True)
+            payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["label_status"], "transcript_only")
+        self.assertIn("adapter failed", response["degradation_reason"])
+        self.assertNotIn(sensitive_phrase, response_json)
+        self.assertNotIn(secret_value, response_json)
+        self.assertNotIn(sensitive_path, response_json)
+        self.assertNotIn(sensitive_phrase, payload_json)
+        self.assertNotIn(secret_value, payload_json)
+        self.assertNotIn(sensitive_path, payload_json)
+
+    def test_adapter_supplied_degradation_reason_is_sanitized(self) -> None:
+        explanation = "diarization confidence below threshold"
+        secret_value = "ghp_speakersecret123456"
+        sensitive_path = "/Users/jerry/.local/share/ai-models/speaker/model.bin"
+
+        def transcript_only_adapter(transcript: dict, audio_path: Path | None) -> dict:
+            return {
+                "label_status": "transcript_only",
+                "labels": [],
+                "segment_mapping": [],
+                "degradation_reason": (
+                    f"{explanation}; secret={secret_value}; model={sensitive_path}"
+                ),
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            create_transcript_session(workspace)
+
+            response = run_generate_speaker_labels(
+                "session-1",
+                "transcript-1",
+                workspace=workspace,
+                allow_transcript_only_fallback=True,
+                adapter=transcript_only_adapter,
+            )
+
+            payload = speaker_payload(response)
+            combined_json = json.dumps({"response": response, "payload": payload}, ensure_ascii=False, sort_keys=True)
+
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["label_status"], "transcript_only")
+        self.assertIn(explanation, response["degradation_reason"])
+        self.assertIn(explanation, combined_json)
+        self.assertNotIn(secret_value, combined_json)
+        self.assertNotIn(sensitive_path, combined_json)
+        self.assertIn("secret=<redacted>", combined_json)
+        self.assertIn("model=<path>", combined_json)
+
     def test_missing_transcript_returns_artifact_missing_without_speaker_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
