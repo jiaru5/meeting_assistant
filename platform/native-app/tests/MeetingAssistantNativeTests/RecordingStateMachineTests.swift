@@ -185,6 +185,14 @@ struct RecordingStateMachineTests {
         #expect(RecordingAccessibilityID.stopButton == "ma.recording.stopButton")
         #expect(RecordingAccessibilityID.error == "ma.recording.error")
         #expect(RecordingAccessibilityID.savedSummary == "ma.recording.savedSummary")
+        #expect(
+            RecordingAccessibilityID.artifactStatus("screen_video")
+                == "ma.recording.artifact.screen_video.status"
+        )
+        #expect(
+            RecordingAccessibilityID.artifactDegradation("microphone_audio")
+                == "ma.recording.artifact.microphone_audio.degradation"
+        )
     }
 }
 

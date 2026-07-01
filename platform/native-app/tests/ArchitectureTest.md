@@ -13,7 +13,20 @@ VS-MA-13 fake recording boundary:
 1. This component may express `start_native_recording` and `stop_recording` through a Swift protocol, deterministic fake client, view model state machine and SwiftUI control.
 2. The fake recording boundary exists only for UI/state verification and must not call a real helper, CLI, capture API or processing internals.
 3. It may expose stable recording accessibility identifiers for status, start, stop, error and saved-summary regions.
-4. It must not implement real capture, ScreenCaptureKit, AVCapture, audio capture, transcription, speaker labeling, external model calls, public normalize audio commands or dependency downloads.
+4. It must not implement uncontrolled real capture, ScreenCaptureKit, AVCapture, audio capture frameworks, transcription, speaker labeling, external model calls, public normalize audio commands or dependency downloads.
+
+VS-MA-14/VS-MA-15 controlled native capture artifact registration boundary:
+
+1. This component may implement a controlled native capture adapter and `RecordingCommandClient` implementation for deterministic native capture artifact registration.
+2. The controlled adapter may only use frozen `start_native_recording` and `stop_recording` semantics and must not add command fields, artifact types, event schema, error codes, exit codes or UI states.
+3. `NativeCapturePermissionChecker` must fail closed when screen recording or requested microphone permission is denied or unknown, using the existing `permission_denied` error code.
+4. `RecordingSessionStore` may create `sessions/<session_id>/session.json`, write managed artifact files under `artifacts/`, compute `sha256:` checksums and validate path traversal, symlink and hardlink boundaries.
+5. Stop artifact registration must register `screen_video`, `system_audio`, `microphone_audio` and `mixed_audio` as `available`, `degraded`, `missing` or `failed`; unavailable artifacts must include `degradation_reason`.
+6. At least one available media artifact may return `ok=true status=recorded`; no available media must return `ok=false code=capture_failed` and persist session `status=failed`.
+7. Repeated stop must return the existing final artifact registry without duplicating entries or re-running the adapter.
+8. It may expose additive recording artifact locators under `ma.recording.artifact.<artifact_type>.status` and `.degradation`, while preserving existing `ma.recording.*` locators and phase/status strings.
+9. The app bundle must default to `FakeRecordingCommandClient`; only the Debug/XCTest-only test hook `MA_NATIVE_RECORDING_CLIENT=controlled` may inject `NativeRecordingCommandClient` with `MA_NATIVE_RECORDING_WORKSPACE` or `MEETING_ASSISTANT_WORKSPACE`; Release builds must ignore this env hook and fall back to fake.
+10. It must not invoke processing providers, native-to-processing commands, ScreenCaptureKit, AVFoundation, CoreAudio, OBS, BlackHole, FFmpeg auxiliary capture, external model APIs, network APIs, downloads, real pasteboard, real file pickers or direct delete behavior.
 
 VS-MA-16 native processing state consumer boundary:
 

@@ -178,6 +178,14 @@ struct RecordingControlViewModelTests {
         #expect(RecordingAccessibilityID.stopButton == "ma.recording.stopButton")
         #expect(RecordingAccessibilityID.error == "ma.recording.error")
         #expect(RecordingAccessibilityID.savedSummary == "ma.recording.savedSummary")
+        #expect(
+            RecordingAccessibilityID.artifactStatus("screen_video")
+                == "ma.recording.artifact.screen_video.status"
+        )
+        #expect(
+            RecordingAccessibilityID.artifactDegradation("mixed_audio")
+                == "ma.recording.artifact.mixed_audio.degradation"
+        )
     }
 }
 

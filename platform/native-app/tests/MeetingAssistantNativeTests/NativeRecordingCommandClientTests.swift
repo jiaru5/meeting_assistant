@@ -1,0 +1,528 @@
+import CryptoKit
+import Foundation
+import Testing
+@testable import MeetingAssistantNative
+
+@Suite("Native recording command client")
+struct NativeRecordingCommandClientTests {
+    @Test
+    func permissionDeniedFailsClosedWithoutStartingAdapter() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter()
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-permission-denied",
+            permissions: .denied,
+            adapter: adapter
+        )
+
+        let response = try await client.startNativeRecording(startRequest(workspace: workspace))
+
+        #expect(response.ok == false)
+        #expect(response.command == .startNativeRecording)
+        #expect(response.code == .permissionDenied)
+        #expect(response.details.contains("Screen Recording permission is denied."))
+        #expect(await adapter.startContexts.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: sessionRoot(workspace, "session-permission-denied").path))
+    }
+
+    @Test
+    func unknownPermissionFailsClosedWithoutStartingAdapter() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter()
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-permission-unknown",
+            permissions: .unknown,
+            adapter: adapter
+        )
+
+        let response = try await client.startNativeRecording(startRequest(workspace: workspace))
+
+        #expect(response.ok == false)
+        #expect(response.code == .permissionDenied)
+        #expect(response.details.contains("Screen Recording permission status is unknown."))
+        #expect(await adapter.startContexts.isEmpty)
+    }
+
+    @Test
+    func successfulStartWritesRecordingSessionMetadata() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter()
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-start-metadata",
+            adapter: adapter
+        )
+
+        let response = try await client.startNativeRecording(
+            startRequest(workspace: workspace, title: "Architecture Review")
+        )
+
+        #expect(response.ok == true)
+        #expect(response.status == "recording")
+        #expect(response.sessionID == "session-start-metadata")
+        #expect(await adapter.startContexts.count == 1)
+
+        let session = try readSessionJSON(workspace: workspace, sessionID: "session-start-metadata")
+        #expect(session["id"] as? String == "session-start-metadata")
+        #expect(session["title"] as? String == "Architecture Review")
+        #expect(session["source_type"] as? String == "native_recording")
+        #expect(session["status"] as? String == "recording")
+        #expect(session["started_at"] as? String == fixedTimestamp)
+        #expect(session["created_at"] as? String == fixedTimestamp)
+        #expect(session["updated_at"] as? String == fixedTimestamp)
+        #expect(session["workspace_dir"] as? String == sessionRoot(workspace, "session-start-metadata").path)
+        #expect((session["artifacts"] as? [[String: Any]])?.isEmpty == true)
+    }
+
+    @Test
+    func stopWritesFourTargetArtifactsWithChecksumAndDegradationReasons() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .success(
+                artifacts: [
+                    .available(.screenVideo, format: "mov", data: data("screen-video")),
+                    .available(.systemAudio, format: "m4a", data: data("system-audio")),
+                    .missing(.microphoneAudio, reason: "microphone capture was disabled by the controlled fixture"),
+                    .degraded(.mixedAudio, reason: "mixed audio degraded because microphone audio was unavailable"),
+                ]
+            )
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-stop-artifacts",
+            adapter: adapter
+        )
+
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let response = try await client.stopRecording(StopRecordingRequest(sessionID: "session-stop-artifacts"))
+
+        #expect(response.ok == true)
+        #expect(response.status == "recorded")
+        #expect(response.artifacts.map(\.artifactType) == [
+            "screen_video",
+            "system_audio",
+            "microphone_audio",
+            "mixed_audio",
+        ])
+        let screen = try #require(response.artifacts.first { $0.artifactType == "screen_video" })
+        #expect(screen.captureStatus == "available")
+        #expect(screen.path == "artifacts/screen_video.mov")
+        #expect(screen.format == "mov")
+        #expect(screen.createdAt == fixedTimestamp)
+        let expectedScreenChecksum = try checksum(
+            for: artifactURL(workspace, "session-stop-artifacts", "screen_video.mov")
+        )
+        #expect(screen.checksum == expectedScreenChecksum)
+
+        let system = try #require(response.artifacts.first { $0.artifactType == "system_audio" })
+        #expect(system.captureStatus == "available")
+        let expectedSystemChecksum = try checksum(
+            for: artifactURL(workspace, "session-stop-artifacts", "system_audio.m4a")
+        )
+        #expect(system.checksum == expectedSystemChecksum)
+
+        let microphone = try #require(response.artifacts.first { $0.artifactType == "microphone_audio" })
+        #expect(microphone.captureStatus == "missing")
+        #expect(microphone.degradationReason == "microphone capture was disabled by the controlled fixture")
+        #expect(microphone.checksum == nil)
+
+        let mixed = try #require(response.artifacts.first { $0.artifactType == "mixed_audio" })
+        #expect(mixed.captureStatus == "degraded")
+        #expect(mixed.degradationReason == "mixed audio degraded because microphone audio was unavailable")
+
+        let session = try readSessionJSON(workspace: workspace, sessionID: "session-stop-artifacts")
+        #expect(session["status"] as? String == "recorded")
+        #expect(session["ended_at"] as? String == fixedTimestamp)
+        let artifacts = try #require(session["artifacts"] as? [[String: Any]])
+        #expect(artifacts.count == 4)
+        #expect(artifacts.compactMap { $0["checksum"] as? String }.count == 2)
+        #expect(artifacts.compactMap { $0["degradation_reason"] as? String }.count == 2)
+    }
+
+    @Test
+    func stopWithNoAvailableMediaReturnsCaptureFailedAndFailedSession() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .success(
+                artifacts: [
+                    .failed(.screenVideo, reason: "screen capture failed"),
+                    .missing(.systemAudio, reason: "system audio missing"),
+                    .missing(.microphoneAudio, reason: "microphone audio missing"),
+                    .failed(.mixedAudio, reason: "mixed audio failed"),
+                ]
+            )
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-no-media",
+            adapter: adapter
+        )
+
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let response = try await client.stopRecording(StopRecordingRequest(sessionID: "session-no-media"))
+
+        #expect(response.ok == false)
+        #expect(response.status == "failed")
+        #expect(response.code == .captureFailed)
+        #expect(response.artifacts.count == 4)
+        #expect(response.artifacts.allSatisfy { $0.captureStatus != "available" })
+        #expect(response.artifacts.allSatisfy { $0.degradationReason != nil })
+
+        let session = try readSessionJSON(workspace: workspace, sessionID: "session-no-media")
+        #expect(session["status"] as? String == "failed")
+        #expect((session["artifacts"] as? [[String: Any]])?.count == 4)
+    }
+
+    @Test
+    func interruptedPartialCaptureRecordsAvailableArtifactsAndFailsTheRest() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .failure(
+                message: "controlled native capture was interrupted",
+                partialArtifacts: [
+                    .available(.screenVideo, data: data("partial-screen-video")),
+                ]
+            )
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-interrupted",
+            adapter: adapter
+        )
+
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let response = try await client.stopRecording(StopRecordingRequest(sessionID: "session-interrupted"))
+
+        #expect(response.ok == true)
+        #expect(response.status == "recorded")
+        #expect(response.artifacts.filter { $0.captureStatus == "available" }.map(\.artifactType) == ["screen_video"])
+        let failedArtifacts = response.artifacts.filter { $0.captureStatus == "failed" }
+        #expect(failedArtifacts.map(\.artifactType) == ["system_audio", "microphone_audio", "mixed_audio"])
+        #expect(failedArtifacts.allSatisfy {
+            $0.degradationReason?.contains("controlled native capture was interrupted") == true
+        })
+    }
+
+    @Test
+    func repeatedStopReturnsFinalArtifactsWithoutDuplicatingOrCallingAdapterAgain() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .success(
+                artifacts: [
+                    .available(.screenVideo, data: data("screen-video")),
+                    .available(.mixedAudio, data: data("mixed-audio")),
+                ]
+            )
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-idempotent-stop",
+            adapter: adapter
+        )
+
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let first = try await client.stopRecording(StopRecordingRequest(sessionID: "session-idempotent-stop"))
+        let second = try await client.stopRecording(StopRecordingRequest(sessionID: "session-idempotent-stop"))
+
+        #expect(first.ok == true)
+        #expect(second.ok == true)
+        #expect(second.artifacts == first.artifacts)
+        #expect(await adapter.stopContexts.count == 1)
+        let artifacts = try #require(
+            readSessionJSON(workspace: workspace, sessionID: "session-idempotent-stop")["artifacts"] as? [[String: Any]]
+        )
+        #expect(artifacts.count == 4)
+    }
+
+    @Test
+    func sessionIDTraversalFailsClosedBeforeAdapterStart() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter()
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "../outside",
+            adapter: adapter
+        )
+
+        let response = try await client.startNativeRecording(startRequest(workspace: workspace))
+
+        #expect(response.ok == false)
+        #expect(response.code == .pathConflict)
+        #expect(await adapter.startContexts.isEmpty)
+    }
+
+    @Test
+    func sessionMetadataSymlinkFailsClosedOnStop() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .success(artifacts: [.available(.screenVideo, data: data("screen-video"))])
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-metadata-symlink",
+            adapter: adapter
+        )
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let sessionURL = sessionRoot(workspace, "session-metadata-symlink").appendingPathComponent("session.json")
+        let outsideURL = workspace.appendingPathComponent("outside-session.json")
+        try data("outside").write(to: outsideURL)
+        try FileManager.default.removeItem(at: sessionURL)
+        try FileManager.default.createSymbolicLink(at: sessionURL, withDestinationURL: outsideURL)
+
+        let response = try await client.stopRecording(StopRecordingRequest(sessionID: "session-metadata-symlink"))
+
+        #expect(response.ok == false)
+        #expect(response.code == .pathConflict)
+        let outsideData = try Data(contentsOf: outsideURL)
+        #expect(outsideData == data("outside"))
+    }
+
+    @Test
+    func artifactSymlinkFailsClosedOnStop() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .success(artifacts: [.available(.screenVideo, data: data("screen-video"))])
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-artifact-symlink",
+            adapter: adapter
+        )
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let outsideURL = workspace.appendingPathComponent("outside-video.mov")
+        try data("outside").write(to: outsideURL)
+        try FileManager.default.createSymbolicLink(
+            at: artifactURL(workspace, "session-artifact-symlink", "screen_video.mov"),
+            withDestinationURL: outsideURL
+        )
+
+        let response = try await client.stopRecording(StopRecordingRequest(sessionID: "session-artifact-symlink"))
+
+        #expect(response.ok == false)
+        #expect(response.code == .pathConflict)
+        let outsideData = try Data(contentsOf: outsideURL)
+        #expect(outsideData == data("outside"))
+    }
+
+    @Test
+    func artifactHardlinkFailsClosedOnStop() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .success(artifacts: [.available(.screenVideo, data: data("screen-video"))])
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-artifact-hardlink",
+            adapter: adapter
+        )
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let outsideURL = workspace.appendingPathComponent("outside-video.mov")
+        try data("outside").write(to: outsideURL)
+        try FileManager.default.linkItem(
+            at: outsideURL,
+            to: artifactURL(workspace, "session-artifact-hardlink", "screen_video.mov")
+        )
+
+        let response = try await client.stopRecording(StopRecordingRequest(sessionID: "session-artifact-hardlink"))
+
+        #expect(response.ok == false)
+        #expect(response.code == .pathConflict)
+        let outsideData = try Data(contentsOf: outsideURL)
+        #expect(outsideData == data("outside"))
+    }
+
+    @Test
+    func nonAvailableArtifactSymlinkFailsClosedOnStop() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .success(
+                artifacts: [
+                    .missing(.microphoneAudio, reason: "microphone capture unavailable"),
+                ]
+            )
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-missing-artifact-symlink",
+            adapter: adapter
+        )
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let outsideURL = workspace.appendingPathComponent("outside-microphone.m4a")
+        try data("outside").write(to: outsideURL)
+        try FileManager.default.createSymbolicLink(
+            at: artifactURL(workspace, "session-missing-artifact-symlink", "microphone_audio.m4a"),
+            withDestinationURL: outsideURL
+        )
+
+        let response = try await client.stopRecording(
+            StopRecordingRequest(sessionID: "session-missing-artifact-symlink")
+        )
+
+        #expect(response.ok == false)
+        #expect(response.code == .pathConflict)
+        let outsideData = try Data(contentsOf: outsideURL)
+        #expect(outsideData == data("outside"))
+    }
+
+    @Test
+    func nonAvailableArtifactHardlinkFailsClosedOnStop() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .success(
+                artifacts: [
+                    .degraded(.mixedAudio, reason: "mixed audio degraded"),
+                ]
+            )
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-degraded-artifact-hardlink",
+            adapter: adapter
+        )
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let outsideURL = workspace.appendingPathComponent("outside-mixed.wav")
+        try data("outside").write(to: outsideURL)
+        try FileManager.default.linkItem(
+            at: outsideURL,
+            to: artifactURL(workspace, "session-degraded-artifact-hardlink", "mixed_audio.wav")
+        )
+
+        let response = try await client.stopRecording(
+            StopRecordingRequest(sessionID: "session-degraded-artifact-hardlink")
+        )
+
+        #expect(response.ok == false)
+        #expect(response.code == .pathConflict)
+        let outsideData = try Data(contentsOf: outsideURL)
+        #expect(outsideData == data("outside"))
+    }
+
+    @Test
+    @MainActor
+    func recordingViewExposesArtifactStatusAndDegradationLocators() {
+        let artifacts = [
+            RecordingCommandArtifact(
+                id: "artifact-screen",
+                sessionID: "session-view",
+                artifactType: "screen_video",
+                captureStatus: "available"
+            ),
+            RecordingCommandArtifact(
+                id: "artifact-mic",
+                sessionID: "session-view",
+                artifactType: "microphone_audio",
+                captureStatus: "missing",
+                degradationReason: "microphone unavailable"
+            ),
+        ]
+        let viewModel = RecordingControlViewModel(
+            client: ControlledViewRecordingClient(),
+            initialState: .recorded(sessionID: "session-view", artifacts: artifacts)
+        )
+        _ = RecordingControlView(viewModel: viewModel)
+
+        #expect(RecordingAccessibilityID.artifactStatus("screen_video") == "ma.recording.artifact.screen_video.status")
+        #expect(
+            RecordingAccessibilityID.artifactDegradation("microphone_audio")
+                == "ma.recording.artifact.microphone_audio.degradation"
+        )
+        #expect(viewModel.state.savedSummary == "Saved 1 recording artifact.")
+    }
+}
+
+private let fixedTimestamp = "2026-07-01T00:00:00Z"
+
+private func nativeClient(
+    workspace: URL,
+    sessionID: String,
+    permissions: NativeCapturePermissionSnapshot = .granted,
+    adapter: ControlledNativeCaptureAdapter
+) -> NativeRecordingCommandClient {
+    NativeRecordingCommandClient(
+        permissionChecker: StaticNativeCapturePermissionChecker(snapshot: permissions),
+        captureAdapter: adapter,
+        sessionIDProvider: { sessionID },
+        timestampProvider: { fixedTimestamp },
+        requestIDProvider: { command in "request-\(command.rawValue)" }
+    )
+}
+
+private func startRequest(
+    workspace: URL,
+    title: String? = nil
+) -> StartNativeRecordingRequest {
+    StartNativeRecordingRequest(
+        title: title,
+        captureTarget: .screen,
+        workspaceURL: workspace,
+        captureSystemAudio: true,
+        captureMicrophoneAudio: true
+    )
+}
+
+private func temporaryWorkspace() throws -> URL {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ma-native-recording-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url
+}
+
+private func sessionRoot(_ workspace: URL, _ sessionID: String) -> URL {
+    workspace
+        .appendingPathComponent("sessions", isDirectory: true)
+        .appendingPathComponent(sessionID, isDirectory: true)
+}
+
+private func artifactURL(_ workspace: URL, _ sessionID: String, _ filename: String) -> URL {
+    sessionRoot(workspace, sessionID)
+        .appendingPathComponent("artifacts", isDirectory: true)
+        .appendingPathComponent(filename, isDirectory: false)
+}
+
+private func readSessionJSON(workspace: URL, sessionID: String) throws -> [String: Any] {
+    let url = sessionRoot(workspace, sessionID).appendingPathComponent("session.json")
+    let payload = try JSONSerialization.jsonObject(with: Data(contentsOf: url))
+    guard let session = payload as? [String: Any] else {
+        throw NativeRecordingCommandClientTestError.invalidSessionJSON
+    }
+    return session
+}
+
+private func data(_ value: String) -> Data {
+    Data(value.utf8)
+}
+
+private func checksum(for url: URL) throws -> String {
+    let digest = SHA256.hash(data: try Data(contentsOf: url))
+    let hex = digest.map { String(format: "%02x", $0) }.joined()
+    return "sha256:\(hex)"
+}
+
+private enum NativeRecordingCommandClientTestError: Error {
+    case invalidSessionJSON
+}
+
+private actor ControlledViewRecordingClient: RecordingCommandClient {
+    func startNativeRecording(_ request: StartNativeRecordingRequest) async throws -> RecordingCommandResponse {
+        .successfulStart(sessionID: "session-view")
+    }
+
+    func stopRecording(_ request: StopRecordingRequest) async throws -> RecordingCommandResponse {
+        .successfulStop(sessionID: request.sessionID)
+    }
+}

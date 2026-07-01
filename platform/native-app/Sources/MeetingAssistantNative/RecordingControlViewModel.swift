@@ -88,9 +88,16 @@ public struct RecordingControlState: Equatable, Sendable {
             artifacts: artifacts,
             errorCode: nil,
             errorMessage: nil,
-            savedSummary: "Saved \(artifacts.count) recording artifacts.",
+            savedSummary: Self.savedSummary(for: artifacts),
             warnings: warnings
         )
+    }
+
+    public static func savedSummary(for artifacts: [RecordingCommandArtifact]) -> String {
+        let artifactCount = artifacts.filter { $0.captureStatus == "available" }.count
+        return artifactCount == 1
+            ? "Saved 1 recording artifact."
+            : "Saved \(artifactCount) recording artifacts."
     }
 }
 
@@ -277,10 +284,6 @@ public final class RecordingControlViewModel: ObservableObject {
             )
         }
 
-        let artifactCount = response.artifacts.count
-        let summary = artifactCount == 1
-            ? "Saved 1 recording artifact."
-            : "Saved \(artifactCount) recording artifacts."
         state = RecordingControlState(
             phase: .recorded,
             statusText: "Recording saved.",
@@ -288,7 +291,7 @@ public final class RecordingControlViewModel: ObservableObject {
             artifacts: response.artifacts,
             errorCode: nil,
             errorMessage: nil,
-            savedSummary: summary,
+            savedSummary: RecordingControlState.savedSummary(for: response.artifacts),
             warnings: response.warnings
         )
     }
