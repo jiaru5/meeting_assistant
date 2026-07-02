@@ -21,6 +21,8 @@ _PROVIDER_DETAIL_ALLOWLIST = {
     "source_artifact_id",
     "transcript_id",
 }
+_SAFE_PROVIDER_DETAIL_VALUE_RE = re.compile(r"^[A-Za-z0-9_.:@+-]{1,128}$")
+_REDACTION_MARKER_RE = re.compile(r"<(?:path|redacted[^>]*)>")
 
 def redact_sensitive_text(value: object, *, max_length: int = 240, redact_paths: bool = True) -> str:
     text = " ".join(str(value).replace("\x00", "").split())
@@ -45,8 +47,11 @@ def sanitize_provider_failure_message(provider_message: object, *, fallback: str
 def sanitize_provider_failure_details(details: Mapping[str, object] | None) -> dict[str, object]:
     if not details:
         return {}
-    sanitized = sanitize_failure_details(details)
-    return {key: value for key, value in sanitized.items() if key in _PROVIDER_DETAIL_ALLOWLIST}
+    return {
+        str(key): _sanitize_provider_detail_value(str(key), value)
+        for key, value in details.items()
+        if str(key) in _PROVIDER_DETAIL_ALLOWLIST
+    }
 
 
 def sanitize_failure_details(details: Mapping[str, object] | None) -> dict[str, object]:
@@ -66,4 +71,22 @@ def _sanitize_detail_value(key: str, value: object) -> object:
         return redact_sensitive_text(value, max_length=240, redact_paths=False)
     if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray, str)):
         return [_sanitize_detail_value(key, item) for item in value]
+    return value
+
+
+def _sanitize_provider_detail_value(key: str, value: object) -> object:
+    if isinstance(value, Mapping):
+        return {
+            str(child_key): _sanitize_provider_detail_value(str(child_key), child_value)
+            for child_key, child_value in value.items()
+        }
+    if isinstance(value, str):
+        sanitized = redact_sensitive_text(value, max_length=160, redact_paths=True)
+        if _REDACTION_MARKER_RE.search(sanitized):
+            return "<redacted>"
+        if not _SAFE_PROVIDER_DETAIL_VALUE_RE.fullmatch(sanitized):
+            return "<redacted>"
+        return sanitized
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray, str)):
+        return [_sanitize_provider_detail_value(key, item) for item in value]
     return value

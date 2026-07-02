@@ -368,6 +368,60 @@ class TranscriptProcessingTests(unittest.TestCase):
         self.assertNotIn(secret_value, log_text)
         self.assertNotIn(sensitive_path, log_text)
 
+    def test_adapter_contract_error_allowlisted_details_are_sanitized(self) -> None:
+        sensitive_phrase = "private transcript phrase in allowlisted details"
+        secret_value = "sk-allowlistedsecret123456"
+        sensitive_path = "/Users/jerry/.local/share/ai-models/whisper.cpp/large-v3/model.bin"
+
+        def failing_adapter(audio_path: Path, language: str | None, runtime: str | None) -> list[dict]:
+            raise ContractError(
+                "processing_failed",
+                "provider failed with sensitive details",
+                runtime=f"fake_adapter {sensitive_path}",
+                language=f"zh {sensitive_phrase}",
+                format=f"json access_token={secret_value}",
+                compression=f"none {sensitive_phrase}",
+                source_artifact_id=f"artifact-normalized_audio {sensitive_path}",
+                transcript_id=sensitive_phrase,
+                artifact_id=f"artifact-transcript_text token={secret_value}",
+                stderr=sensitive_phrase,
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+
+            response = run_generate_transcript(
+                "session-1",
+                workspace=workspace,
+                request_id="local-allowlisted-detail-failure",
+                adapter=failing_adapter,
+            )
+
+            response_json = json.dumps(response, ensure_ascii=False, sort_keys=True)
+            log_text = (session_dir / "logs" / "processing.log").read_text(encoding="utf-8")
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "processing_failed")
+        for key in (
+            "artifact_id",
+            "compression",
+            "format",
+            "language",
+            "runtime",
+            "source_artifact_id",
+            "transcript_id",
+        ):
+            self.assertIn(key, response["details"])
+        self.assertNotIn("stderr", response["details"])
+        self.assertNotIn(sensitive_phrase, response_json)
+        self.assertNotIn(secret_value, response_json)
+        self.assertNotIn(sensitive_path, response_json)
+        self.assertNotIn(sensitive_phrase, log_text)
+        self.assertNotIn(secret_value, log_text)
+        self.assertNotIn(sensitive_path, log_text)
+        self.assertIn("local-allowlisted-detail-failure", log_text)
+
     def test_transcript_symlink_destination_returns_path_conflict_without_external_write(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

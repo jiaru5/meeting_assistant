@@ -91,8 +91,57 @@ class DependencyCheckTests(unittest.TestCase):
         self.assertEqual(checks["media_tool.ffmpeg"]["status"], "missing")
         self.assertIn("missing_required_checks", response["details"])
 
+    def test_non_executable_runtime_is_reported_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bin_dir = root / "bin"
+            workspace = root / "workspace"
+            bin_dir.mkdir()
+            _fake_executable(bin_dir, "swift")
+            _fake_executable(bin_dir, "ffmpeg")
+            runtime_path = bin_dir / "whisper-local"
+            runtime_path.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+            runtime_path.chmod(0o644)
+            _fake_model(bin_dir)
+            env = self.fake_env(bin_dir)
+
+            response = run_dependency_check(workspace, env)
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "dependency_missing")
+        checks = {item["id"]: item for item in response["checks"]}
+        self.assertEqual(checks["transcription.runtime"]["status"], "missing")
+        self.assertIn("transcription.runtime", response["details"]["missing_required_checks"])
+
+    def test_model_directory_and_missing_model_path_are_reported_missing(self) -> None:
+        for model_setup in ("directory", "missing"):
+            with self.subTest(model_setup=model_setup):
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    bin_dir = root / "bin"
+                    workspace = root / "workspace"
+                    bin_dir.mkdir()
+                    _fake_executable(bin_dir, "swift")
+                    _fake_executable(bin_dir, "ffmpeg")
+                    _fake_executable(bin_dir, "whisper-local")
+                    if model_setup == "directory":
+                        model_path = bin_dir / "ggml-large-v3-turbo-q5_0.bin"
+                        model_path.mkdir()
+                    else:
+                        model_path = bin_dir / "missing" / "ggml-large-v3-turbo-q5_0.bin"
+                    env = self.fake_env(bin_dir)
+                    env["MEETING_ASSISTANT_TRANSCRIPTION_MODEL"] = str(model_path)
+
+                    response = run_dependency_check(workspace, env)
+
+                self.assertFalse(response["ok"])
+                self.assertEqual(response["code"], "dependency_missing")
+                checks = {item["id"]: item for item in response["checks"]}
+                self.assertEqual(checks["transcription.model"]["status"], "missing")
+                self.assertIn("transcription.model", response["details"]["missing_required_checks"])
+
     def test_english_only_whisper_model_is_not_valid_for_mixed_language_coverage(self) -> None:
-        for model_name in ("ggml-base.en.bin", "ggml-base.en-q5_0.bin"):
+        for model_name in ("ggml-base.en.bin", "ggml-base.en-q5_0.bin", "ggml-large-v3.en-q5_0.bin"):
             with self.subTest(model_name=model_name):
                 with tempfile.TemporaryDirectory() as tmp:
                     root = Path(tmp)

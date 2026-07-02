@@ -10,6 +10,7 @@ from .delete_session import run_delete_session
 from .dependency_check import run_dependency_check
 from .export_transcript import run_export_transcript
 from .import_media import run_import_media
+from .sanitization import redact_sensitive_text
 from .settings import default_workspace
 from .speaker_labeling import run_generate_speaker_labels
 from .transcript_processing import run_generate_transcript
@@ -34,6 +35,14 @@ EXIT_CODES = {
     "capture_failed": 5,
     "processing_failed": 5,
     "internal_error": 1,
+}
+KNOWN_COMMANDS = {
+    "check_dependencies",
+    "delete_session",
+    "export_transcript",
+    "generate_speaker_labels",
+    "generate_transcript",
+    "import_media",
 }
 
 
@@ -100,7 +109,7 @@ def _parse_failure_response(message: str, argv: Sequence[str] | None) -> dict:
     command = "unknown"
     if argv:
         first = str(argv[0])
-        if not first.startswith("-"):
+        if first in KNOWN_COMMANDS:
             command = first
     return {
         "ok": False,
@@ -108,7 +117,7 @@ def _parse_failure_response(message: str, argv: Sequence[str] | None) -> dict:
         "command": command,
         "code": "invalid_input",
         "message": "Invalid command input.",
-        "details": {"error": message},
+        "details": {"error": redact_sensitive_text(message, max_length=240, redact_paths=True)},
         "warnings": [],
     }
 

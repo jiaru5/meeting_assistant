@@ -95,6 +95,64 @@ class CliContractTests(unittest.TestCase):
                     error_contains=error_contains,
                 )
 
+    def test_parse_failure_redacts_sensitive_values_but_keeps_argument_names(self) -> None:
+        sensitive_path = "/Users/jerry/Meetings/private/model.bin"
+        secret_value = "sk-cli-secret123456"
+
+        payload = self.assert_invalid_input_response(
+            ["check_dependencies", "--unknown-field", sensitive_path, f"token={secret_value}"],
+            command="check_dependencies",
+            error_contains="--unknown-field",
+        )
+        error = payload["details"]["error"]
+        self.assertIn("--unknown-field", error)
+        self.assertNotIn(sensitive_path, error)
+        self.assertNotIn(secret_value, error)
+
+        payload = self.assert_invalid_input_response(
+            ["check_dependencies", "--format", sensitive_path],
+            command="check_dependencies",
+            error_contains="invalid choice",
+        )
+        error = payload["details"]["error"]
+        self.assertIn("invalid choice", error)
+        self.assertIn("--format", error)
+        self.assertNotIn(sensitive_path, error)
+
+        payload = self.assert_invalid_input_response(
+            ["generate_transcript", "--runtime", f"access_token={secret_value}"],
+            command="generate_transcript",
+            error_contains="--session-id",
+        )
+        error = payload["details"]["error"]
+        self.assertIn("--session-id", error)
+        self.assertNotIn(secret_value, error)
+
+    def test_invalid_sensitive_first_argv_uses_unknown_command_and_redacts_details(self) -> None:
+        sensitive_values = [
+            "/Users/jerry/.local/share/ai-models/whisper.cpp/large-v3/model.bin",
+            "token=sk-invalidcommand123456",
+        ]
+
+        for sensitive_value in sensitive_values:
+            with self.subTest(sensitive_value=sensitive_value):
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    exit_code = main([sensitive_value, "--unknown-field", "value"])
+
+                output = stdout.getvalue().strip()
+                payload = json.loads(output)
+
+                self.assertEqual(exit_code, 2)
+                self.assertEqual(stderr.getvalue(), "")
+                self.assertEqual(payload["command"], "unknown")
+                self.assertEqual(payload["code"], "invalid_input")
+                self.assertEqual(payload["message"], "Invalid command input.")
+                self.assertNotIn(sensitive_value, payload["details"]["error"])
+                self.assertNotIn(sensitive_value, output)
+
     def test_check_dependencies_success_emits_contract_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
