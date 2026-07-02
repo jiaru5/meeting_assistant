@@ -17,7 +17,6 @@ _PROVIDER_DETAIL_ALLOWLIST = {
     "compression",
     "format",
     "language",
-    "path",
     "runtime",
     "source_artifact_id",
     "transcript_id",

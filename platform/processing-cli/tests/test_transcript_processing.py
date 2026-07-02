@@ -325,7 +325,10 @@ class TranscriptProcessingTests(unittest.TestCase):
             raise ContractError(
                 "processing_failed",
                 f"{sensitive_phrase} access_token={secret_value} {sensitive_path}",
-                path=str(audio_path),
+                path=sensitive_path,
+                language=language,
+                runtime=runtime or "fake_adapter",
+                source_artifact_id="artifact-normalized_audio",
                 stderr=f"{sensitive_phrase} stderr {secret_value}",
                 transcript_text=sensitive_phrase,
             )
@@ -349,13 +352,18 @@ class TranscriptProcessingTests(unittest.TestCase):
         self.assertFalse(response["ok"])
         self.assertEqual(response["code"], "processing_failed")
         self.assertEqual(response["message"], "Transcript generation failed.")
-        self.assertEqual(response["details"]["path"], str(session_dir / "artifacts" / "normalized_audio.wav"))
+        self.assertNotIn("path", response["details"])
+        self.assertEqual(response["details"]["language"], None)
+        self.assertEqual(response["details"]["runtime"], "fake_adapter")
+        self.assertEqual(response["details"]["source_artifact_id"], "artifact-normalized_audio")
         self.assertEqual(response["details"]["log_path"], str(session_dir / "logs" / "processing.log"))
         self.assertFalse(transcript_exists)
         self.assertNotIn("transcript_text", artifact_types)
+        self.assertNotIn("private-transcript.txt", response_json)
         self.assertNotIn(sensitive_phrase, response_json)
         self.assertNotIn(secret_value, response_json)
         self.assertNotIn(sensitive_path, response_json)
+        self.assertNotIn("private-transcript.txt", log_text)
         self.assertNotIn(sensitive_phrase, log_text)
         self.assertNotIn(secret_value, log_text)
         self.assertNotIn(sensitive_path, log_text)

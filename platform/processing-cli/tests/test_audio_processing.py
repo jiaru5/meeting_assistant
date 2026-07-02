@@ -599,7 +599,9 @@ class AudioProcessingTests(unittest.TestCase):
             raise ContractError(
                 "processing_failed",
                 f"{sensitive_phrase} token={secret_value} {sensitive_path}",
-                path=str(source),
+                path=sensitive_path,
+                compression="NONE",
+                source_artifact_id="artifact-mixed_audio",
                 stderr=f"{sensitive_phrase} stderr {secret_value}",
                 transcript_text=sensitive_phrase,
             )
@@ -607,7 +609,6 @@ class AudioProcessingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
-            source_path = session_dir / "artifacts" / "mixed_audio.wav"
 
             response = run_audio_normalization(
                 "session-1",
@@ -624,13 +625,17 @@ class AudioProcessingTests(unittest.TestCase):
         self.assertFalse(response["ok"])
         self.assertEqual(response["code"], "processing_failed")
         self.assertEqual(response["message"], "Audio normalization failed.")
-        self.assertEqual(response["details"]["path"], str(source_path))
+        self.assertNotIn("path", response["details"])
+        self.assertEqual(response["details"]["compression"], "NONE")
+        self.assertEqual(response["details"]["source_artifact_id"], "artifact-mixed_audio")
         self.assertEqual(response["details"]["log_path"], str(session_dir / "logs" / "processing.log"))
         self.assertFalse(temp_exists)
         self.assertFalse(normalized_exists)
+        self.assertNotIn("private-source.wav", response_json)
         self.assertNotIn(sensitive_phrase, response_json)
         self.assertNotIn(secret_value, response_json)
         self.assertNotIn(sensitive_path, response_json)
+        self.assertNotIn("private-source.wav", log_text)
         self.assertNotIn(sensitive_phrase, log_text)
         self.assertNotIn(secret_value, log_text)
         self.assertNotIn(sensitive_path, log_text)

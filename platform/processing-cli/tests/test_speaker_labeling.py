@@ -286,6 +286,8 @@ class SpeakerLabelingTests(unittest.TestCase):
             raise ContractError(
                 "processing_failed",
                 f"{sensitive_phrase} auth_token={secret_value} {sensitive_path}",
+                path=sensitive_path,
+                transcript_id=transcript["id"],
                 transcript_path="/Users/jerry/Meetings/private-transcript.json",
                 stderr=f"{sensitive_phrase} stderr {secret_value}",
             )
@@ -307,10 +309,15 @@ class SpeakerLabelingTests(unittest.TestCase):
         self.assertFalse(response["ok"])
         self.assertEqual(response["code"], "processing_failed")
         self.assertEqual(response["message"], "Speaker labeling failed.")
+        self.assertNotIn("path", response["details"])
+        self.assertEqual(response["details"]["transcript_id"], "transcript-1")
+        self.assertEqual(response["details"]["log_path"], str(session_dir / "logs" / "processing.log"))
+        self.assertNotIn("private-speaker.log", response_json)
         self.assertNotIn(sensitive_phrase, response_json)
         self.assertNotIn(secret_value, response_json)
         self.assertNotIn(sensitive_path, response_json)
         self.assertNotIn("private-transcript.json", response_json)
+        self.assertNotIn("private-speaker.log", log_text)
         self.assertNotIn(sensitive_phrase, log_text)
         self.assertNotIn(secret_value, log_text)
         self.assertNotIn(sensitive_path, log_text)
