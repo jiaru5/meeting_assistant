@@ -19,6 +19,8 @@
 
 当前目录没有公开 `normalize_audio` 命令；标准化音频是 `generate_transcript` 或原生处理流程可复用的内部 stage。当前 normalized audio stage 使用 fixture-compatible WAV/PCM adapter 边界。当前 transcript adapter 包含 deterministic fake 和最小 `whisper.cpp` 调用路径；speaker labeling 只提供 transcript-only fallback 和可注入 adapter 边界，不选择 WhisperX、pyannote.audio 或其他真实 speaker runtime。当前组件不承诺生产级转码、生产级识别质量、生产级 speaker labeling、外部模型调用或自动依赖下载。真实 `PV-MA-007` covered 仍需要本机 `whisper.cpp` CLI、multilingual 模型和中英混合小样例 smoke 进入标准门禁。
 
+`platform/e2e` 中的 `VS-MA-20 provider/e2e marker [non-contract]` 输出仅用于 provider smoke 证据归因，不新增公开 processing CLI 命令、字段、artifact、error code 或 exit code。
+
 本机共享资产约定：
 
 ```bash

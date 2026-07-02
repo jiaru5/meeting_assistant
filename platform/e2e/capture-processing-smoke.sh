@@ -38,6 +38,14 @@ TRANSCRIPTION_ENV_NAMES = (
 )
 
 
+def evidence_marker(stage: str) -> None:
+    print(
+        f"VS-MA-20 provider/e2e marker [non-contract]: "
+        f"native_recording-style provider artifact chain - {stage}",
+        flush=True,
+    )
+
+
 def write_fixture_wav(path: Path, seed: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     frames = bytearray()
@@ -542,6 +550,7 @@ def exercise_default_capture_pipeline(workspace: Path, root: Path) -> None:
         item_path = Path(str(deleted_item))
         if item_path.is_absolute() or ".." in item_path.parts:
             raise AssertionError(f"delete_session event: deleted item must be relative and contained: {deleted_item}")
+    evidence_marker("default mixed_audio, no-auto-upload boundary, and export/delete retention verified")
 
 
 def exercise_fallback_capture_pipeline(
@@ -602,6 +611,7 @@ def exercise_fallback_capture_pipeline(
         raise AssertionError("fallback fixture: transcript must source normalized_audio")
     assert_capture_checksums_unchanged(session_dir, original_checksums)
     assert_no_temp_leftovers(session_dir)
+    evidence_marker(f"fallback {source_artifact_type} artifact verified")
 
 
 def exercise_path_boundary_rollback(workspace: Path, root: Path) -> None:
@@ -639,6 +649,7 @@ def exercise_path_boundary_rollback(workspace: Path, root: Path) -> None:
         raise AssertionError("path boundary rollback: conflicting symlink should remain for diagnosis")
     assert_capture_checksums_unchanged(session_dir, original_checksums)
     assert_no_temp_leftovers(session_dir)
+    evidence_marker("path rollback boundary verified")
 
 
 def exercise_lock_conflict(workspace: Path) -> None:
@@ -663,6 +674,7 @@ def exercise_lock_conflict(workspace: Path) -> None:
         raise AssertionError("lock conflict: transcript.json must not be written")
     assert_capture_checksums_unchanged(session_dir, original_checksums)
     assert_no_temp_leftovers(session_dir)
+    evidence_marker("lock rollback boundary verified")
 
 
 def exercise_temp_hardlink_rollback(workspace: Path, root: Path) -> None:
@@ -699,6 +711,7 @@ def exercise_temp_hardlink_rollback(workspace: Path, root: Path) -> None:
     if not temp_path.exists() or temp_path.stat().st_nlink < 2:
         raise AssertionError("temp hardlink rollback: conflicting hardlink should remain for diagnosis")
     assert_capture_checksums_unchanged(session_dir, original_checksums)
+    evidence_marker("temp hardlink rollback boundary verified")
 
 
 def exercise_checksum_drift(workspace: Path) -> None:
@@ -725,6 +738,7 @@ def exercise_checksum_drift(workspace: Path) -> None:
         raise AssertionError("checksum drift: derived outputs must not be written")
     unchanged_types = {key: value for key, value in original_checksums.items() if key != "mixed_audio"}
     assert_capture_checksums_unchanged(session_dir, unchanged_types)
+    evidence_marker("checksum rollback boundary verified")
 
 
 with tempfile.TemporaryDirectory(prefix="meeting-assistant-capture-processing-") as tmp:
@@ -740,6 +754,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-capture-processing-")
     model_path.write_bytes(b"fake local multilingual model")
 
     run_isolated_dependency_smoke(check_workspace, bin_dir, model_path)
+    evidence_marker("no-auto-download dependency preflight verified")
     exercise_default_capture_pipeline(workspace, root)
     exercise_fallback_capture_pipeline(
         workspace,
