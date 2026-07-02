@@ -640,6 +640,49 @@ class AudioProcessingTests(unittest.TestCase):
         self.assertNotIn(secret_value, log_text)
         self.assertNotIn(sensitive_path, log_text)
 
+    def test_adapter_contract_error_nested_allowlisted_details_are_redacted(self) -> None:
+        sensitive_phrase = "ProjectApolloRoadmap"
+        secret_value = "secretcodename"
+
+        def failing_normalizer(source: Path, destination: Path) -> None:
+            raise ContractError(
+                "processing_failed",
+                "normalizer failed",
+                compression={"mode": "NONE", "meeting_words": sensitive_phrase},
+                source_artifact_id=["artifact-mixed_audio", secret_value],
+                artifact_id={"child_key": "artifact-mixed_audio"},
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+
+            response = run_audio_normalization(
+                "session-1",
+                workspace=workspace,
+                request_id="local-nested-audio-detail",
+                normalizer=failing_normalizer,
+            )
+
+            response_json = json.dumps(response, ensure_ascii=False, sort_keys=True)
+            log_text = (session_dir / "logs" / "processing.log").read_text(encoding="utf-8")
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "processing_failed")
+        self.assertEqual(response["details"]["compression"], "<redacted>")
+        self.assertEqual(response["details"]["source_artifact_id"], "<redacted>")
+        self.assertEqual(response["details"]["artifact_id"], "<redacted>")
+        self.assertNotIn("mode", response_json)
+        self.assertNotIn("meeting_words", response_json)
+        self.assertNotIn("child_key", response_json)
+        self.assertNotIn(sensitive_phrase, response_json)
+        self.assertNotIn(secret_value, response_json)
+        self.assertNotIn("mode", log_text)
+        self.assertNotIn("meeting_words", log_text)
+        self.assertNotIn("child_key", log_text)
+        self.assertNotIn(sensitive_phrase, log_text)
+        self.assertNotIn(secret_value, log_text)
+
     def test_adapter_no_output_fails_without_workspace_pollution(self) -> None:
         def missing_output_normalizer(source: Path, destination: Path) -> None:
             return None

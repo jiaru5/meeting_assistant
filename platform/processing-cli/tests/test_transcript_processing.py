@@ -377,12 +377,12 @@ class TranscriptProcessingTests(unittest.TestCase):
             raise ContractError(
                 "processing_failed",
                 "provider failed with sensitive details",
-                runtime=f"fake_adapter {sensitive_path}",
-                language=f"zh {sensitive_phrase}",
+                runtime="ProjectApolloRoadmap",
+                language="secretcodename",
                 format=f"json access_token={secret_value}",
                 compression=f"none {sensitive_phrase}",
-                source_artifact_id=f"artifact-normalized_audio {sensitive_path}",
-                transcript_id=sensitive_phrase,
+                source_artifact_id={"child_key": "artifact-normalized_audio", "child_value": sensitive_phrase},
+                transcript_id=["transcript-1", "transcript-project-apollo"],
                 artifact_id=f"artifact-transcript_text token={secret_value}",
                 stderr=sensitive_phrase,
             )
@@ -413,14 +413,62 @@ class TranscriptProcessingTests(unittest.TestCase):
             "transcript_id",
         ):
             self.assertIn(key, response["details"])
+            self.assertEqual(response["details"][key], "<redacted>")
         self.assertNotIn("stderr", response["details"])
+        self.assertNotIn("ProjectApolloRoadmap", response_json)
+        self.assertNotIn("secretcodename", response_json)
+        self.assertNotIn("child_key", response_json)
+        self.assertNotIn("child_value", response_json)
+        self.assertNotIn("transcript-project-apollo", response_json)
         self.assertNotIn(sensitive_phrase, response_json)
         self.assertNotIn(secret_value, response_json)
         self.assertNotIn(sensitive_path, response_json)
+        self.assertNotIn("ProjectApolloRoadmap", log_text)
+        self.assertNotIn("secretcodename", log_text)
+        self.assertNotIn("child_key", log_text)
+        self.assertNotIn("child_value", log_text)
+        self.assertNotIn("transcript-project-apollo", log_text)
         self.assertNotIn(sensitive_phrase, log_text)
         self.assertNotIn(secret_value, log_text)
         self.assertNotIn(sensitive_path, log_text)
         self.assertIn("local-allowlisted-detail-failure", log_text)
+
+    def test_adapter_contract_error_safe_allowlisted_details_are_preserved(self) -> None:
+        safe_artifact_uuid = "artifact-550e8400-e29b-41d4-a716-446655440000"
+
+        def failing_adapter(audio_path: Path, language: str | None, runtime: str | None) -> list[dict]:
+            raise ContractError(
+                "processing_failed",
+                "provider failed",
+                runtime="whisper_cpp",
+                language="zh-CN",
+                format="json",
+                compression="NONE",
+                source_artifact_id="artifact-mixed_audio",
+                artifact_id=safe_artifact_uuid,
+                transcript_id="transcript-42",
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+
+            response = run_generate_transcript(
+                "session-1",
+                workspace=workspace,
+                request_id="local-safe-detail-failure",
+                adapter=failing_adapter,
+            )
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "processing_failed")
+        self.assertEqual(response["details"]["runtime"], "whisper_cpp")
+        self.assertEqual(response["details"]["language"], "zh-CN")
+        self.assertEqual(response["details"]["format"], "json")
+        self.assertEqual(response["details"]["compression"], "NONE")
+        self.assertEqual(response["details"]["source_artifact_id"], "artifact-mixed_audio")
+        self.assertEqual(response["details"]["artifact_id"], safe_artifact_uuid)
+        self.assertEqual(response["details"]["transcript_id"], "transcript-42")
 
     def test_transcript_symlink_destination_returns_path_conflict_without_external_write(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

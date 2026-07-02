@@ -323,6 +323,45 @@ class SpeakerLabelingTests(unittest.TestCase):
         self.assertNotIn(sensitive_path, log_text)
         self.assertNotIn("private-transcript.json", log_text)
 
+    def test_adapter_contract_error_arbitrary_transcript_id_suffix_is_redacted_when_fallback_disabled(self) -> None:
+        sensitive_transcript_id = "transcript-ProjectApolloRoadmap"
+        sensitive_artifact_id = "artifact-ProjectApolloRoadmap"
+
+        def sensitive_failure_adapter(transcript: dict, audio_path: Path | None) -> dict:
+            raise ContractError(
+                "processing_failed",
+                "speaker adapter failed",
+                transcript_id=sensitive_transcript_id,
+                artifact_id=sensitive_artifact_id,
+                source_artifact_id="artifact-transcript_text-apollo",
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_transcript_session(workspace)
+
+            response = run_generate_speaker_labels(
+                "session-1",
+                "transcript-1",
+                workspace=workspace,
+                allow_transcript_only_fallback=False,
+                adapter=sensitive_failure_adapter,
+            )
+            response_json = json.dumps(response, ensure_ascii=False, sort_keys=True)
+            log_text = (session_dir / "logs" / "processing.log").read_text(encoding="utf-8")
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "processing_failed")
+        self.assertEqual(response["details"]["transcript_id"], "<redacted>")
+        self.assertEqual(response["details"]["artifact_id"], "<redacted>")
+        self.assertEqual(response["details"]["source_artifact_id"], "<redacted>")
+        self.assertNotIn(sensitive_transcript_id, response_json)
+        self.assertNotIn(sensitive_artifact_id, response_json)
+        self.assertNotIn("artifact-transcript_text-apollo", response_json)
+        self.assertNotIn(sensitive_transcript_id, log_text)
+        self.assertNotIn(sensitive_artifact_id, log_text)
+        self.assertNotIn("artifact-transcript_text-apollo", log_text)
+
     def test_adapter_supplied_degradation_reason_is_sanitized(self) -> None:
         explanation = "diarization confidence below threshold"
         secret_value = "ghp_speakersecret123456"

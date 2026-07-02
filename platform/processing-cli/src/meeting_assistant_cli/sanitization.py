@@ -21,8 +21,26 @@ _PROVIDER_DETAIL_ALLOWLIST = {
     "source_artifact_id",
     "transcript_id",
 }
-_SAFE_PROVIDER_DETAIL_VALUE_RE = re.compile(r"^[A-Za-z0-9_.:@+-]{1,128}$")
 _REDACTION_MARKER_RE = re.compile(r"<(?:path|redacted[^>]*)>")
+_SAFE_PROVIDER_RUNTIMES = {"fake_adapter", "whisper_cpp"}
+_SAFE_PROVIDER_LANGUAGES = {"en", "zh", "en-US", "en-GB", "zh-CN", "zh-TW"}
+_SAFE_PROVIDER_FORMATS = {"json", "wav", "m4a", "mp3", "mp4", "mov", "txt", "md"}
+_SAFE_PROVIDER_COMPRESSIONS = {"NONE"}
+_SAFE_PROVIDER_ARTIFACT_TYPES = {
+    "mixed_audio",
+    "system_audio",
+    "microphone_audio",
+    "screen_video",
+    "normalized_audio",
+    "transcript_text",
+    "speaker_labels",
+}
+_UUID_FRAGMENT = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}"
+_SAFE_PROVIDER_ARTIFACT_ID_RE = re.compile(
+    rf"^(?:artifact-(?:{'|'.join(sorted(_SAFE_PROVIDER_ARTIFACT_TYPES))})|artifact-{_UUID_FRAGMENT})$"
+)
+_SAFE_PROVIDER_TRANSCRIPT_ID_RE = re.compile(rf"^transcript-(?:[0-9]+|{_UUID_FRAGMENT})$")
+
 
 def redact_sensitive_text(value: object, *, max_length: int = 240, redact_paths: bool = True) -> str:
     text = " ".join(str(value).replace("\x00", "").split())
@@ -76,17 +94,32 @@ def _sanitize_detail_value(key: str, value: object) -> object:
 
 def _sanitize_provider_detail_value(key: str, value: object) -> object:
     if isinstance(value, Mapping):
-        return {
-            str(child_key): _sanitize_provider_detail_value(str(child_key), child_value)
-            for child_key, child_value in value.items()
-        }
-    if isinstance(value, str):
-        sanitized = redact_sensitive_text(value, max_length=160, redact_paths=True)
-        if _REDACTION_MARKER_RE.search(sanitized):
-            return "<redacted>"
-        if not _SAFE_PROVIDER_DETAIL_VALUE_RE.fullmatch(sanitized):
-            return "<redacted>"
-        return sanitized
+        return "<redacted>"
     if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray, str)):
-        return [_sanitize_provider_detail_value(key, item) for item in value]
-    return value
+        return "<redacted>"
+    if value is None:
+        if key in {"runtime", "language"}:
+            return None
+        return "<redacted>"
+    if isinstance(value, str):
+        if _provider_detail_contains_sensitive_text(value):
+            return "<redacted>"
+        if key == "runtime" and value in _SAFE_PROVIDER_RUNTIMES:
+            return value
+        if key == "language" and value in _SAFE_PROVIDER_LANGUAGES:
+            return value
+        if key == "format" and value in _SAFE_PROVIDER_FORMATS:
+            return value
+        if key == "compression" and value in _SAFE_PROVIDER_COMPRESSIONS:
+            return value
+        if key in {"artifact_id", "source_artifact_id"} and _SAFE_PROVIDER_ARTIFACT_ID_RE.fullmatch(value):
+            return value
+        if key == "transcript_id" and _SAFE_PROVIDER_TRANSCRIPT_ID_RE.fullmatch(value):
+            return value
+        return "<redacted>"
+    return "<redacted>"
+
+
+def _provider_detail_contains_sensitive_text(value: str) -> bool:
+    sanitized = redact_sensitive_text(value, max_length=160, redact_paths=True)
+    return _REDACTION_MARKER_RE.search(sanitized) is not None
