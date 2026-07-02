@@ -8,7 +8,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
-from .sanitization import redact_sensitive_text, safe_exception_details, sanitize_failure_details
+from .sanitization import (
+    redact_sensitive_text,
+    safe_exception_details,
+    sanitize_failure_details,
+    sanitize_provider_failure_details,
+    sanitize_provider_failure_message,
+)
 from .settings import default_workspace
 from .workspace_contract import (
     ContractError,
@@ -332,6 +338,19 @@ def run_generate_speaker_labels(
                     payload = _payload_from_adapter(
                         adapter(transcript, _normalized_audio_path(session_dir)),
                         transcript=transcript,
+                        clock=clock,
+                    )
+                except ContractError as exc:
+                    if not allow_transcript_only_fallback:
+                        raise ContractError(
+                            exc.code,
+                            sanitize_provider_failure_message(exc.message, fallback="Speaker labeling failed."),
+                            **sanitize_provider_failure_details(exc.details),
+                        ) from exc
+                    payload = _fallback_payload(
+                        session_id=session_id,
+                        transcript_id=transcript_id,
+                        degradation_reason="Speaker labeling adapter failed; transcript-only fallback was used.",
                         clock=clock,
                     )
                 except Exception as exc:

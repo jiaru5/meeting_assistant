@@ -12,6 +12,16 @@ _ASSIGNED_SENSITIVE_VALUE_RE = re.compile(
 _OPENAI_STYLE_VALUE_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}")
 _GITHUB_STYLE_VALUE_RE = re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{8,}")
 _AWS_ACCESS_KEY_RE = re.compile(r"\bAKIA[0-9A-Z]{12,}\b")
+_PROVIDER_DETAIL_ALLOWLIST = {
+    "artifact_id",
+    "compression",
+    "format",
+    "language",
+    "path",
+    "runtime",
+    "source_artifact_id",
+    "transcript_id",
+}
 
 def redact_sensitive_text(value: object, *, max_length: int = 240, redact_paths: bool = True) -> str:
     text = " ".join(str(value).replace("\x00", "").split())
@@ -25,6 +35,19 @@ def redact_sensitive_text(value: object, *, max_length: int = 240, redact_paths:
     if len(text) > max_length:
         return text[: max_length - 14].rstrip() + " <truncated>"
     return text
+
+
+def sanitize_provider_failure_message(provider_message: object, *, fallback: str) -> str:
+    """Return a stable provider failure summary without echoing provider text."""
+    _ = provider_message
+    return redact_sensitive_text(fallback, max_length=160)
+
+
+def sanitize_provider_failure_details(details: Mapping[str, object] | None) -> dict[str, object]:
+    if not details:
+        return {}
+    sanitized = sanitize_failure_details(details)
+    return {key: value for key, value in sanitized.items() if key in _PROVIDER_DETAIL_ALLOWLIST}
 
 
 def sanitize_failure_details(details: Mapping[str, object] | None) -> dict[str, object]:

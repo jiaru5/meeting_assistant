@@ -316,23 +316,49 @@ class TranscriptProcessingTests(unittest.TestCase):
         self.assertNotIn(sensitive_path, log_text)
         self.assertIn("local-sensitive-failure", log_text)
 
-    def test_adapter_contract_error_returns_processing_failed_without_transcript_artifact(self) -> None:
+    def test_adapter_contract_error_text_is_not_logged_or_returned(self) -> None:
+        sensitive_phrase = "private transcript phrase from adapter"
+        secret_value = "sk-transcriptsecret123456"
+        sensitive_path = "/Users/jerry/Meetings/private-transcript.txt"
+
         def failing_adapter(audio_path: Path, language: str | None, runtime: str | None) -> list[dict]:
-            raise ContractError("processing_failed", "adapter contract failure")
+            raise ContractError(
+                "processing_failed",
+                f"{sensitive_phrase} access_token={secret_value} {sensitive_path}",
+                path=str(audio_path),
+                stderr=f"{sensitive_phrase} stderr {secret_value}",
+                transcript_text=sensitive_phrase,
+            )
 
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
 
-            response = run_generate_transcript("session-1", workspace=workspace, adapter=failing_adapter)
+            response = run_generate_transcript(
+                "session-1",
+                workspace=workspace,
+                request_id="local-contract-error",
+                adapter=failing_adapter,
+            )
 
             transcript_exists = (session_dir / "artifacts" / "transcript.json").exists()
             artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+            log_text = (session_dir / "logs" / "processing.log").read_text(encoding="utf-8")
+            response_json = json.dumps(response, ensure_ascii=False, sort_keys=True)
 
         self.assertFalse(response["ok"])
         self.assertEqual(response["code"], "processing_failed")
+        self.assertEqual(response["message"], "Transcript generation failed.")
+        self.assertEqual(response["details"]["path"], str(session_dir / "artifacts" / "normalized_audio.wav"))
+        self.assertEqual(response["details"]["log_path"], str(session_dir / "logs" / "processing.log"))
         self.assertFalse(transcript_exists)
         self.assertNotIn("transcript_text", artifact_types)
+        self.assertNotIn(sensitive_phrase, response_json)
+        self.assertNotIn(secret_value, response_json)
+        self.assertNotIn(sensitive_path, response_json)
+        self.assertNotIn(sensitive_phrase, log_text)
+        self.assertNotIn(secret_value, log_text)
+        self.assertNotIn(sensitive_path, log_text)
 
     def test_transcript_symlink_destination_returns_path_conflict_without_external_write(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

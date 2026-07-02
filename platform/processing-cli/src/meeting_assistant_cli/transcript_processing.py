@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .audio_processing import run_audio_normalization
-from .sanitization import redact_sensitive_text, safe_exception_details, sanitize_failure_details
+from .sanitization import (
+    redact_sensitive_text,
+    safe_exception_details,
+    sanitize_failure_details,
+    sanitize_provider_failure_details,
+    sanitize_provider_failure_message,
+)
 from .settings import default_workspace
 from .transcription_runtime_config import SUPPORTED_TRANSCRIPTION_RUNTIME
 from .whisper_cpp_adapter import validate_whisper_cpp_config, whisper_cpp_transcript_adapter
@@ -407,7 +413,17 @@ def run_generate_transcript(
                 if existing is not None:
                     return _success_response(request_id=assigned_request_id, session_id=session_id, artifact=existing, reused=True)
                 selected_adapter = adapter or (whisper_cpp_transcript_adapter if runtime else _fake_transcript_adapter)
-                segments = _normalized_segments(selected_adapter(source_path, language, runtime))
+                try:
+                    raw_segments = selected_adapter(source_path, language, runtime)
+                except ContractError as exc:
+                    if adapter is not None:
+                        raise ContractError(
+                            exc.code,
+                            sanitize_provider_failure_message(exc.message, fallback="Transcript generation failed."),
+                            **sanitize_provider_failure_details(exc.details),
+                        ) from exc
+                    raise
+                segments = _normalized_segments(raw_segments)
                 payload = _transcript_payload(
                     session_id=session_id,
                     source_artifact_id=str(source.get("id")),

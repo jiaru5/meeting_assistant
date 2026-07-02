@@ -237,6 +237,85 @@ class SpeakerLabelingTests(unittest.TestCase):
         self.assertNotIn(secret_value, payload_json)
         self.assertNotIn(sensitive_path, payload_json)
 
+    def test_adapter_contract_error_text_is_not_written_to_fallback_payload(self) -> None:
+        sensitive_phrase = "private transcript phrase from speaker adapter"
+        secret_value = "sk-speakercontract123456"
+        sensitive_path = "/Users/jerry/Meetings/private-diarization.log"
+
+        def sensitive_failure_adapter(transcript: dict, audio_path: Path | None) -> dict:
+            raise ContractError(
+                "processing_failed",
+                f"{sensitive_phrase} auth_token={secret_value} {sensitive_path}",
+                transcript_path="/Users/jerry/Meetings/private-transcript.json",
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            create_transcript_session(workspace)
+
+            response = run_generate_speaker_labels(
+                "session-1",
+                "transcript-1",
+                workspace=workspace,
+                allow_transcript_only_fallback=True,
+                adapter=sensitive_failure_adapter,
+            )
+
+            payload = speaker_payload(response)
+            response_json = json.dumps(response, ensure_ascii=False, sort_keys=True)
+            payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["label_status"], "transcript_only")
+        self.assertIn("adapter failed", response["degradation_reason"])
+        self.assertNotIn(sensitive_phrase, response_json)
+        self.assertNotIn(secret_value, response_json)
+        self.assertNotIn(sensitive_path, response_json)
+        self.assertNotIn("private-transcript.json", response_json)
+        self.assertNotIn(sensitive_phrase, payload_json)
+        self.assertNotIn(secret_value, payload_json)
+        self.assertNotIn(sensitive_path, payload_json)
+        self.assertNotIn("private-transcript.json", payload_json)
+
+    def test_adapter_contract_error_text_is_not_returned_when_fallback_disabled(self) -> None:
+        sensitive_phrase = "private transcript phrase from speaker adapter"
+        secret_value = "sk-speakerdisabled123456"
+        sensitive_path = "/Users/jerry/Meetings/private-speaker.log"
+
+        def sensitive_failure_adapter(transcript: dict, audio_path: Path | None) -> dict:
+            raise ContractError(
+                "processing_failed",
+                f"{sensitive_phrase} auth_token={secret_value} {sensitive_path}",
+                transcript_path="/Users/jerry/Meetings/private-transcript.json",
+                stderr=f"{sensitive_phrase} stderr {secret_value}",
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_transcript_session(workspace)
+
+            response = run_generate_speaker_labels(
+                "session-1",
+                "transcript-1",
+                workspace=workspace,
+                allow_transcript_only_fallback=False,
+                adapter=sensitive_failure_adapter,
+            )
+            response_json = json.dumps(response, ensure_ascii=False, sort_keys=True)
+            log_text = (session_dir / "logs" / "processing.log").read_text(encoding="utf-8")
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "processing_failed")
+        self.assertEqual(response["message"], "Speaker labeling failed.")
+        self.assertNotIn(sensitive_phrase, response_json)
+        self.assertNotIn(secret_value, response_json)
+        self.assertNotIn(sensitive_path, response_json)
+        self.assertNotIn("private-transcript.json", response_json)
+        self.assertNotIn(sensitive_phrase, log_text)
+        self.assertNotIn(secret_value, log_text)
+        self.assertNotIn(sensitive_path, log_text)
+        self.assertNotIn("private-transcript.json", log_text)
+
     def test_adapter_supplied_degradation_reason_is_sanitized(self) -> None:
         explanation = "diarization confidence below threshold"
         secret_value = "ghp_speakersecret123456"

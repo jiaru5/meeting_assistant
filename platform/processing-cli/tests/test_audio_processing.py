@@ -589,14 +589,25 @@ class AudioProcessingTests(unittest.TestCase):
         self.assertNotIn("unexpected adapter failure", log_text)
         self.assertIn("local-unexpected", log_text)
 
-    def test_adapter_contract_error_removes_temp_file_and_writes_processing_evidence(self) -> None:
+    def test_adapter_contract_error_text_is_not_logged_or_returned(self) -> None:
+        sensitive_phrase = "private transcript phrase from normalizer"
+        secret_value = "sk-normalizersecret123456"
+        sensitive_path = "/Users/jerry/Meetings/private-source.wav"
+
         def failing_normalizer(source: Path, destination: Path) -> None:
             destination.write_bytes(wav_bytes(b"partial"))
-            raise ContractError("processing_failed", "adapter contract failure")
+            raise ContractError(
+                "processing_failed",
+                f"{sensitive_phrase} token={secret_value} {sensitive_path}",
+                path=str(source),
+                stderr=f"{sensitive_phrase} stderr {secret_value}",
+                transcript_text=sensitive_phrase,
+            )
 
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.wav", wav_bytes(b"mixed"))])
+            source_path = session_dir / "artifacts" / "mixed_audio.wav"
 
             response = run_audio_normalization(
                 "session-1",
@@ -608,12 +619,21 @@ class AudioProcessingTests(unittest.TestCase):
             temp_exists = (session_dir / "artifacts" / ".normalized_audio.wav.tmp").exists()
             normalized_exists = (session_dir / "artifacts" / "normalized_audio.wav").exists()
             log_text = (session_dir / "logs" / "processing.log").read_text(encoding="utf-8")
+            response_json = json.dumps(response, ensure_ascii=False, sort_keys=True)
 
         self.assertFalse(response["ok"])
         self.assertEqual(response["code"], "processing_failed")
+        self.assertEqual(response["message"], "Audio normalization failed.")
+        self.assertEqual(response["details"]["path"], str(source_path))
+        self.assertEqual(response["details"]["log_path"], str(session_dir / "logs" / "processing.log"))
         self.assertFalse(temp_exists)
         self.assertFalse(normalized_exists)
-        self.assertIn("adapter contract failure", log_text)
+        self.assertNotIn(sensitive_phrase, response_json)
+        self.assertNotIn(secret_value, response_json)
+        self.assertNotIn(sensitive_path, response_json)
+        self.assertNotIn(sensitive_phrase, log_text)
+        self.assertNotIn(secret_value, log_text)
+        self.assertNotIn(sensitive_path, log_text)
 
     def test_adapter_no_output_fails_without_workspace_pollution(self) -> None:
         def missing_output_normalizer(source: Path, destination: Path) -> None:

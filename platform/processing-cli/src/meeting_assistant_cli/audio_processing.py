@@ -8,7 +8,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, NamedTuple
 
-from .sanitization import redact_sensitive_text, safe_exception_details, sanitize_failure_details
+from .sanitization import (
+    redact_sensitive_text,
+    safe_exception_details,
+    sanitize_failure_details,
+    sanitize_provider_failure_details,
+    sanitize_provider_failure_message,
+)
 from .settings import default_workspace
 from .workspace_contract import (
     ContractError,
@@ -314,7 +320,17 @@ def run_audio_normalization(
                 if temp_path.exists():
                     temp_path.unlink()
 
-                (normalizer or _copy_normalizer)(source.path, temp_path)
+                selected_normalizer = normalizer or _copy_normalizer
+                try:
+                    selected_normalizer(source.path, temp_path)
+                except ContractError as exc:
+                    if normalizer is not None:
+                        raise ContractError(
+                            exc.code,
+                            sanitize_provider_failure_message(exc.message, fallback="Audio normalization failed."),
+                            **sanitize_provider_failure_details(exc.details),
+                        ) from exc
+                    raise
                 if not temp_path.is_file():
                     raise ContractError(
                         "processing_failed",
