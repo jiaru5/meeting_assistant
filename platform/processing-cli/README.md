@@ -15,7 +15,7 @@
 9. `generate_speaker_labels` 命令契约：默认支持 transcript-only fallback，写入 `artifacts/speaker_labels.json` 并登记降级的 `speaker_labels` artifact；可注入本地 fake/best-effort adapter，但不选择真实外部 speaker runtime。
 10. `export_transcript` 命令契约：支持 `plain_text`、`markdown`、`json` 内容返回或用户显式目标路径导出，不修改 transcript 或媒体 artifact。
 11. `delete_session` 命令契约：要求 `confirm=true`，只删除当前 workspace 中目标 session 目录，并保留 workspace 外导出文件。
-12. 结构、架构、安全和 SBOM 检查。
+12. 结构、架构、安全、SBOM 和 release validation image 检查。
 
 当前目录没有公开 `normalize_audio` 命令；标准化音频是 `generate_transcript` 或原生处理流程可复用的内部 stage。当前 normalized audio stage 使用 fixture-compatible WAV/PCM adapter 边界。当前 transcript adapter 包含 deterministic fake 和最小 `whisper.cpp` 调用路径；speaker labeling 只提供 transcript-only fallback 和可注入 adapter 边界，不选择 WhisperX、pyannote.audio 或其他真实 speaker runtime。当前组件不承诺生产级转码、生产级识别质量、生产级 speaker labeling、外部模型调用或自动依赖下载。真实 `PV-MA-007` covered 仍需要本机 `whisper.cpp` CLI、multilingual 模型和中英混合小样例 smoke 进入标准门禁。
 
@@ -44,3 +44,5 @@ export MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$HOME/.local/share/ai-fixtures/asr
 | model sha256 | `394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2` |
 
 `scripts/smoke-whisper-cpp.sh` 是条件真实 runtime smoke 入口，并由 `scripts/test.sh` 调用。未配置 runtime/model 或缺少混合语言 WAV fixture 时默认报告 not run；设置 `MEETING_ASSISTANT_REQUIRE_WHISPER_CPP_SMOKE=1` 后缺依赖或缺少 fixture 会失败。若未设置 `MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO`，脚本会检查默认 fixture 路径 `~/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav`。fixture 必须包含中文为主且夹杂 `HTTP`、`LLM`、`clean architecture`、`EDA` 的语音；脚本会拒绝非 `large-v3`/`large-v3-turbo` 名称模型，并断言 transcript 含中文字符和这些英文技术术语。该脚本的 not-run 结果不能作为 `PV-MA-007` covered 证据。
+
+VS-MA-23 provider/e2e release readiness 证据由组件脚本分别提供：`scripts/release-provider-smoke.sh` 是显式 release-scope provider smoke，要求 `MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME`、`MEETING_ASSISTANT_TRANSCRIPTION_MODEL` 和 `MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO` 已配置，且 runtime/model/fixture 位于 `~/.local` 共享资产边界并通过 required `whisper.cpp` mixed-language smoke；`scripts/security.sh` 断言源码不引入网络客户端、provider failure message/details 脱敏和 no-auto-download dependency preflight；`scripts/sbom.sh` 断言 CycloneDX SBOM、validation image SBOM copy、digest-pinned base 和 non-root user；`scripts/architecture.sh` 断言公开 CLI command 集、`normalize_audio` 仍为内部 stage、唯一真实 runtime 仍为 `whisper_cpp` 且源码不引入网络客户端；`scripts/build.sh` 生成 validation-only build report，并断言 Dockerfile 不下载依赖、不打包 runtime/model。上述证据不改变 release scope，也不能替代验证矩阵中仍为 `partial` 的 `PV-MA-*` blocker。
