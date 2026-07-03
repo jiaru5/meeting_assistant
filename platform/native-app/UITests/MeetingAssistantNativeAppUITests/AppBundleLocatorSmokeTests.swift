@@ -292,6 +292,84 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         assertElement("ma.transcriptAction.error", in: failureApp, contains: "path_conflict")
     }
 
+    func testTranscriptActionProcessRunnerLaunchEnvironmentExportsAndDeletesWorkspaceArtifactsFromLaunchedAppBundle() throws {
+        let actionFixture = try AppTranscriptActionProcessFixture()
+        defer { actionFixture.cleanup() }
+        let app = launchApp(
+            workspaceURL: actionFixture.workspaceURL,
+            sessionID: actionFixture.sessionID,
+            transcriptActionFixture: actionFixture
+        )
+
+        assertElement("ma.transcript.heading", in: app, contains: "Native action process workspace fixture")
+        assertElement("ma.transcriptAction.status", in: app, contains: "Transcript actions are ready.")
+
+        tapTranscriptActionButton("ma.transcriptAction.copyButton", in: app)
+
+        assertElement("ma.transcriptAction.status", in: app, contains: "Copy complete.")
+        assertElement(
+            "ma.transcriptAction.success",
+            in: app,
+            contains: "Copied plain text transcript for session \(actionFixture.sessionID)."
+        )
+
+        tapTranscriptActionButton("ma.transcriptAction.exportButton", in: app)
+
+        assertElement("ma.transcriptAction.status", in: app, contains: "Export complete.")
+        assertElement("ma.transcriptAction.success", in: app, contains: actionFixture.exportURL.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: actionFixture.exportURL.path))
+        XCTAssertTrue(try actionFixture.exportContent().contains("Native action process fixture transcript content."))
+
+        tapTranscriptActionButton("ma.transcriptAction.deleteButton", in: app)
+        assertElement("ma.transcriptAction.deletePromptText", in: app, contains: actionFixture.sessionID)
+        assertElement("ma.transcriptAction.deletePromptText", in: app, contains: "External exports are retained.")
+        tapTranscriptActionButton("ma.transcriptAction.deleteConfirmButton", in: app)
+
+        assertElement("ma.transcriptAction.status", in: app, contains: "Delete complete.")
+        assertElement(
+            "ma.transcriptAction.success",
+            in: app,
+            contains: "Deleted session \(actionFixture.sessionID). Removed 3 items. Retained 1 external export."
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: actionFixture.sessionRootURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: actionFixture.exportURL.path))
+        XCTAssertEqual(
+            try actionFixture.invocationLines(),
+            successfulTranscriptActionInvocationLines(
+                sessionID: actionFixture.sessionID,
+                workspaceURL: actionFixture.workspaceURL,
+                exportURL: actionFixture.exportURL
+            )
+        )
+    }
+
+    func testTranscriptActionProcessRunnerBridgeFailureShowsSafeAppBundleError() throws {
+        let actionFixture = try AppTranscriptActionProcessFixture(mode: "non-json-stderr")
+        defer { actionFixture.cleanup() }
+        let app = launchApp(
+            workspaceURL: actionFixture.workspaceURL,
+            sessionID: actionFixture.sessionID,
+            transcriptActionFixture: actionFixture
+        )
+
+        tapTranscriptActionButton("ma.transcriptAction.copyButton", in: app)
+
+        assertElement("ma.transcriptAction.status", in: app, contains: "Copy failed.")
+        assertElement(
+            "ma.transcriptAction.error",
+            in: app,
+            contains: "Transcript action command failed before returning a contract response."
+        )
+        assertElement("ma.transcriptAction.error", in: app, contains: "internal_error")
+        assertElement("ma.transcriptAction.error", in: app, doesNotContain: "customer roadmap")
+        assertElement("ma.transcriptAction.error", in: app, doesNotContain: "/Users/jerry")
+        assertElement("ma.transcriptAction.error", in: app, doesNotContain: "sk-nativefixturevalue")
+        XCTAssertEqual(
+            try actionFixture.invocationLines(),
+            failedTranscriptActionInvocationLines(sessionID: actionFixture.sessionID)
+        )
+    }
+
     func testProcessingSuccessAndTranscriptOnlyDegradationFromLaunchedAppBundle() {
         let successApp = launchApp(fixture: "processing-success")
 
@@ -528,7 +606,8 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         workspaceURL: URL? = nil,
         sessionID: String? = nil,
         recordingFixture: AppControlledRecordingFixture? = nil,
-        processingFixture: AppProcessingProcessFixture? = nil
+        processingFixture: AppProcessingProcessFixture? = nil,
+        transcriptActionFixture: AppTranscriptActionProcessFixture? = nil
     ) -> XCUIApplication {
         dismissSpotlightIfPresent()
         launchedApp?.terminate()
@@ -554,6 +633,9 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         }
         if let processingFixture {
             processingFixture.applyLaunchEnvironment(to: app)
+        }
+        if let transcriptActionFixture {
+            transcriptActionFixture.applyLaunchEnvironment(to: app)
         }
         app.terminate()
         _ = app.wait(for: .notRunning, timeout: 5)
@@ -914,6 +996,64 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         parts.joined(separator: "_")
     }
 
+    private func successfulTranscriptActionInvocationLines(
+        sessionID: String,
+        workspaceURL: URL,
+        exportURL: URL
+    ) -> [String] {
+        [
+            transcriptActionInvocationLine(
+                parts: ["export", "transcript"],
+                arguments: [
+                    "--session-id",
+                    sessionID,
+                    "--export-type",
+                    "plain_text",
+                ]
+            ),
+            transcriptActionInvocationLine(
+                parts: ["export", "transcript"],
+                arguments: [
+                    "--session-id",
+                    sessionID,
+                    "--export-type",
+                    "markdown",
+                    "--target-path",
+                    exportURL.path,
+                ]
+            ),
+            transcriptActionInvocationLine(
+                parts: ["delete", "session"],
+                arguments: [
+                    "--session-id",
+                    sessionID,
+                    "--workspace-dir",
+                    workspaceURL.path,
+                    "--confirm",
+                    "true",
+                ]
+            ),
+        ]
+    }
+
+    private func failedTranscriptActionInvocationLines(sessionID: String) -> [String] {
+        [
+            transcriptActionInvocationLine(
+                parts: ["export", "transcript"],
+                arguments: [
+                    "--session-id",
+                    sessionID,
+                    "--export-type",
+                    "plain_text",
+                ]
+            ),
+        ]
+    }
+
+    private func transcriptActionInvocationLine(parts: [String], arguments: [String]) -> String {
+        ([parts.joined(separator: "_")] + arguments).joined(separator: " ")
+    }
+
     private func bringAppToForeground(
         _ app: XCUIApplication,
         beforeTapping identifier: String,
@@ -1150,6 +1290,170 @@ private final class AppControlledRecordingFixture {
 
     func cleanup() {
         try? FileManager.default.removeItem(at: rootURL)
+    }
+}
+
+private final class AppTranscriptActionProcessFixture {
+    let mode: String
+    let rootURL: URL
+    let workspaceURL: URL
+    let cliURL: URL
+    let invocationsURL: URL
+    let sessionID = "session-app-ui-action-process"
+
+    var sessionRootURL: URL {
+        workspaceURL
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+    }
+
+    var exportURL: URL {
+        workspaceURL
+            .appendingPathComponent("exports", isDirectory: true)
+            .appendingPathComponent("\(sessionID).md", isDirectory: false)
+    }
+
+    init(mode: String = "success", sourceFile: StaticString = #filePath) throws {
+        self.mode = mode
+        let nativeAppRootURL = URL(fileURLWithPath: String(describing: sourceFile))
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        cliURL = nativeAppRootURL
+            .appendingPathComponent("test-fixtures", isDirectory: true)
+            .appendingPathComponent("transcript-action-command-fixture.sh")
+        guard FileManager.default.isExecutableFile(atPath: cliURL.path) else {
+            throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: cliURL.path])
+        }
+
+        rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ma-native-transcript-action-app-\(UUID().uuidString)", isDirectory: true)
+        workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        invocationsURL = rootURL.appendingPathComponent("invocations.txt")
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        try createWorkspaceTranscriptFixture()
+    }
+
+    deinit {
+        cleanup()
+    }
+
+    func applyLaunchEnvironment(to app: XCUIApplication) {
+        app.launchEnvironment["MA_NATIVE_TRANSCRIPT_ACTION_CLIENT"] = "process"
+        app.launchEnvironment["MA_NATIVE_APP_XCTEST"] = "1"
+        app.launchEnvironment["MEETING_ASSISTANT_CLI_PATH"] = cliURL.path
+        app.launchEnvironment["MEETING_ASSISTANT_WORKSPACE"] = workspaceURL.path
+        app.launchEnvironment["MA_NATIVE_TRANSCRIPT_ACTION_FIXTURE_MODE"] = mode
+        app.launchEnvironment["MA_NATIVE_TRANSCRIPT_ACTION_FIXTURE_INVOCATIONS"] = invocationsURL.path
+        app.launchEnvironment["MA_NATIVE_TRANSCRIPT_ACTION_RETAINED_EXPORT"] = exportURL.path
+    }
+
+    func cleanup() {
+        try? FileManager.default.removeItem(at: rootURL)
+    }
+
+    func invocationLines() throws -> [String] {
+        guard FileManager.default.fileExists(atPath: invocationsURL.path) else {
+            return []
+        }
+        let content = try String(contentsOf: invocationsURL, encoding: .utf8)
+        return content.split(whereSeparator: \.isNewline).map(String.init)
+    }
+
+    func exportContent() throws -> String {
+        try String(contentsOf: exportURL, encoding: .utf8)
+    }
+
+    private func createWorkspaceTranscriptFixture() throws {
+        let artifactsURL = sessionRootURL.appendingPathComponent("artifacts", isDirectory: true)
+        try FileManager.default.createDirectory(at: artifactsURL, withIntermediateDirectories: true)
+
+        let transcriptURL = artifactsURL.appendingPathComponent("transcript.json", isDirectory: false)
+        let speakerURL = artifactsURL.appendingPathComponent("speaker_labels.json", isDirectory: false)
+        let transcriptChecksum = try writeJSON(
+            [
+                "id": "transcript-action-process-fixture",
+                "session_id": sessionID,
+                "source_artifact_id": "artifact-action-normalized-audio",
+                "status": "succeeded",
+                "segments": [
+                    [
+                        "segment_id": "seg-action-1",
+                        "start_ms": 1_000,
+                        "end_ms": 3_000,
+                        "text": "Native action process fixture transcript content.",
+                        "speaker_label": "SPEAKER_01",
+                    ],
+                ],
+                "created_at": "2026-07-03T00:00:00Z",
+            ],
+            to: transcriptURL
+        )
+        let speakerChecksum = try writeJSON(
+            [
+                "session_id": sessionID,
+                "transcript_id": "transcript-action-process-fixture",
+                "labels": [
+                    [
+                        "label": "SPEAKER_01",
+                        "session_id": sessionID,
+                        "is_verified_identity": false,
+                    ],
+                ],
+                "segment_mapping": [
+                    [
+                        "segment_id": "seg-action-1",
+                        "label": "SPEAKER_01",
+                    ],
+                ],
+                "created_at": "2026-07-03T00:00:00Z",
+            ],
+            to: speakerURL
+        )
+        _ = try writeJSON(
+            [
+                "id": sessionID,
+                "title": "Native action process workspace fixture",
+                "source_type": "native_recording",
+                "status": "transcribed",
+                "started_at": "2026-07-03T00:00:00Z",
+                "workspace_dir": sessionRootURL.path,
+                "created_at": "2026-07-03T00:00:00Z",
+                "updated_at": "2026-07-03T00:00:00Z",
+                "artifacts": [
+                    [
+                        "id": "artifact-action-transcript",
+                        "session_id": sessionID,
+                        "artifact_type": "transcript_text",
+                        "path": "artifacts/transcript.json",
+                        "format": "json",
+                        "capture_status": "available",
+                        "checksum": transcriptChecksum,
+                        "created_at": "2026-07-03T00:00:00Z",
+                    ],
+                    [
+                        "id": "artifact-action-speakers",
+                        "session_id": sessionID,
+                        "artifact_type": "speaker_labels",
+                        "path": "artifacts/speaker_labels.json",
+                        "format": "json",
+                        "capture_status": "available",
+                        "checksum": speakerChecksum,
+                        "created_at": "2026-07-03T00:00:00Z",
+                    ],
+                ],
+            ],
+            to: sessionRootURL.appendingPathComponent("session.json", isDirectory: false)
+        )
+    }
+
+    @discardableResult
+    private func writeJSON(_ payload: Any, to url: URL) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: url)
+        let digest = SHA256.hash(data: data)
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "sha256:\(hex)"
     }
 }
 

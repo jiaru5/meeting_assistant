@@ -20,6 +20,8 @@ if "read_only_workspace_transcript_loading" not in metadata.get("allowed_capabil
     raise SystemExit("native-app test failed: missing read-only workspace transcript loading capability")
 if "fake_transcript_action_command_client" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app test failed: missing fake transcript action capability")
+if "transcript_action_process_runner" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app test failed: missing transcript action process runner capability")
 if "processing_command_consumer" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app test failed: missing processing command consumer capability")
 if "controlled_native_capture_adapter" not in metadata.get("allowed_capabilities", []):
@@ -46,6 +48,7 @@ required_phrases = (
     "ma.processing.*",
     "MA_NATIVE_RECORDING_CLIENT=controlled",
     "MA_NATIVE_PROCESSING_CLIENT=process",
+    "MA_NATIVE_TRANSCRIPT_ACTION_CLIENT=process",
     "AppleScreenCaptureKitNativeCaptureAdapter.swift",
     "Debug/XCTest-only",
     "check_dependencies",
@@ -93,6 +96,7 @@ required_paths = (
     Path("Sources/MeetingAssistantNative/ProcessingStateViewModel.swift"),
     Path("Sources/MeetingAssistantNative/ProcessingStateView.swift"),
     Path("test-fixtures/processing-command-fixture.sh"),
+    Path("test-fixtures/transcript-action-command-fixture.sh"),
     Path("tests/MeetingAssistantNativeTests/PermissionDependencyStatusViewModelTests.swift"),
     Path("tests/MeetingAssistantNativeTests/NativeRecordingCommandClientTests.swift"),
     Path("tests/MeetingAssistantNativeTests/RecordingControlViewModelTests.swift"),

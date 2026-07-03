@@ -14,6 +14,7 @@ grep -q "VS-MA-16 native processing state consumer boundary" tests/ArchitectureT
 grep -q "VS-MA-17 read-only transcript review boundary" tests/ArchitectureTest.md
 grep -q "read-only workspace transcript loading boundary" tests/ArchitectureTest.md
 grep -q "VS-MA-18/VS-MA-19 deterministic transcript action consumer boundary" tests/ArchitectureTest.md
+grep -q "MA_NATIVE_TRANSCRIPT_ACTION_CLIENT=process" tests/ArchitectureTest.md
 grep -q "check_dependencies" tests/ArchitectureTest.md
 grep -q "session.json" tests/ArchitectureTest.md
 grep -q "screen_video" tests/ArchitectureTest.md
@@ -54,6 +55,7 @@ test -f Sources/MeetingAssistantNative/ProcessingCommandFakeClient.swift
 test -f Sources/MeetingAssistantNative/ProcessingStateViewModel.swift
 test -f Sources/MeetingAssistantNative/ProcessingStateView.swift
 test -x test-fixtures/processing-command-fixture.sh
+test -x test-fixtures/transcript-action-command-fixture.sh
 test -f tests/MeetingAssistantNativeTests/NativeRecordingCommandClientTests.swift
 test -f tests/MeetingAssistantNativeTests/TranscriptReviewActionsViewModelTests.swift
 test -f tests/MeetingAssistantNativeTests/ProcessingStateViewModelTests.swift
@@ -90,6 +92,8 @@ grep -R -q "isRecordingClientTestHookAllowed" App/MeetingAssistantNativeApp.swif
 grep -R -q "MA_NATIVE_PROCESSING_CLIENT" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MA_NATIVE_APP_XCTEST" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "isProcessClientTestHookAllowed" App/MeetingAssistantNativeApp.swift
+grep -R -q "MA_NATIVE_TRANSCRIPT_ACTION_CLIENT" App UITests/MeetingAssistantNativeAppUITests
+grep -R -q "isTranscriptActionClientTestHookAllowed" App/MeetingAssistantNativeApp.swift
 grep -R -q "#if DEBUG" App/MeetingAssistantNativeApp.swift
 grep -q "SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;" MeetingAssistantNative.xcodeproj/project.pbxproj
 python3 - <<'PY'
@@ -138,6 +142,8 @@ if missing_markers:
 PY
 grep -q '"command": "generate_transcript"' test-fixtures/processing-command-fixture.sh
 grep -q '"command": "generate_speaker_labels"' test-fixtures/processing-command-fixture.sh
+grep -q '"command": "export_transcript"' test-fixtures/transcript-action-command-fixture.sh
+grep -q '"command": "delete_session"' test-fixtures/transcript-action-command-fixture.sh
 grep -R -q "MA_NATIVE_TRANSCRIPT_WORKSPACE" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "XCTest" UITests
 grep -R -q "NSHostingController" UITests/MeetingAssistantNativeUITests

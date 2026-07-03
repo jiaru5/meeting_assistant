@@ -23,6 +23,7 @@
     "read_only_transcript_review_view",
     "read_only_workspace_transcript_loading",
     "fake_transcript_action_command_client",
+    "transcript_action_process_runner",
     "transcript_copy_export_delete_action_view"
   ],
   "forbidden_capabilities": [

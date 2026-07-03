@@ -49,6 +49,7 @@ required = [
     "Sources/MeetingAssistantNative/ProcessingStateViewModel.swift",
     "Sources/MeetingAssistantNative/ProcessingStateView.swift",
     "test-fixtures/processing-command-fixture.sh",
+    "test-fixtures/transcript-action-command-fixture.sh",
     "tests/MeetingAssistantNativeTests/PermissionDependencyStatusViewModelTests.swift",
     "tests/MeetingAssistantNativeTests/NativeRecordingCommandClientTests.swift",
     "tests/MeetingAssistantNativeTests/RecordingControlViewModelTests.swift",
@@ -75,6 +76,8 @@ if "read_only_workspace_transcript_loading" not in metadata.get("allowed_capabil
     raise SystemExit("native-app lint failed: missing read-only workspace transcript loading capability")
 if "fake_transcript_action_command_client" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app lint failed: missing fake transcript action capability")
+if "transcript_action_process_runner" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app lint failed: missing transcript action process runner capability")
 if "processing_command_consumer" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app lint failed: missing processing command consumer capability")
 if "controlled_native_capture_adapter" not in metadata.get("allowed_capabilities", []):
@@ -123,6 +126,8 @@ required_app_snippets = [
     "NativeRecordingCommandClient",
     "isRecordingClientTestHookAllowed",
     "MA_NATIVE_PROCESSING_CLIENT",
+    "MA_NATIVE_TRANSCRIPT_ACTION_CLIENT",
+    "isTranscriptActionClientTestHookAllowed",
 ]
 missing_app_snippets = [snippet for snippet in required_app_snippets if snippet not in app_source]
 if missing_app_snippets:
