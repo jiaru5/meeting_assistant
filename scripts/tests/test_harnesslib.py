@@ -49,6 +49,42 @@ class HarnessValidationTests(unittest.TestCase):
         subprocess.run(["git", "add", "."], cwd=fixture, check=True, capture_output=True, text=True)
         subprocess.run(["git", "commit", "-m", "baseline"], cwd=fixture, check=True, capture_output=True, text=True)
 
+    def worktree_fingerprint(self, fixture: Path) -> str:
+        return subprocess.check_output(
+            [sys.executable, str(fixture / "scripts/worktree-fingerprint.py")],
+            cwd=fixture,
+            text=True,
+        ).strip()
+
+    def write_evidence_step(
+        self,
+        fixture: Path,
+        scope: str,
+        step: str,
+        fingerprint: str,
+        exit_code: int = 0,
+        command: str | None = None,
+    ) -> None:
+        evidence_dir = fixture / ".harness/evidence" / scope
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        log = evidence_dir / f"{step}.log"
+        meta = evidence_dir / f"{step}.meta"
+        relative_log = f".harness/evidence/{scope}/{step}.log"
+        log.write_text(f"{step} evidence\n", encoding="utf-8")
+        meta.write_text(
+            "\n".join(
+                [
+                    f"step={step}",
+                    f"exit_code={exit_code}",
+                    f"worktree_fingerprint={fingerprint}",
+                    f"command={command or f'./scripts/{step}.sh'}",
+                    f"log={relative_log}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
     def test_framework_manifest_and_policy_are_valid(self) -> None:
         self.assertEqual([], validate_manifest(ROOT, "current"))
         self.assertEqual([], validate_agent_policy(ROOT))
@@ -230,6 +266,49 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertIn("Release candidate requires every PV-* row to be `covered`.", output)
             self.assertIn("PV-MA-010: planned", output)
             self.assertNotIn("当前证据", output)
+
+    def test_product_validation_release_rejects_partial_pv_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.write_validation_statuses(fixture, "covered", {"PV-MA-001": "partial"})
+
+            result = subprocess.run(
+                [sys.executable, str(fixture / "scripts/product-validation-check.py"), "release"],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            output = result.stderr + result.stdout
+            self.assertIn("Release candidate requires every PV-* row to be `covered`.", output)
+            self.assertIn("PV-MA-001: partial", output)
+
+    def test_release_preflight_fails_closed_when_pv_rows_are_partial(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.write_validation_statuses(fixture, "covered", {"PV-MA-001": "partial"})
+
+            result = subprocess.run(
+                [str(fixture / "scripts/release-preflight.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Release candidate requires every PV-* row to be `covered`.", output)
+            self.assertIn("PV-MA-001: partial", output)
+            self.assertIn(
+                "release-preflight failed: validation matrix contains non-covered release-scope PV-* rows",
+                output,
+            )
+            self.assertNotIn("release-preflight passed.", output)
+            self.assertTrue((fixture / ".harness/evidence/release/production-readiness.meta").is_file())
+            self.assertFalse((fixture / ".harness/evidence/release/docs.meta").exists())
 
     def test_product_validation_current_phase_rejects_missing_status(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -505,6 +584,56 @@ class HarnessValidationTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("missing required validation evidence step docs-check", result.stderr + result.stdout)
+
+    def test_review_report_require_release_evidence_rejects_check_scope_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            fingerprint = self.worktree_fingerprint(fixture)
+            for step in (
+                "production-readiness",
+                "docs",
+                "check",
+                "mocked-e2e",
+                "full-stack-e2e",
+                "supply-chain",
+            ):
+                self.write_evidence_step(fixture, "check", step, fingerprint)
+
+            result = subprocess.run(
+                [str(fixture / "scripts/review-report.sh"), "--require-release-evidence"],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("no recorded release validation evidence", result.stderr + result.stdout)
+
+    def test_review_report_require_release_evidence_rejects_readiness_only_release_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            fingerprint = self.worktree_fingerprint(fixture)
+            self.write_evidence_step(
+                fixture,
+                "release",
+                "production-readiness",
+                fingerprint,
+                command="./scripts/production-readiness-check.sh",
+            )
+
+            result = subprocess.run(
+                [str(fixture / "scripts/review-report.sh"), "--require-release-evidence"],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("missing required release validation evidence step docs", result.stderr + result.stdout)
 
     def test_review_report_require_evidence_rejects_bundle_without_harness_self_test(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

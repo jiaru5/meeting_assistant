@@ -282,8 +282,10 @@ if [ "${1:-}" = "--check" ] || [ "${1:-}" = "--require-evidence" ] || [ "${1:-}"
   if [ "${1:-}" = "--require-evidence" ] || [ "${1:-}" = "--require-release-evidence" ]; then
     evidence_dir="${HARNESS_EVIDENCE_DIR:-.harness/evidence}"
     evidence_scope="$evidence_dir/check"
+    evidence_label="validation"
     if [ "${1:-}" = "--require-release-evidence" ]; then
-      evidence_scope="$evidence_dir"
+      evidence_scope="$evidence_dir/release"
+      evidence_label="release validation"
     fi
     meta_files=()
     while IFS= read -r -d '' meta_file; do
@@ -291,7 +293,7 @@ if [ "${1:-}" = "--check" ] || [ "${1:-}" = "--require-evidence" ] || [ "${1:-}"
     done < <(find "$evidence_scope" -type f -name "*.meta" -print0 2>/dev/null)
 
     if [ "${#meta_files[@]}" -eq 0 ]; then
-      echo "review-report check failed: no recorded validation evidence" >&2
+      echo "review-report check failed: no recorded $evidence_label evidence" >&2
       exit 1
     fi
 
@@ -347,6 +349,29 @@ if [ "${1:-}" = "--check" ] || [ "${1:-}" = "--require-evidence" ] || [ "${1:-}"
         done
         if [ "$found_step" = false ]; then
           echo "review-report check failed: missing required validation evidence step $required_step" >&2
+          exit 1
+        fi
+      done
+    elif [ "${1:-}" = "--require-release-evidence" ]; then
+      required_steps=(
+        production-readiness
+        docs
+        check
+        mocked-e2e
+        full-stack-e2e
+        supply-chain
+      )
+      for required_step in "${required_steps[@]}"; do
+        found_step=false
+        for meta_file in "${meta_files[@]}"; do
+          step="$(awk -F= '$1 == "step" { print substr($0, index($0, "=") + 1); found=1; exit } END { if (!found) exit 1 }' "$meta_file" 2>/dev/null || true)"
+          if [ "$step" = "$required_step" ]; then
+            found_step=true
+            break
+          fi
+        done
+        if [ "$found_step" = false ]; then
+          echo "review-report check failed: missing required release validation evidence step $required_step" >&2
           exit 1
         fi
       done
