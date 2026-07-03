@@ -89,6 +89,12 @@ public struct ProcessingCommandErrorCode: RawRepresentable, Equatable, Sendable,
     public init(stringLiteral value: StringLiteralType) {
         self.rawValue = value
     }
+
+    public static let invalidInput = ProcessingCommandErrorCode(rawValue: "invalid_input")
+    public static let artifactMissing = ProcessingCommandErrorCode(rawValue: "artifact_missing")
+    public static let dependencyMissing = ProcessingCommandErrorCode(rawValue: "dependency_missing")
+    public static let processingFailed = ProcessingCommandErrorCode(rawValue: "processing_failed")
+    public static let internalError = ProcessingCommandErrorCode(rawValue: "internal_error")
 }
 
 public struct GenerateTranscriptRequest: Equatable, Sendable {
@@ -278,17 +284,20 @@ public struct ProcessingCommandFailure: Error, Equatable, LocalizedError, Sendab
     public let code: ProcessingCommandErrorCode?
     public let message: String
     public let details: [String]
+    public let warnings: [String]
 
     public init(
         command: ProcessingCommandName,
         code: ProcessingCommandErrorCode?,
         message: String,
-        details: [String] = []
+        details: [String] = [],
+        warnings: [String] = []
     ) {
         self.command = command
         self.code = code
         self.message = message
         self.details = details
+        self.warnings = warnings
     }
 
     public init(response: GenerateTranscriptResponse) {
@@ -296,7 +305,8 @@ public struct ProcessingCommandFailure: Error, Equatable, LocalizedError, Sendab
             command: response.command,
             code: response.code,
             message: response.message ?? "Transcript generation failed.",
-            details: response.details
+            details: response.details,
+            warnings: response.warnings
         )
     }
 
@@ -305,7 +315,8 @@ public struct ProcessingCommandFailure: Error, Equatable, LocalizedError, Sendab
             command: response.command,
             code: response.code,
             message: response.message ?? "Speaker label generation failed.",
-            details: response.details
+            details: response.details,
+            warnings: response.warnings
         )
     }
 
