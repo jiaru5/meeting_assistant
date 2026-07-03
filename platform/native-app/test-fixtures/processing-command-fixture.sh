@@ -50,6 +50,16 @@ mode="${MA_NATIVE_PROCESSING_FIXTURE_MODE:-success}"
 
 case "$command" in
   generate_transcript)
+    if [ "$mode" = "non-json-stderr" ]; then
+      printf '%s\n' "adapter crashed at /Users/jerry/Movies/MeetingAssistant/session with sk-nativefixturevalue and transcript_text customer roadmap" >&2
+      exit 5
+    fi
+
+    if [ "$mode" = "invalid-json-stdout" ]; then
+      printf '%s\n' "not json from /Users/jerry/Movies/MeetingAssistant/session sk-nativefixturevalue"
+      exit 5
+    fi
+
     if [ "$mode" = "transcript-failure" ]; then
       cat <<JSON
 {

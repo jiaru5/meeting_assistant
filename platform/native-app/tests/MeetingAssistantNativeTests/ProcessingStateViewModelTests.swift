@@ -216,6 +216,131 @@ struct ProcessingStateViewModelTests {
     }
 
     @Test
+    func failureDisplayRedactsUnsafeMessageDetailsAndWarningsWithoutChangingCode() async {
+        let client = ProcessingCommandFakeClient(
+            transcriptScript: .failure(
+                code: "path_conflict",
+                message: "Adapter failed at /Users/jerry/Movies/MeetingAssistant/session with access_token=sk-localrawvalue",
+                details: [
+                    "path: /Users/jerry/Movies/MeetingAssistant/session/transcript.txt",
+                    "log_path: artifacts/logs/processing.log",
+                    "runtime_path: /usr/local/bin/whisper",
+                    "workspace: sessions/session-processing",
+                    "transcript_text: Alice discussed the customer renewal and project roadmap",
+                ],
+                warnings: [
+                    "content: We discussed the customer renewal transcript in detail",
+                ]
+            )
+        )
+        let viewModel = ProcessingStateViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState(),
+            defaultSessionID: "session-processing"
+        )
+
+        await viewModel.start()
+
+        #expect(viewModel.state.phase == .failed)
+        #expect(viewModel.state.errorCode?.rawValue == "path_conflict")
+        #expect(viewModel.state.errorMessage == "Adapter failed at <redacted> with access_token=<redacted>")
+        #expect(viewModel.state.errorDetails == [
+            "path: <redacted>",
+            "log_path: <redacted>",
+            "runtime_path: <redacted>",
+            "workspace: <redacted>",
+            "transcript_text: <redacted>",
+        ])
+        #expect(viewModel.state.warnings == ["content: <redacted>"])
+        #expect(viewModel.state.errorMessage?.contains("/Users/jerry") == false)
+        #expect(viewModel.state.errorMessage?.contains("sk-localrawvalue") == false)
+        #expect(viewModel.state.errorDetails.joined(separator: " ").contains("artifacts/logs") == false)
+        #expect(viewModel.state.errorDetails.joined(separator: " ").contains("/usr/local") == false)
+        #expect(viewModel.state.errorDetails.joined(separator: " ").contains("sessions/session-processing") == false)
+        #expect(viewModel.state.errorDetails.joined(separator: " ").contains("customer renewal") == false)
+        #expect(viewModel.state.warnings.joined(separator: " ").contains("customer renewal") == false)
+    }
+
+    @Test
+    func failureDisplayRedactsFreeFormRelativePathsBearerTokensAndShortTranscriptSnippets() async {
+        let client = ProcessingCommandFakeClient(
+            transcriptScript: .failure(
+                code: "processing_failed",
+                message: "Adapter failed with Authorization: Bearer secretBearerToken12345",
+                details: [
+                    "see artifacts/logs/processing.log",
+                    "reason: sessions/session-processing/transcript.json",
+                    "Alice discussed customer renewal and project roadmap",
+                    "stage: transcription",
+                ],
+                warnings: [
+                    "retry with ../workspace/session/transcript.json",
+                    "Bearer secretBearerToken12345",
+                    "short customer roadmap note",
+                ]
+            )
+        )
+        let viewModel = ProcessingStateViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState(),
+            defaultSessionID: "session-processing"
+        )
+
+        await viewModel.start()
+
+        #expect(viewModel.state.phase == .failed)
+        #expect(viewModel.state.errorCode?.rawValue == "processing_failed")
+        #expect(viewModel.state.errorMessage == "Adapter failed with Authorization=<redacted>")
+        #expect(viewModel.state.errorDetails == [
+            "see <redacted>",
+            "reason: <redacted>",
+            "<redacted>",
+            "stage: transcription",
+        ])
+        #expect(viewModel.state.warnings == [
+            "retry with <redacted>",
+            "Bearer <redacted>",
+            "<redacted>",
+        ])
+
+        let displayedText = (
+            [viewModel.state.errorMessage ?? ""]
+                + viewModel.state.errorDetails
+                + viewModel.state.warnings
+        ).joined(separator: " ")
+        #expect(displayedText.contains("artifacts/logs") == false)
+        #expect(displayedText.contains("sessions/session-processing") == false)
+        #expect(displayedText.contains("../workspace") == false)
+        #expect(displayedText.contains("secretBearerToken12345") == false)
+        #expect(displayedText.contains("customer renewal") == false)
+        #expect(displayedText.contains("customer roadmap") == false)
+    }
+
+    @Test
+    func transcriptOnlyDegradationReasonIsRedactedBeforeDisplay() async {
+        let client = ProcessingCommandFakeClient(
+            transcriptScript: .success(transcriptID: "transcript-processing"),
+            speakerLabelsScript: .success(
+                labelStatus: "transcript_only",
+                speakerLabelsArtifactID: "artifact-speakers-processing",
+                degradationReason: "/Users/jerry/Movies/MeetingAssistant/session/transcript.json"
+            )
+        )
+        let viewModel = ProcessingStateViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState(),
+            defaultSessionID: "session-processing"
+        )
+
+        await viewModel.start()
+
+        #expect(viewModel.state.phase == .degraded)
+        #expect(viewModel.state.degradationReason == "speaker labeling unavailable")
+        #expect(viewModel.state.speakerLabelStatus == "Speaker labels degraded: speaker labeling unavailable")
+        #expect(viewModel.state.speakerLabelStatus?.contains("/Users/jerry") == false)
+    }
+
+    @Test
     func dependencyBlockedStateDoesNotSendProcessingCommands() async {
         let client = ProcessingCommandFakeClient()
         let viewModel = ProcessingStateViewModel(
@@ -252,6 +377,68 @@ struct ProcessingStateViewModelTests {
         await task.value
 
         let transcriptRequests = await client.transcriptRequestSnapshot()
+        #expect(transcriptRequests == [
+            GenerateTranscriptRequest(sessionID: "session-processing"),
+        ])
+    }
+
+    @Test
+    func duplicateRetryWhileBusyDoesNotSendSecondRetryRequest() async {
+        let client = ProcessingCommandFakeClient(
+            transcriptScript: .failure(
+                code: "processing_failed",
+                message: "Transcript adapter failed."
+            ),
+            responseDelayNanoseconds: 150_000_000
+        )
+        let viewModel = ProcessingStateViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState(),
+            defaultSessionID: "session-processing"
+        )
+
+        await viewModel.start()
+        #expect(viewModel.state.phase == .failed)
+
+        let retryTask = Task {
+            await viewModel.retry()
+        }
+        while !viewModel.state.isBusy {
+            await Task.yield()
+        }
+        await viewModel.retry()
+        await retryTask.value
+
+        let transcriptRequests = await client.transcriptRequestSnapshot()
+        #expect(transcriptRequests == [
+            GenerateTranscriptRequest(sessionID: "session-processing"),
+            GenerateTranscriptRequest(sessionID: "session-processing"),
+        ])
+    }
+
+    @Test
+    func retryWhenReadinessBecomesBlockedFailsClosedWithoutSendingRequest() async {
+        let client = ProcessingCommandFakeClient(
+            transcriptScript: .failure(
+                code: "processing_failed",
+                message: "Transcript adapter failed."
+            )
+        )
+        let viewModel = ProcessingStateViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState(),
+            defaultSessionID: "session-processing"
+        )
+
+        await viewModel.start()
+        #expect(viewModel.state.phase == .failed)
+
+        viewModel.updateReadiness(blockedProcessingReadinessState())
+        await viewModel.retry()
+
+        let transcriptRequests = await client.transcriptRequestSnapshot()
+        #expect(viewModel.state.phase == .blocked)
+        #expect(viewModel.canRetry == false)
         #expect(transcriptRequests == [
             GenerateTranscriptRequest(sessionID: "session-processing"),
         ])
@@ -324,7 +511,7 @@ struct ProcessingStateViewModelTests {
 
     @Test
     func processRunnerThrowsProcessFailedWhenNonzeroHasNoJSON() async throws {
-        let fixture = try ProcessingProcessRunnerFixture(script: .nonJSONTranscriptFailure)
+        let fixture = try ProcessingProcessRunnerFixture(script: .nonJSONTranscriptFailure(exitCode: 5))
 
         do {
             _ = try await fixture.runner.generateTranscript(
@@ -333,16 +520,111 @@ struct ProcessingStateViewModelTests {
             #expect(Bool(false), "Expected processFailed for a nonzero command without JSON stdout.")
         } catch let error as ProcessingCommandBridgeError {
             switch error {
-            case .processFailed(let command, let exitCode, let stderr):
+            case .processFailed(let command, let exitCode, let code):
                 #expect(command == .generateTranscript)
                 #expect(exitCode == 5)
-                #expect(stderr == "adapter crashed")
+                #expect(code.rawValue == "processing_failed")
+                #expect(error.errorDescription?.contains("adapter crashed") == false)
             default:
                 #expect(Bool(false), "Expected processFailed, got \(error).")
             }
         } catch {
             #expect(Bool(false), "Expected ProcessingCommandBridgeError, got \(error).")
         }
+    }
+
+    @Test
+    func processRunnerMapsBridgeFailureExitCodesToFrozenErrorCodes() async throws {
+        let cases: [(Int32, String)] = [
+            (2, "invalid_input"),
+            (3, "artifact_missing"),
+            (4, "dependency_missing"),
+            (5, "processing_failed"),
+            (9, "internal_error"),
+        ]
+
+        for (exitCode, expectedCode) in cases {
+            let fixture = try ProcessingProcessRunnerFixture(
+                script: .nonJSONTranscriptFailure(exitCode: exitCode)
+            )
+            do {
+                _ = try await fixture.runner.generateTranscript(
+                    GenerateTranscriptRequest(sessionID: "session-process")
+                )
+                #expect(Bool(false), "Expected bridge failure for exit code \(exitCode).")
+            } catch let error as ProcessingCommandBridgeError {
+                #expect(error.command == .generateTranscript)
+                #expect(error.code.rawValue == expectedCode)
+                #expect(error.errorDescription?.contains("/Users/jerry") == false)
+            }
+        }
+    }
+
+    @Test
+    func processRunnerThrowsInvalidJSONWithoutStdoutSnippet() async throws {
+        let fixture = try ProcessingProcessRunnerFixture(script: .invalidJSONTranscriptFailure)
+
+        do {
+            _ = try await fixture.runner.generateTranscript(
+                GenerateTranscriptRequest(sessionID: "session-process")
+            )
+            #expect(Bool(false), "Expected invalidJSON for invalid stdout.")
+        } catch let error as ProcessingCommandBridgeError {
+            switch error {
+            case .invalidJSON(let command, let code):
+                #expect(command == .generateTranscript)
+                #expect(code.rawValue == "processing_failed")
+                #expect(error.errorDescription?.contains("not json") == false)
+                #expect(error.errorDescription?.contains("/Users/jerry") == false)
+            default:
+                #expect(Bool(false), "Expected invalidJSON, got \(error).")
+            }
+        }
+    }
+
+    @Test
+    func processRunnerLaunchFailureUsesSafeInternalError() async throws {
+        let fixture = try ProcessingProcessRunnerFixture()
+        let missingExecutable = fixture.rootURL
+            .appendingPathComponent("missing", isDirectory: true)
+            .appendingPathComponent("meeting-assistant-cli")
+        let runner = ProcessingCommandProcessRunner(
+            executablePath: missingExecutable.path,
+            environment: [
+                "MEETING_ASSISTANT_WORKSPACE": fixture.workspaceURL.path,
+            ]
+        )
+
+        do {
+            _ = try await runner.generateTranscript(
+                GenerateTranscriptRequest(sessionID: "session-process")
+            )
+            #expect(Bool(false), "Expected launch failure.")
+        } catch let error as ProcessingCommandBridgeError {
+            #expect(error.command == .generateTranscript)
+            #expect(error.code.rawValue == "internal_error")
+            #expect(error.safeMessage == "Processing command could not be launched.")
+            #expect(error.errorDescription?.contains(missingExecutable.path) == false)
+        }
+    }
+
+    @Test
+    func processRunnerBridgeFailuresBecomeSafeViewModelErrors() async throws {
+        let fixture = try ProcessingProcessRunnerFixture(script: .nonJSONTranscriptFailure(exitCode: 5))
+        let viewModel = ProcessingStateViewModel(
+            commandClient: fixture.runner,
+            readinessState: readyReadinessState(),
+            defaultSessionID: "session-process"
+        )
+
+        await viewModel.start()
+
+        #expect(viewModel.state.phase == .failed)
+        #expect(viewModel.state.errorCode?.rawValue == "processing_failed")
+        #expect(viewModel.state.errorMessage == "Processing command failed before returning a contract response.")
+        #expect(viewModel.state.errorMessage?.contains("adapter crashed") == false)
+        #expect(viewModel.state.errorMessage?.contains("/Users/jerry") == false)
+        #expect(viewModel.canRetry)
     }
 
     @Test
@@ -489,7 +771,8 @@ private final class ProcessingProcessRunnerFixture {
         case success
         case labeledSuccess
         case structuredTranscriptFailure
-        case nonJSONTranscriptFailure
+        case nonJSONTranscriptFailure(exitCode: Int32)
+        case invalidJSONTranscriptFailure
     }
 
     let rootURL: URL
@@ -574,15 +857,20 @@ private final class ProcessingProcessRunnerFixture {
             JSON
                 exit 5
             """
-        case .nonJSONTranscriptFailure:
+        case .nonJSONTranscriptFailure(let exitCode):
             transcriptCase = """
-                printf '%s\\n' "adapter crashed" >&2
+                printf '%s\\n' "adapter crashed at /Users/jerry/Movies/MeetingAssistant/session with sk-localrawvalue" >&2
+                exit \(exitCode)
+            """
+        case .invalidJSONTranscriptFailure:
+            transcriptCase = """
+                printf '%s\\n' "not json from /Users/jerry/Movies/MeetingAssistant/session sk-localrawvalue"
                 exit 5
             """
         }
         let speakerStatus: String
         switch script {
-        case .labeledSuccess, .structuredTranscriptFailure, .nonJSONTranscriptFailure:
+        case .labeledSuccess, .structuredTranscriptFailure, .nonJSONTranscriptFailure(_), .invalidJSONTranscriptFailure:
             speakerStatus = """
                 "label_status": "labeled",
                 "speaker_labels_artifact_id": "artifact-speakers-process",

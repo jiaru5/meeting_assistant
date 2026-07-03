@@ -1,22 +1,47 @@
 import Foundation
 
 public enum ProcessingCommandBridgeError: Error, Equatable, LocalizedError, Sendable {
-    case invalidJSON(command: ProcessingCommandName, snippet: String)
-    case launchFailed(command: ProcessingCommandName, message: String)
-    case processFailed(command: ProcessingCommandName, exitCode: Int32, stderr: String)
+    case invalidJSON(command: ProcessingCommandName, code: ProcessingCommandErrorCode)
+    case launchFailed(command: ProcessingCommandName)
+    case processFailed(command: ProcessingCommandName, exitCode: Int32, code: ProcessingCommandErrorCode)
     case unexpectedCommand(expected: ProcessingCommandName, actual: ProcessingCommandName)
 
-    public var errorDescription: String? {
+    public var command: ProcessingCommandName {
         switch self {
-        case .invalidJSON(let command, let snippet):
-            return "\(command.rawValue) did not return valid JSON: \(snippet)"
-        case .launchFailed(let command, let message):
-            return "\(command.rawValue) could not be launched: \(message)"
-        case .processFailed(let command, let exitCode, let stderr):
-            return "\(command.rawValue) exited with \(exitCode) and did not return JSON: \(stderr)"
-        case .unexpectedCommand(let expected, let actual):
-            return "Expected \(expected.rawValue) response, got \(actual.rawValue)."
+        case .invalidJSON(let command, _), .launchFailed(let command), .processFailed(let command, _, _):
+            return command
+        case .unexpectedCommand(let expected, _):
+            return expected
         }
+    }
+
+    public var code: ProcessingCommandErrorCode {
+        switch self {
+        case .invalidJSON(_, let code), .processFailed(_, _, let code):
+            return code
+        case .launchFailed, .unexpectedCommand:
+            return .internalError
+        }
+    }
+
+    public var safeMessage: String {
+        switch self {
+        case .invalidJSON:
+            return "Processing command returned an invalid response."
+        case .launchFailed:
+            return "Processing command could not be launched."
+        case .processFailed:
+            return "Processing command failed before returning a contract response."
+        case .unexpectedCommand:
+            return "Processing command returned an unexpected response."
+        }
+    }
+
+    public var errorDescription: String? {
+        if case .processFailed(_, let exitCode, _) = self {
+            return "\(safeMessage) Exit code: \(exitCode). Error code: \(code.rawValue)."
+        }
+        return "\(safeMessage) Error code: \(code.rawValue)."
     }
 }
 
@@ -36,7 +61,7 @@ public enum ProcessingCommandResponseDecoder {
         } catch {
             throw ProcessingCommandBridgeError.invalidJSON(
                 command: .generateTranscript,
-                snippet: snippet(from: data)
+                code: .internalError
             )
         }
     }
@@ -56,15 +81,9 @@ public enum ProcessingCommandResponseDecoder {
         } catch {
             throw ProcessingCommandBridgeError.invalidJSON(
                 command: .generateSpeakerLabels,
-                snippet: snippet(from: data)
+                code: .internalError
             )
         }
-    }
-
-    private static func snippet(from data: Data) -> String {
-        let prefix = Data(data.prefix(400))
-        let value = String(data: prefix, encoding: .utf8) ?? "<non-utf8 output>"
-        return value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -99,10 +118,17 @@ public struct ProcessingCommandProcessRunner: ProcessingCommandClient, Sendable 
                 throw ProcessingCommandBridgeError.processFailed(
                     command: .generateTranscript,
                     exitCode: result.exitCode,
-                    stderr: Self.snippet(from: result.stderr)
+                    code: Self.errorCode(forExitCode: result.exitCode)
                 )
             }
-            return try ProcessingCommandResponseDecoder.decodeTranscript(result.stdout)
+            do {
+                return try ProcessingCommandResponseDecoder.decodeTranscript(result.stdout)
+            } catch ProcessingCommandBridgeError.invalidJSON(_, _) {
+                throw ProcessingCommandBridgeError.invalidJSON(
+                    command: .generateTranscript,
+                    code: Self.errorCode(forExitCode: result.exitCode)
+                )
+            }
         }.value
     }
 
@@ -123,10 +149,17 @@ public struct ProcessingCommandProcessRunner: ProcessingCommandClient, Sendable 
                 throw ProcessingCommandBridgeError.processFailed(
                     command: .generateSpeakerLabels,
                     exitCode: result.exitCode,
-                    stderr: Self.snippet(from: result.stderr)
+                    code: Self.errorCode(forExitCode: result.exitCode)
                 )
             }
-            return try ProcessingCommandResponseDecoder.decodeSpeakerLabels(result.stdout)
+            do {
+                return try ProcessingCommandResponseDecoder.decodeSpeakerLabels(result.stdout)
+            } catch ProcessingCommandBridgeError.invalidJSON(_, _) {
+                throw ProcessingCommandBridgeError.invalidJSON(
+                    command: .generateSpeakerLabels,
+                    code: Self.errorCode(forExitCode: result.exitCode)
+                )
+            }
         }.value
     }
 
@@ -184,10 +217,7 @@ public struct ProcessingCommandProcessRunner: ProcessingCommandClient, Sendable 
         do {
             try process.run()
         } catch {
-            throw ProcessingCommandBridgeError.launchFailed(
-                command: command,
-                message: error.localizedDescription
-            )
+            throw ProcessingCommandBridgeError.launchFailed(command: command)
         }
         process.waitUntilExit()
 
@@ -198,9 +228,18 @@ public struct ProcessingCommandProcessRunner: ProcessingCommandClient, Sendable 
         )
     }
 
-    private static func snippet(from data: Data) -> String {
-        let prefix = Data(data.prefix(400))
-        return (String(data: prefix, encoding: .utf8) ?? "<non-utf8 output>")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+    private static func errorCode(forExitCode exitCode: Int32) -> ProcessingCommandErrorCode {
+        switch exitCode {
+        case 2:
+            return .invalidInput
+        case 3:
+            return .artifactMissing
+        case 4:
+            return .dependencyMissing
+        case 5:
+            return .processingFailed
+        default:
+            return .internalError
+        }
     }
 }
