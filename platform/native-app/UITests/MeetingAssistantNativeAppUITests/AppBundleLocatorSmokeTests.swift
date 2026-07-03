@@ -405,6 +405,38 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         )
     }
 
+    func testProcessingProcessRunnerBridgeFailureShowsSafeAppBundleError() throws {
+        let failureFixture = try AppProcessingProcessFixture(mode: "non-json-stderr")
+        let app = launchApp(fixture: "processing-failure", processingFixture: failureFixture)
+
+        tapProcessingButton("ma.processing.startButton", in: app)
+
+        assertElement("ma.processing.status", in: app, contains: "Processing failed.")
+        assertElement(
+            "ma.processing.error",
+            in: app,
+            contains: "Processing command failed before returning a contract response."
+        )
+        assertElement("ma.processing.error", in: app, contains: "processing_failed")
+        assertElement("ma.processing.error", in: app, doesNotContain: "adapter crashed")
+        assertElement("ma.processing.error", in: app, doesNotContain: "/Users/jerry")
+        assertElement("ma.processing.error", in: app, doesNotContain: "sk-nativefixturevalue")
+        XCTAssertTrue(button("ma.processing.retryButton", in: app).isEnabled)
+
+        tapProcessingButton("ma.processing.retryButton", in: app)
+
+        assertElement("ma.processing.status", in: app, contains: "Processing failed.")
+        assertElement(
+            "ma.processing.error",
+            in: app,
+            contains: "Processing command failed before returning a contract response."
+        )
+        XCTAssertEqual(
+            try failureFixture.invocationLines(),
+            failedRetryProcessingInvocationLines(sessionID: "session-app-ui-processing")
+        )
+    }
+
     private func launchApp(
         fixture: String? = nil,
         workspaceURL: URL? = nil,
@@ -546,6 +578,23 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             result,
             .completed,
             "Expected \(identifier) label or value to contain \(expectedText). Actual label: \(element.label), value: \(String(describing: element.value))",
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertElement(
+        _ identifier: String,
+        in app: XCUIApplication,
+        doesNotContain unexpectedText: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let element = element(identifier, in: app)
+        let value = String(describing: element.value)
+        XCTAssertFalse(
+            element.label.contains(unexpectedText) || value.contains(unexpectedText),
+            "Expected \(identifier) label and value not to contain \(unexpectedText). Actual label: \(element.label), value: \(value)",
             file: file,
             line: line
         )
