@@ -78,6 +78,9 @@ grep -R -q "TranscriptReviewViewModel" Sources tests App UITests
 grep -R -q "TranscriptReviewWorkspaceLoader" Sources tests App UITests
 grep -R -q "TranscriptReviewActionsViewModel" Sources tests App UITests
 grep -R -q "TranscriptActionFakeCommandClient" Sources tests App UITests
+grep -R -q "TranscriptActionProcessRunner" Sources tests
+grep -R -q "TranscriptActionMemoryClipboard" Sources tests
+grep -R -q "TranscriptActionStaticDestinationSelector" Sources tests
 grep -R -q "ProcessingStateViewModel" Sources tests App UITests
 grep -R -q "ProcessingCommandFakeClient" Sources tests App UITests
 grep -R -q "ProcessingCommandProcessRunner" Sources tests App UITests
@@ -219,10 +222,21 @@ if grep -R --include '*.swift' -n -E "$app_bundle_forbidden" App UITests/Meeting
   exit 1
 fi
 
-action_boundary_forbidden='(^[[:space:]]*import[[:space:]]+(AppKit|ScreenCaptureKit|AVFoundation|CoreAudio|CoreMediaIO|ReplayKit|Network)\b|Process\b|NSTask\b|posix_spawn|execv|system[[:space:]]*\(|popen[[:space:]]*\(|meeting_assistant_cli|ProcessingCLIDependencyCheckRunner|DependencyCheckProcessRunner|native-helper|processing-cli|helper[[:space:]]+tool|ScreenCaptureKit|AVCapture|CGDisplayStream|SCStream|AVAudioEngine|AVAudioRecorder|NSPasteboard|NSOpenPanel|NSSavePanel|FileManager\b|FileHandle\b|OutputStream\b|InputStream\b|createFile[[:space:]]*\(|createDirectory[[:space:]]*\(|removeItem[[:space:]]*\(|copyItem[[:space:]]*\(|moveItem[[:space:]]*\(|\.(write|write(to|Bytes))[[:space:]]*\(|URLSession|URLRequest|URLSessionConfiguration|NWConnection|NWListener|WebSocket|https?://)'
+grep -q "TranscriptActionProcessRunner" Sources/MeetingAssistantNative/TranscriptActionCommandClient.swift
+grep -q "TranscriptActionMemoryClipboard" Sources/MeetingAssistantNative/TranscriptActionFakeCommandClient.swift
+grep -q "TranscriptActionStaticDestinationSelector" Sources/MeetingAssistantNative/TranscriptActionFakeCommandClient.swift
 
-if grep -R --include 'TranscriptAction*.swift' --include 'TranscriptReviewActions*.swift' -n -E "$action_boundary_forbidden" Sources; then
-  echo "native-app architecture check failed: transcript action consumer must stay on deterministic fake/injected boundaries and must not call helpers/CLIs, real pasteboard, file pickers, file deletion, processing internals or network APIs." >&2
+action_process_boundary_file='Sources/MeetingAssistantNative/TranscriptActionCommandClient.swift'
+action_os_boundary_forbidden='(^[[:space:]]*import[[:space:]]+(AppKit|ScreenCaptureKit|AVFoundation|CoreAudio|CoreMediaIO|ReplayKit|Network)\b|NSTask\b|posix_spawn|execv|system[[:space:]]*\(|popen[[:space:]]*\(|meeting_assistant_cli|ProcessingCLIDependencyCheckRunner|DependencyCheckProcessRunner|native-helper|processing-cli|helper[[:space:]]+tool|ScreenCaptureKit|AVCapture|CGDisplayStream|SCStream|AVAudioEngine|AVAudioRecorder|NSPasteboard|NSOpenPanel|NSSavePanel|FileManager\b|OutputStream\b|InputStream\b|createFile[[:space:]]*\(|createDirectory[[:space:]]*\(|removeItem[[:space:]]*\(|copyItem[[:space:]]*\(|moveItem[[:space:]]*\(|\.(write|write(to|Bytes))[[:space:]]*\(|URLSession|URLRequest|URLSessionConfiguration|NWConnection|NWListener|WebSocket|https?://)'
+
+if grep -R --include 'TranscriptAction*.swift' --include 'TranscriptReviewActions*.swift' -n -E "$action_os_boundary_forbidden" Sources; then
+  echo "native-app architecture check failed: transcript action consumer must keep OS effects behind injected boundaries and must not call helpers/provider internals, real pasteboard, file pickers, direct file mutation/deletion, capture APIs, or network APIs." >&2
+  exit 1
+fi
+
+if grep -R --include 'TranscriptAction*.swift' --include 'TranscriptReviewActions*.swift' -n -E 'Process\b|ProcessInfo\b|Pipe\b|standardOutput|standardError|FileHandle\b' Sources |
+  grep -v -F "$action_process_boundary_file"; then
+  echo "native-app architecture check failed: transcript action Process/Pipe usage is allowed only inside TranscriptActionProcessRunner." >&2
   exit 1
 fi
 
