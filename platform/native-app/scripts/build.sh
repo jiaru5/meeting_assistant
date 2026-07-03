@@ -26,11 +26,20 @@ SWIFT
 
 (cd "$tmp_dir" && swift build)
 xcodebuild build \
+  -configuration Debug \
   -project "$component_dir/MeetingAssistantNative.xcodeproj" \
   -scheme "MeetingAssistantNative" \
   -destination 'platform=macOS' \
   -derivedDataPath "$tmp_dir/DerivedData"
-printf '%s\n' "native-app VS-MA-12/VS-MA-15/VS-MA-16/VS-MA-17/VS-MA-18/VS-MA-19 build: Swift permission/dependency status, fake recording target, controlled native capture artifact registration, Apple ScreenCaptureKit native capture adapter, processing state consumer, read-only workspace transcript loader, deterministic transcript actions, and app bundle compiled." > build/build-report.txt
+xcodebuild build \
+  -configuration Release \
+  -project "$component_dir/MeetingAssistantNative.xcodeproj" \
+  -scheme "MeetingAssistantNative" \
+  -destination 'platform=macOS' \
+  -derivedDataPath "$tmp_dir/DerivedData"
+test -d "$tmp_dir/DerivedData/Build/Products/Debug/MeetingAssistantNative.app"
+test -d "$tmp_dir/DerivedData/Build/Products/Release/MeetingAssistantNative.app"
+printf '%s\n' "native-app VS-MA-12/VS-MA-15/VS-MA-16/VS-MA-17/VS-MA-18/VS-MA-19 build: Swift permission/dependency status, fake recording target, controlled native capture artifact registration, Apple ScreenCaptureKit native capture adapter, processing state consumer, read-only workspace transcript loader, deterministic transcript actions, and Debug plus Release app bundles compiled." > build/build-report.txt
 
 test -f component.json
 test -f README.md

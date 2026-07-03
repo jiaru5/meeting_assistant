@@ -89,6 +89,50 @@ grep -R -q "MA_NATIVE_APP_XCTEST" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "isProcessClientTestHookAllowed" App/MeetingAssistantNativeApp.swift
 grep -R -q "#if DEBUG" App/MeetingAssistantNativeApp.swift
 grep -q "SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;" MeetingAssistantNative.xcodeproj/project.pbxproj
+python3 - <<'PY'
+import re
+from pathlib import Path
+
+project = Path("MeetingAssistantNative.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
+configuration_pattern = re.compile(
+    r"/\* (Debug|Release) \*/ = \{\n"
+    r"\t\t\tisa = XCBuildConfiguration;\n"
+    r"\t\t\tbuildSettings = \{(.*?)\n"
+    r"\t\t\t\};\n"
+    r"\t\t\tname = \1;",
+    re.S,
+)
+debug_settings = []
+release_settings = []
+for match in configuration_pattern.finditer(project):
+    name, settings = match.groups()
+    if name == "Debug":
+        debug_settings.append(settings)
+    else:
+        release_settings.append(settings)
+
+if len(debug_settings) < 3 or len(release_settings) < 3:
+    raise SystemExit("native-app architecture check failed: expected Debug and Release build configurations for project, app, and UI test targets.")
+
+missing_debug = [settings for settings in debug_settings if "SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;" not in settings]
+if missing_debug:
+    raise SystemExit("native-app architecture check failed: every Debug configuration must define DEBUG for XCTest-only hooks.")
+
+leaking_release = [settings for settings in release_settings if "SWIFT_ACTIVE_COMPILATION_CONDITIONS" in settings and "DEBUG" in settings]
+if leaking_release:
+    raise SystemExit("native-app architecture check failed: Release configurations must not define DEBUG or enable XCTest-only hooks.")
+
+scheme = Path("MeetingAssistantNative.xcodeproj/xcshareddata/xcschemes/MeetingAssistantNative.xcscheme").read_text(encoding="utf-8")
+required_scheme_markers = [
+    '<TestAction\n      buildConfiguration = "Debug"',
+    '<LaunchAction\n      buildConfiguration = "Debug"',
+    '<ProfileAction\n      buildConfiguration = "Release"',
+    '<ArchiveAction\n      buildConfiguration = "Release"',
+]
+missing_markers = [marker for marker in required_scheme_markers if marker not in scheme]
+if missing_markers:
+    raise SystemExit(f"native-app architecture check failed: scheme Debug/Release boundary markers are missing: {missing_markers}")
+PY
 grep -q '"command": "generate_transcript"' test-fixtures/processing-command-fixture.sh
 grep -q '"command": "generate_speaker_labels"' test-fixtures/processing-command-fixture.sh
 grep -R -q "MA_NATIVE_TRANSCRIPT_WORKSPACE" App UITests/MeetingAssistantNativeAppUITests

@@ -491,12 +491,12 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
     }
 
     private func button(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
-        let element = app
+        let matches = app
             .descendants(matching: .button)
             .matching(identifier: identifier)
-            .firstMatch
+        let element = matches.firstMatch
         XCTAssertTrue(element.waitForExistence(timeout: 5), "Expected button \(identifier) to exist.")
-        return element
+        return matches.allElementsBoundByIndex.first { $0.exists && $0.isHittable } ?? element
     }
 
     private func element(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
@@ -629,9 +629,8 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         line: UInt = #line
     ) {
         bringAppToForeground(app, beforeTapping: identifier, file: file, line: line)
-        let control = button(identifier, in: app)
-        waitForHittable(control, file: file, line: line)
-        control.click()
+        let control = hittableButton(identifier, in: app, file: file, line: line)
+        clickButton(control, in: app, file: file, line: line)
     }
 
     private func waitForEnabled(
@@ -663,13 +662,14 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         line: UInt = #line
     ) {
         bringAppToForeground(app, beforeTapping: identifier, file: file, line: line)
-        var control = button(identifier, in: app)
-        if !control.isHittable {
-            scrollTowardTranscriptActions(in: app, targetIdentifier: identifier)
-            control = button(identifier, in: app)
-        }
-        waitForHittable(control, file: file, line: line)
-        control.click()
+        let control = hittableButton(
+            identifier,
+            in: app,
+            scroll: { self.scrollTowardTranscriptActions(in: app, targetIdentifier: identifier, attempt: $0) },
+            file: file,
+            line: line
+        )
+        clickButton(control, in: app, file: file, line: line)
     }
 
     private func tapProcessingButton(
@@ -679,13 +679,63 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         line: UInt = #line
     ) {
         bringAppToForeground(app, beforeTapping: identifier, file: file, line: line)
+        let control = hittableButton(identifier, in: app, file: file, line: line)
+        clickButton(control, in: app, file: file, line: line)
+    }
+
+    private func hittableButton(
+        _ identifier: String,
+        in app: XCUIApplication,
+        scroll: ((Int) -> Void)? = nil,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
         var control = button(identifier, in: app)
-        if !control.isHittable {
-            scrollTowardButton(in: app, targetIdentifier: identifier)
+        for attempt in 0..<8 {
+            if waitUntilHittable(control, timeout: 1) || isVisibleEnabled(control, in: app) {
+                return control
+            }
+            (scroll ?? { self.scrollTowardButton(in: app, targetIdentifier: identifier, attempt: $0) })(attempt)
             control = button(identifier, in: app)
         }
         waitForHittable(control, file: file, line: line)
+        return control
+    }
+
+    private func clickButton(
+        _ control: XCUIElement,
+        in app: XCUIApplication,
+        file: StaticString,
+        line: UInt
+    ) {
+        if waitUntilHittable(control, timeout: 1) {
+            control.click()
+            return
+        }
+        if isVisibleEnabled(control, in: app) {
+            control.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+            return
+        }
+        waitForHittable(control, file: file, line: line)
         control.click()
+    }
+
+    private func waitUntilHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let predicate = NSPredicate(format: "exists == true AND enabled == true AND hittable == true")
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func isVisibleEnabled(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
+        guard element.exists && element.isEnabled && hasUsableFrame(element.frame) else {
+            return false
+        }
+        let window = appWindow(in: app)
+        guard window.exists && hasUsableFrame(window.frame) else {
+            return false
+        }
+        let center = CGPoint(x: element.frame.midX, y: element.frame.midY)
+        return window.frame.insetBy(dx: 4, dy: 4).contains(center)
     }
 
     private func successfulProcessingInvocationLines(sessionID: String) -> [String] {
@@ -751,36 +801,57 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
 
     private func scrollTowardTranscriptActions(
         in app: XCUIApplication,
-        targetIdentifier: String
+        targetIdentifier: String,
+        attempt: Int = 0
     ) {
-        scrollTowardButton(in: app, targetIdentifier: targetIdentifier)
+        scrollTowardButton(in: app, targetIdentifier: targetIdentifier, attempt: attempt)
     }
 
     private func scrollTowardButton(
         in app: XCUIApplication,
-        targetIdentifier: String
+        targetIdentifier: String,
+        attempt: Int = 0
     ) {
-        let scrollView = app.scrollViews
+        var scrollView = app.scrollViews
             .containing(.button, identifier: targetIdentifier)
             .firstMatch
-        guard scrollView.exists else {
+        if !scrollView.waitForExistence(timeout: 1) {
+            scrollView = app.scrollViews.firstMatch
+        }
+        guard scrollView.waitForExistence(timeout: 2) else {
             return
         }
 
-        for _ in 0..<8 {
-            let element = app
-                .descendants(matching: .button)
-                .matching(identifier: targetIdentifier)
-                .firstMatch
-            if element.exists && element.isHittable {
-                return
-            }
-            if app.state != .runningForeground {
-                app.activate()
-                _ = app.wait(for: .runningForeground, timeout: 5)
-            }
-            scrollView.swipeUp()
+        let element = app
+            .descendants(matching: .button)
+            .matching(identifier: targetIdentifier)
+            .firstMatch
+        if app.state != .runningForeground {
+            app.activate()
+            _ = app.wait(for: .runningForeground, timeout: 5)
         }
+        if element.exists, hasUsableFrame(element.frame) {
+            let edgePadding: CGFloat = 80
+            if element.frame.minY < scrollView.frame.minY + edgePadding {
+                scrollView.swipeDown()
+            } else if element.frame.maxY > scrollView.frame.maxY - edgePadding {
+                scrollView.swipeUp()
+            } else if attempt.isMultiple(of: 2) {
+                scrollView.swipeDown()
+            } else if attempt < 6 {
+                scrollView.swipeUp()
+            } else {
+                scrollView.swipeDown()
+            }
+        } else if attempt < 4 {
+            scrollView.swipeUp()
+        } else {
+            scrollView.swipeDown()
+        }
+    }
+
+    private func hasUsableFrame(_ frame: CGRect) -> Bool {
+        !frame.isNull && !frame.isInfinite && frame.width > 0 && frame.height > 0
     }
 
     private func scrollTowardElement(
