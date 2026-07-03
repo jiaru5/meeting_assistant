@@ -123,6 +123,54 @@ case "$smoke_output" in
     ;;
 esac
 
+release_home="$smoke_tmp/release-home"
+mkdir -p \
+  "$release_home/.local/bin" \
+  "$release_home/.local/share/ai-models/whisper.cpp/large-v3-turbo" \
+  "$release_home/.local/share/ai-fixtures/asr/zh-en-tech"
+printf '#!/usr/bin/env sh\nexit 0\n' > "$release_home/.local/bin/whisper-cli"
+chmod +x "$release_home/.local/bin/whisper-cli"
+printf 'fake model' > "$release_home/.local/share/ai-models/whisper.cpp/large-v3-turbo/ggml-large-v3-turbo-q5_0.bin"
+printf 'fake wav' > "$release_home/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav"
+set +e
+release_smoke_output="$(
+  HOME="$release_home" \
+    MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$release_home/.local/bin/whisper-cli" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL="$release_home/.local/share/ai-models/whisper.cpp/large-v3-turbo/ggml-large-v3-turbo-q5_0.bin" \
+    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$release_home/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav" \
+    ./scripts/release-provider-smoke.sh 2>&1
+)"
+release_smoke_status="$?"
+set -e
+if [ "$release_smoke_status" -eq 0 ]; then
+  echo "processing-cli test failed: release provider smoke accepted missing model sidecar evidence" >&2
+  exit 1
+fi
+case "$release_smoke_output" in
+  *"model hash blocker"* ) ;;
+  *)
+    echo "processing-cli test failed: release provider smoke did not report the model hash blocker" >&2
+    echo "$release_smoke_output" >&2
+    exit 1
+    ;;
+esac
+case "$release_smoke_output" in
+  *"model license blocker"* ) ;;
+  *)
+    echo "processing-cli test failed: release provider smoke did not report the model license blocker" >&2
+    echo "$release_smoke_output" >&2
+    exit 1
+    ;;
+esac
+case "$release_smoke_output" in
+  *"model provenance blocker"* ) ;;
+  *)
+    echo "processing-cli test failed: release provider smoke did not report the model provenance blocker" >&2
+    echo "$release_smoke_output" >&2
+    exit 1
+    ;;
+esac
+
 ./scripts/smoke-whisper-cpp.sh
 
 ../e2e/smoke-test.sh
