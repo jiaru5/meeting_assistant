@@ -46,6 +46,14 @@ def evidence_marker(stage: str) -> None:
     )
 
 
+def provider_failure_marker(stage: str) -> None:
+    print(
+        f"VS-MA-21 provider/e2e marker [non-contract]: "
+        f"capture-style provider failure fixture - {stage}",
+        flush=True,
+    )
+
+
 def write_fixture_wav(path: Path, seed: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     frames = bytearray()
@@ -62,6 +70,57 @@ def write_fixture_wav(path: Path, seed: int) -> None:
 def write_fake_executable(directory: Path, name: str) -> Path:
     path = directory / name
     path.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    return path
+
+
+def write_fake_whisper_runtime(directory: Path) -> Path:
+    path = directory / "whisper-cli"
+    path.write_text(
+        """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+mode = os.environ.get("MEETING_ASSISTANT_FAKE_WHISPER_MODE", "valid")
+sensitive = os.environ.get("MEETING_ASSISTANT_FAKE_WHISPER_SENSITIVE", "")
+leak_text = os.environ.get("MEETING_ASSISTANT_FAKE_WHISPER_TRANSCRIPT", "")
+args = sys.argv[1:]
+output_prefix = None
+for index, arg in enumerate(args):
+    if arg in {"--output-file", "-of"} and index + 1 < len(args):
+        output_prefix = args[index + 1]
+        break
+
+if output_prefix:
+    output_path = Path(output_prefix + ".json")
+    if mode == "bad_output":
+        output_path.write_text("not-json " + sensitive + " " + leak_text, encoding="utf-8")
+    else:
+        payload = {
+            "transcription": [
+                {
+                    "offsets": {"from": 0, "to": 900},
+                    "text": "runtime retry transcript HTTP LLM clean architecture EDA",
+                }
+            ]
+        }
+        if mode == "nonzero":
+            payload["diagnostic"] = {
+                "credential": sensitive,
+                "path": str(Path(output_prefix).parent),
+                "transcript": leak_text,
+            }
+        output_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+if mode == "nonzero":
+    print(f"provider failed credential={sensitive} path=/tmp/provider-private transcript={leak_text}", file=sys.stderr)
+    raise SystemExit(7)
+raise SystemExit(0)
+""",
+        encoding="utf-8",
+    )
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
     return path
 
@@ -103,12 +162,66 @@ def assert_json_does_not_contain(payload: object, forbidden: str, label: str) ->
         raise AssertionError(f"{label}: response must not contain transcript content")
 
 
-def run_cli(workspace: Path, args: list[str], *, expected_exit: int, command: str) -> dict:
+def iter_strings(value: object, path: str = "$") -> list[tuple[str, str]]:
+    if isinstance(value, dict):
+        result: list[tuple[str, str]] = []
+        for key, child in value.items():
+            result.extend(iter_strings(child, f"{path}.{key}"))
+        return result
+    if isinstance(value, list):
+        result = []
+        for index, child in enumerate(value):
+            result.extend(iter_strings(child, f"{path}[{index}]"))
+        return result
+    if isinstance(value, str):
+        return [(path, value)]
+    return []
+
+
+def assert_failure_surface_sanitized(
+    payload: dict,
+    session_dir: Path,
+    *,
+    label: str,
+    forbidden_values: list[str],
+    log_path: Path | None = None,
+) -> None:
+    allowed_paths = {str(log_path)} if log_path is not None else set()
+    for key_path, value in iter_strings(payload):
+        if value in allowed_paths and key_path == "$.details.log_path":
+            continue
+        for forbidden in forbidden_values:
+            if forbidden and forbidden in value:
+                raise AssertionError(f"{label}: leaked forbidden value at {key_path}")
+        if str(session_dir) in value:
+            raise AssertionError(f"{label}: leaked session path at {key_path}")
+    if log_path is None:
+        return
+    if not log_path.is_file():
+        raise AssertionError(f"{label}: expected processing log to be written")
+    log_text = log_path.read_text(encoding="utf-8")
+    for forbidden in forbidden_values:
+        if forbidden and forbidden in log_text:
+            raise AssertionError(f"{label}: processing log leaked forbidden value")
+    if str(session_dir) in log_text:
+        raise AssertionError(f"{label}: processing log leaked session path")
+
+
+def run_cli(
+    workspace: Path,
+    args: list[str],
+    *,
+    expected_exit: int,
+    command: str,
+    env_overrides: dict[str, str] | None = None,
+) -> dict:
     env = CLI_ENV_BASE.copy()
     for env_name in TRANSCRIPTION_ENV_NAMES:
         env.pop(env_name, None)
     env["MEETING_ASSISTANT_WORKSPACE"] = str(workspace)
     env["PYTHONPATH"] = f"{ROOT / 'platform/processing-cli/src'}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    if env_overrides:
+        env.update(env_overrides)
     completed = subprocess.run(
         [PYTHON, "-m", "meeting_assistant_cli", *args],
         cwd=ROOT,
@@ -302,6 +415,23 @@ def assert_capture_checksums_unchanged(session_dir: Path, expected: dict[str, st
         artifact_path = Path(str(artifact["path"]))
         if sha256_file(artifact_path) != checksum:
             raise AssertionError(f"{artifact_type}: original capture artifact checksum changed")
+
+
+def assert_artifacts_absent(session_dir: Path, artifact_types: set[str], label: str) -> None:
+    session = load_session(session_dir)
+    existing = {artifact.get("artifact_type") for artifact in session.get("artifacts", [])}
+    leaked = artifact_types & existing
+    if leaked:
+        raise AssertionError(f"{label}: unexpected artifact registrations {sorted(leaked)}")
+    artifact_files = {
+        "normalized_audio": session_dir / "artifacts" / "normalized_audio.wav",
+        "transcript_text": session_dir / "artifacts" / "transcript.json",
+        "speaker_labels": session_dir / "artifacts" / "speaker_labels.json",
+    }
+    for artifact_type in artifact_types:
+        path = artifact_files.get(artifact_type)
+        if path is not None and path.exists():
+            raise AssertionError(f"{label}: unexpected derived artifact file {path.name}")
 
 
 def create_capture_session(
@@ -741,6 +871,126 @@ def exercise_checksum_drift(workspace: Path) -> None:
     evidence_marker("checksum rollback boundary verified")
 
 
+def exercise_runtime_dependency_missing_failure(workspace: Path) -> None:
+    session_id = "capture-runtime-dependency-missing"
+    session_dir = create_capture_session(workspace, session_id)
+    original_checksums = capture_artifact_checksums(assert_session_identity(session_dir, session_id=session_id))
+    mixed_path = Path(str(artifact_by_type(load_session(session_dir), "mixed_audio")["path"]))
+    forbidden_values = [
+        "Project Apollo transcript leak",
+        "provider-sensitive-dependency-value",
+        str(mixed_path),
+        str(session_dir / "artifacts" / "normalized_audio.wav"),
+        str(session_dir / "artifacts" / "transcript.json"),
+    ]
+
+    response = run_cli(
+        workspace,
+        ["generate_transcript", "--session-id", session_id, "--runtime", "whisper_cpp"],
+        expected_exit=4,
+        command="generate_transcript",
+    )
+
+    assert_response_shape(response, "generate_transcript", ok=False, code="dependency_missing")
+    missing = response.get("details", {}).get("missing")
+    if missing != ["MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME", "MEETING_ASSISTANT_TRANSCRIPTION_MODEL"]:
+        raise AssertionError("runtime dependency fixture: missing env names drifted")
+    if response.get("details", {}).get("runtime") != "whisper_cpp":
+        raise AssertionError("runtime dependency fixture: runtime detail drifted")
+    log_path = session_dir / "logs" / "processing.log"
+    assert_failure_surface_sanitized(
+        response,
+        session_dir,
+        label="runtime dependency fixture",
+        forbidden_values=forbidden_values,
+        log_path=log_path,
+    )
+    assert_artifacts_absent(session_dir, {"normalized_audio", "transcript_text"}, "runtime dependency fixture")
+    assert_capture_checksums_unchanged(session_dir, original_checksums)
+    assert_no_temp_leftovers(session_dir)
+    provider_failure_marker("dependency_missing exit 4 without derived artifact pollution verified")
+
+
+def exercise_runtime_processing_failure_retry(workspace: Path, root: Path) -> None:
+    session_id = "capture-runtime-processing-failed"
+    session_dir = create_capture_session(workspace, session_id)
+    session = assert_session_identity(session_dir, session_id=session_id)
+    original_checksums = capture_artifact_checksums(session)
+    mixed_path = Path(str(artifact_by_type(session, "mixed_audio")["path"]))
+    runtime_dir = root / "runtime-failure-fixture"
+    runtime_dir.mkdir()
+    runtime_path = write_fake_whisper_runtime(runtime_dir)
+    model_path = runtime_dir / "ggml-large-v3-turbo-q5_0.bin"
+    model_path.write_bytes(b"fake multilingual whisper model")
+    sensitive_value = "provider-sensitive-processing-value"
+    transcript_leak = "Project Apollo transcript leak"
+    env = {
+        "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME": str(runtime_path),
+        "MEETING_ASSISTANT_TRANSCRIPTION_MODEL": str(model_path),
+        "MEETING_ASSISTANT_FAKE_WHISPER_MODE": "nonzero",
+        "MEETING_ASSISTANT_FAKE_WHISPER_SENSITIVE": sensitive_value,
+        "MEETING_ASSISTANT_FAKE_WHISPER_TRANSCRIPT": transcript_leak,
+    }
+    forbidden_values = [
+        sensitive_value,
+        transcript_leak,
+        str(runtime_path),
+        str(model_path),
+        str(runtime_dir),
+        str(mixed_path),
+        str(session_dir / "artifacts" / "transcript.json"),
+    ]
+
+    response = run_cli(
+        workspace,
+        ["generate_transcript", "--session-id", session_id, "--runtime", "whisper_cpp"],
+        expected_exit=5,
+        command="generate_transcript",
+        env_overrides=env,
+    )
+
+    assert_response_shape(response, "generate_transcript", ok=False, code="processing_failed")
+    if response.get("details", {}).get("runtime") != "whisper_cpp":
+        raise AssertionError("runtime processing failure fixture: runtime detail drifted")
+    if response.get("details", {}).get("exit_code") != 7:
+        raise AssertionError("runtime processing failure fixture: exit_code detail drifted")
+    log_path = session_dir / "logs" / "processing.log"
+    assert_failure_surface_sanitized(
+        response,
+        session_dir,
+        label="runtime processing failure fixture",
+        forbidden_values=forbidden_values,
+        log_path=log_path,
+    )
+    assert_artifacts_absent(session_dir, {"transcript_text", "speaker_labels"}, "runtime processing failure fixture")
+    normalized_artifact = artifact_by_type(load_session(session_dir), "normalized_audio")
+    assert_artifact_schema(session_dir, normalized_artifact, "normalized_audio")
+    assert_capture_checksums_unchanged(session_dir, original_checksums)
+    assert_no_temp_leftovers(session_dir)
+
+    retry_env = dict(env)
+    retry_env["MEETING_ASSISTANT_FAKE_WHISPER_MODE"] = "valid"
+    retry_response = run_cli(
+        workspace,
+        ["generate_transcript", "--session-id", session_id, "--runtime", "whisper_cpp", "--language", "zh"],
+        expected_exit=0,
+        command="generate_transcript",
+        env_overrides=retry_env,
+    )
+    assert_response_shape(retry_response, "generate_transcript", ok=True)
+    session = assert_session_identity(session_dir, session_id=session_id)
+    transcript_artifact = artifact_by_type(session, "transcript_text")
+    transcript_path = assert_artifact_schema(session_dir, transcript_artifact, "transcript_text")
+    transcript = load_json(transcript_path)
+    if transcript["source_artifact_id"] != normalized_artifact["id"]:
+        raise AssertionError("runtime processing retry: transcript must reuse normalized_audio source")
+    if "runtime retry transcript HTTP LLM clean architecture EDA" not in json.dumps(transcript, ensure_ascii=False):
+        raise AssertionError("runtime processing retry: expected fake runtime transcript text")
+    assert_capture_checksums_unchanged(session_dir, original_checksums)
+    assert_no_temp_leftovers(session_dir)
+    provider_failure_marker("processing_failed exit 5 redaction and retry success verified")
+
+
 with tempfile.TemporaryDirectory(prefix="meeting-assistant-capture-processing-") as tmp:
     root = Path(tmp)
     workspace = root / "workspace"
@@ -772,6 +1022,8 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-capture-processing-")
     exercise_lock_conflict(workspace)
     exercise_temp_hardlink_rollback(workspace, root)
     exercise_checksum_drift(workspace)
+    exercise_runtime_dependency_missing_failure(workspace)
+    exercise_runtime_processing_failure_retry(workspace, root)
 
 print("capture-style processing e2e smoke passed.")
 PY
