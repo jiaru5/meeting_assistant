@@ -29,3 +29,9 @@ Phase 1 没有服务端 on-call。安全或数据问题的处理路径是停止�
 ## 数据分类
 
 数据分类以 `docs/product-spec/13-security-and-compliance.md` 的 `DATA-MA-*` 为准。会议视频、音频、transcript 和 speaker labels 默认视为 confidential by default。
+
+## Release-readiness 证据边界
+
+本文档只能说明 Phase 1 本地运行准备边界，不能作为 release candidate 放行证据。只要 `docs/engineering/06-product-validation-matrix.md` 中仍存在 `partial`、`planned`、`missing` 或 `manual-evidence` 的发布范围 `PV-*` 行，`./scripts/product-validation-check.py release` 和 `./scripts/release-preflight.sh` 都应按预期失败。
+
+`release-readiness` 或 `production-readiness` 证据只能证明对应工程准备项存在，不能替代发布范围内所有 `PV-*` 行达到 `covered`。交付报告使用 `./scripts/review-report.sh --require-release-evidence` 时，必须基于 `./scripts/release-preflight.sh` 产生的完整 `.harness/evidence/release/` 证据；普通 `.harness/evidence/check/` 证据或单独的 production-readiness 证据不能写作 release candidate 通过。
