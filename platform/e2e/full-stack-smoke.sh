@@ -46,5 +46,9 @@ echo "VS-MA-20 provider/e2e attribution [non-contract]: native_recording-style p
 echo "VS-MA-20 provider/e2e attribution [non-contract]: native read bridge checksum remains in scope."
 echo "VS-MA-20 provider/e2e attribution [non-contract]: no-auto-pull precondition remains in scope."
 echo "VS-MA-20 provider/e2e attribution [non-contract]: real native capture, native UI, and release bundle are not proven by this provider smoke."
+echo "VS-MA-23 provider/e2e release readiness [non-contract]: processing local command chain passed."
+echo "VS-MA-23 provider/e2e release readiness [non-contract]: capture-style provider artifact and failure-redaction chain passed."
+echo "VS-MA-23 provider/e2e release readiness [non-contract]: native read bridge artifact-consumption smoke passed."
+echo "VS-MA-23 provider/e2e release readiness [non-contract]: product-validation release blockers remain authoritative until Main PM closes PV partial rows."
 
 echo "full-stack e2e smoke passed."
