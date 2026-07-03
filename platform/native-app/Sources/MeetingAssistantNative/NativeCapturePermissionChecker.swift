@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 public enum NativeCapturePermissionState: String, Equatable, Sendable {
@@ -70,6 +71,44 @@ public protocol NativeCapturePermissionChecking: Sendable {
     func permissionSnapshot(
         for request: StartNativeRecordingRequest
     ) async -> NativeCapturePermissionSnapshot
+}
+
+public struct CoreGraphicsScreenRecordingPermissionProbe: Sendable {
+    private let preflight: @Sendable () -> Bool
+
+    public init(preflight: @escaping @Sendable () -> Bool = {
+        CGPreflightScreenCaptureAccess()
+    }) {
+        self.preflight = preflight
+    }
+
+    public func state() -> NativeCapturePermissionState {
+        preflight() ? .granted : .denied
+    }
+}
+
+public struct MacOSNativeCapturePermissionChecker: NativeCapturePermissionChecking {
+    private let screenRecordingProbe: CoreGraphicsScreenRecordingPermissionProbe
+    private let microphoneStateProvider: @Sendable () -> NativeCapturePermissionState
+
+    public init(
+        screenRecordingProbe: CoreGraphicsScreenRecordingPermissionProbe = CoreGraphicsScreenRecordingPermissionProbe(),
+        microphoneStateProvider: @escaping @Sendable () -> NativeCapturePermissionState = {
+            .unknown
+        }
+    ) {
+        self.screenRecordingProbe = screenRecordingProbe
+        self.microphoneStateProvider = microphoneStateProvider
+    }
+
+    public func permissionSnapshot(
+        for request: StartNativeRecordingRequest
+    ) async -> NativeCapturePermissionSnapshot {
+        NativeCapturePermissionSnapshot(
+            screenRecording: screenRecordingProbe.state(),
+            microphone: microphoneStateProvider()
+        )
+    }
 }
 
 public struct StaticNativeCapturePermissionChecker: NativeCapturePermissionChecking {

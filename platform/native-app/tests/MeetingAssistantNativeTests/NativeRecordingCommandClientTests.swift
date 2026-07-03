@@ -48,6 +48,82 @@ struct NativeRecordingCommandClientTests {
     }
 
     @Test
+    func macOSScreenRecordingPreflightDeniedFailsClosedWithoutStartingAdapter() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter()
+        let checker = MacOSNativeCapturePermissionChecker(
+            screenRecordingProbe: CoreGraphicsScreenRecordingPermissionProbe(preflight: { false }),
+            microphoneStateProvider: { .granted }
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-macos-screen-denied",
+            permissionChecker: checker,
+            adapter: adapter
+        )
+
+        let response = try await client.startNativeRecording(
+            startRequest(workspace: workspace, captureMicrophoneAudio: false)
+        )
+
+        #expect(response.ok == false)
+        #expect(response.command == .startNativeRecording)
+        #expect(response.code == .permissionDenied)
+        #expect(response.details == ["Screen Recording permission is denied."])
+        #expect(await adapter.startContexts.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: sessionRoot(workspace, "session-macos-screen-denied").path))
+    }
+
+    @Test
+    func macOSMicrophoneUnknownFailsClosedOnlyWhenMicrophoneCaptureIsRequested() async throws {
+        let blockedWorkspace = try temporaryWorkspace()
+        let allowedWorkspace = try temporaryWorkspace()
+        defer {
+            try? FileManager.default.removeItem(at: blockedWorkspace)
+            try? FileManager.default.removeItem(at: allowedWorkspace)
+        }
+        let blockedAdapter = ControlledNativeCaptureAdapter()
+        let allowedAdapter = ControlledNativeCaptureAdapter()
+        let checker = MacOSNativeCapturePermissionChecker(
+            screenRecordingProbe: CoreGraphicsScreenRecordingPermissionProbe(preflight: { true }),
+            microphoneStateProvider: { .unknown }
+        )
+        let blockedClient = nativeClient(
+            workspace: blockedWorkspace,
+            sessionID: "session-macos-mic-unknown",
+            permissionChecker: checker,
+            adapter: blockedAdapter
+        )
+        let allowedClient = nativeClient(
+            workspace: allowedWorkspace,
+            sessionID: "session-macos-mic-not-requested",
+            permissionChecker: checker,
+            adapter: allowedAdapter
+        )
+
+        let blocked = try await blockedClient.startNativeRecording(
+            startRequest(workspace: blockedWorkspace, captureMicrophoneAudio: true)
+        )
+
+        #expect(blocked.ok == false)
+        #expect(blocked.code == .permissionDenied)
+        #expect(blocked.details == ["Microphone permission status is unknown."])
+        #expect(await blockedAdapter.startContexts.isEmpty)
+
+        let allowed = try await allowedClient.startNativeRecording(
+            startRequest(workspace: allowedWorkspace, captureMicrophoneAudio: false)
+        )
+
+        #expect(allowed.ok == true)
+        #expect(allowed.status == "recording")
+        #expect(await allowedAdapter.startContexts.count == 1)
+        #expect(FileManager.default.fileExists(
+            atPath: sessionRoot(allowedWorkspace, "session-macos-mic-not-requested").path
+        ))
+    }
+
+    @Test
     func successfulStartWritesRecordingSessionMetadata() async throws {
         let workspace = try temporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
@@ -143,6 +219,47 @@ struct NativeRecordingCommandClientTests {
         #expect(artifacts.count == 4)
         #expect(artifacts.compactMap { $0["checksum"] as? String }.count == 2)
         #expect(artifacts.compactMap { $0["degradation_reason"] as? String }.count == 2)
+    }
+
+    @Test
+    func omittedStopArtifactsAreRegisteredMissingWithDegradationReasons() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .success(
+                artifacts: [
+                    .available(.screenVideo, format: "mov", data: data("screen-video")),
+                ]
+            )
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-omitted-artifacts",
+            adapter: adapter
+        )
+
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let response = try await client.stopRecording(StopRecordingRequest(sessionID: "session-omitted-artifacts"))
+
+        #expect(response.ok == true)
+        #expect(response.status == "recorded")
+        #expect(response.artifacts.count == 4)
+        let missingArtifacts = response.artifacts.filter { $0.captureStatus == "missing" }
+        #expect(missingArtifacts.map(\.artifactType) == [
+            "system_audio",
+            "microphone_audio",
+            "mixed_audio",
+        ])
+        #expect(missingArtifacts.allSatisfy {
+            $0.degradationReason?.contains("Native capture adapter did not produce") == true
+        })
+        #expect(missingArtifacts.allSatisfy { $0.checksum == nil })
+
+        let session = try readSessionJSON(workspace: workspace, sessionID: "session-omitted-artifacts")
+        let artifacts = try #require(session["artifacts"] as? [[String: Any]])
+        #expect(artifacts.count == 4)
+        #expect(artifacts.compactMap { $0["checksum"] as? String }.count == 1)
+        #expect(artifacts.compactMap { $0["degradation_reason"] as? String }.count == 3)
     }
 
     @Test
@@ -573,8 +690,22 @@ private func nativeClient(
     permissions: NativeCapturePermissionSnapshot = .granted,
     adapter: any NativeCaptureAdapter
 ) -> NativeRecordingCommandClient {
-    NativeRecordingCommandClient(
+    nativeClient(
+        workspace: workspace,
+        sessionID: sessionID,
         permissionChecker: StaticNativeCapturePermissionChecker(snapshot: permissions),
+        adapter: adapter
+    )
+}
+
+private func nativeClient(
+    workspace: URL,
+    sessionID: String,
+    permissionChecker: any NativeCapturePermissionChecking,
+    adapter: any NativeCaptureAdapter
+) -> NativeRecordingCommandClient {
+    NativeRecordingCommandClient(
+        permissionChecker: permissionChecker,
         captureAdapter: adapter,
         sessionIDProvider: { sessionID },
         timestampProvider: { fixedTimestamp },
@@ -584,14 +715,16 @@ private func nativeClient(
 
 private func startRequest(
     workspace: URL,
-    title: String? = nil
+    title: String? = nil,
+    captureSystemAudio: Bool = true,
+    captureMicrophoneAudio: Bool = true
 ) -> StartNativeRecordingRequest {
     StartNativeRecordingRequest(
         title: title,
         captureTarget: .screen,
         workspaceURL: workspace,
-        captureSystemAudio: true,
-        captureMicrophoneAudio: true
+        captureSystemAudio: captureSystemAudio,
+        captureMicrophoneAudio: captureMicrophoneAudio
     )
 }
 
