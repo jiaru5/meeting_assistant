@@ -343,6 +343,195 @@ struct TranscriptReviewActionsViewModelTests {
     }
 
     @Test
+    func processRunnerUsesFrozenArgumentsWithoutFormatFlagAndDecodesJSON() async throws {
+        let fixture = try TranscriptActionProcessRunnerFixture()
+        let copyResponse = try await fixture.runner.exportTranscript(
+            ExportTranscriptRequest(
+                sessionID: "session-actions",
+                exportType: .plainText,
+                targetPath: nil
+            )
+        )
+
+        #expect(copyResponse.ok)
+        #expect(copyResponse.content == "Process runner copy content.")
+        #expect(try fixture.recordedArguments() == [
+            "export_transcript",
+            "--session-id",
+            "session-actions",
+            "--export-type",
+            "plain_text",
+        ])
+
+        let exportResponse = try await fixture.runner.exportTranscript(
+            ExportTranscriptRequest(
+                sessionID: "session-actions",
+                exportType: .markdown,
+                targetPath: "/tmp/actions.md"
+            )
+        )
+
+        #expect(exportResponse.ok)
+        #expect(exportResponse.exportPackageID == "export-package-process")
+        #expect(exportResponse.targetPath == "/tmp/actions.md")
+        #expect(try fixture.recordedArguments() == [
+            "export_transcript",
+            "--session-id",
+            "session-actions",
+            "--export-type",
+            "markdown",
+            "--target-path",
+            "/tmp/actions.md",
+        ])
+
+        let deleteResponse = try await fixture.runner.deleteSession(
+            DeleteSessionRequest(
+                sessionID: "session-actions",
+                workspaceDir: "/tmp/workspace",
+                confirm: true
+            )
+        )
+
+        #expect(deleteResponse.ok)
+        #expect(deleteResponse.deleted == true)
+        #expect(deleteResponse.deletedItems == ["artifacts/transcript.json", "logs/processing.log"])
+        #expect(deleteResponse.retainedExternalExports == ["/tmp/actions.md"])
+        #expect(try fixture.recordedArguments() == [
+            "delete_session",
+            "--session-id",
+            "session-actions",
+            "--workspace-dir",
+            "/tmp/workspace",
+            "--confirm",
+            "true",
+        ])
+        #expect(try fixture.recordedInvocationLines() == [
+            "export_transcript --session-id session-actions --export-type plain_text",
+            "export_transcript --session-id session-actions --export-type markdown --target-path /tmp/actions.md",
+            "delete_session --session-id session-actions --workspace-dir /tmp/workspace --confirm true",
+        ])
+    }
+
+    @Test
+    func processRunnerDecodesStructuredNonzeroExportFailure() async throws {
+        let fixture = try TranscriptActionProcessRunnerFixture(script: .structuredExportFailure)
+        let response = try await fixture.runner.exportTranscript(
+            ExportTranscriptRequest(
+                sessionID: "session-actions",
+                exportType: .markdown,
+                targetPath: "/tmp/actions.md"
+            )
+        )
+
+        #expect(response.ok == false)
+        #expect(response.code?.rawValue == "path_conflict")
+        #expect(response.message == "Export target already exists.")
+        #expect(response.details == ["stage: export", "target_path: /tmp/actions.md"])
+        #expect(try fixture.recordedArguments() == [
+            "export_transcript",
+            "--session-id",
+            "session-actions",
+            "--export-type",
+            "markdown",
+            "--target-path",
+            "/tmp/actions.md",
+        ])
+    }
+
+    @Test
+    func processRunnerThrowsSafeBridgeErrorsWithoutStdoutOrStderrSnippets() async throws {
+        let nonJSONFixture = try TranscriptActionProcessRunnerFixture(script: .nonJSONExportFailure(exitCode: 3))
+
+        do {
+            _ = try await nonJSONFixture.runner.exportTranscript(
+                ExportTranscriptRequest(
+                    sessionID: "session-actions",
+                    exportType: .plainText
+                )
+            )
+            #expect(Bool(false), "Expected processFailed for non-JSON failure.")
+        } catch let error as TranscriptActionBridgeError {
+            #expect(error.command == .exportTranscript)
+            #expect(error.code.rawValue == "path_conflict")
+            #expect(error.safeMessage == "Transcript action command failed before returning a contract response.")
+            #expect(error.errorDescription?.contains("/Users/jerry") == false)
+            #expect(error.errorDescription?.contains("sk-actionrawvalue") == false)
+        }
+
+        let invalidJSONFixture = try TranscriptActionProcessRunnerFixture(script: .invalidJSONExportFailure)
+
+        do {
+            _ = try await invalidJSONFixture.runner.exportTranscript(
+                ExportTranscriptRequest(
+                    sessionID: "session-actions",
+                    exportType: .plainText
+                )
+            )
+            #expect(Bool(false), "Expected invalidJSON for invalid stdout.")
+        } catch let error as TranscriptActionBridgeError {
+            #expect(error.command == .exportTranscript)
+            #expect(error.code.rawValue == "path_conflict")
+            #expect(error.safeMessage == "Transcript action command returned an invalid response.")
+            #expect(error.errorDescription?.contains("not json") == false)
+            #expect(error.errorDescription?.contains("/Users/jerry") == false)
+        }
+    }
+
+    @Test
+    func processRunnerBridgeFailuresBecomeSafeViewModelErrors() async throws {
+        let fixture = try TranscriptActionProcessRunnerFixture(script: .nonJSONExportFailure(exitCode: 3))
+        let viewModel = TranscriptReviewActionsViewModel(
+            input: actionInput(),
+            commandClient: fixture.runner,
+            clipboard: TranscriptActionMemoryClipboard(),
+            destinationSelector: TranscriptActionStaticDestinationSelector()
+        )
+
+        await viewModel.copyTranscript()
+
+        #expect(viewModel.state.statusText == "Copy failed.")
+        #expect(viewModel.state.failureSummary?.contains("Transcript action command failed before returning a contract response.") == true)
+        #expect(viewModel.state.failureSummary?.contains("path_conflict") == true)
+        #expect(viewModel.state.failureSummary?.contains("/Users/jerry") == false)
+        #expect(viewModel.state.failureSummary?.contains("sk-actionrawvalue") == false)
+    }
+
+    @Test
+    func processRunnerDrivenViewModelUsesInjectedClipboardDestinationAndCommandDelete() async throws {
+        let fixture = try TranscriptActionProcessRunnerFixture()
+        let clipboard = TranscriptActionMemoryClipboard()
+        let selector = TranscriptActionStaticDestinationSelector(targetPath: "/tmp/actions.md")
+        let viewModel = TranscriptReviewActionsViewModel(
+            input: actionInput(),
+            commandClient: fixture.runner,
+            clipboard: clipboard,
+            destinationSelector: selector,
+            workspaceDir: "/tmp/workspace"
+        )
+
+        await viewModel.copyTranscript()
+
+        #expect(await clipboard.latestContentSnapshot() == "Process runner copy content.")
+        #expect(viewModel.state.statusText == "Copy complete.")
+
+        await viewModel.exportTranscript()
+
+        #expect(viewModel.state.statusText == "Export complete.")
+        #expect(viewModel.state.successSummary == "Exported markdown transcript to /tmp/actions.md.")
+
+        viewModel.requestDeleteConfirmation()
+        await viewModel.confirmDelete()
+
+        #expect(viewModel.state.statusText == "Delete complete.")
+        #expect(viewModel.state.successSummary == "Deleted session session-actions. Removed 2 items. Retained 1 external export.")
+        #expect(try fixture.recordedInvocationLines() == [
+            "export_transcript --session-id session-actions --export-type plain_text",
+            "export_transcript --session-id session-actions --export-type markdown --target-path /tmp/actions.md",
+            "delete_session --session-id session-actions --workspace-dir /tmp/workspace --confirm true",
+        ])
+    }
+
+    @Test
     func deleteCancelDoesNotCallDeleteCommand() async {
         let client = TranscriptActionFakeCommandClient()
         let viewModel = TranscriptReviewActionsViewModel(
@@ -555,6 +744,155 @@ struct TranscriptReviewActionsViewModelTests {
                 ]
             )
         )
+    }
+}
+
+private final class TranscriptActionProcessRunnerFixture {
+    enum Script {
+        case success
+        case structuredExportFailure
+        case nonJSONExportFailure(exitCode: Int32)
+        case invalidJSONExportFailure
+    }
+
+    let rootURL: URL
+    let workspaceURL: URL
+    let scriptURL: URL
+    let argsURL: URL
+    let invocationsURL: URL
+    let runner: TranscriptActionProcessRunner
+
+    init(script: Script = .success) throws {
+        rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meeting-assistant-transcript-action-tests-\(UUID().uuidString)", isDirectory: true)
+        workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        scriptURL = rootURL.appendingPathComponent("meeting-assistant-cli")
+        argsURL = rootURL.appendingPathComponent("args.txt")
+        invocationsURL = rootURL.appendingPathComponent("invocations.txt")
+
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+        try Self.script(script).write(to: scriptURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        runner = TranscriptActionProcessRunner(
+            executablePath: scriptURL.path,
+            environment: [
+                "MEETING_ASSISTANT_TEST_ARGS_FILE": argsURL.path,
+                "MEETING_ASSISTANT_TEST_INVOCATIONS_FILE": invocationsURL.path,
+                "MEETING_ASSISTANT_WORKSPACE": workspaceURL.path,
+            ]
+        )
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: rootURL)
+    }
+
+    func recordedArguments() throws -> [String] {
+        try String(contentsOf: argsURL, encoding: .utf8)
+            .split(separator: "\n")
+            .map(String.init)
+    }
+
+    func recordedInvocationLines() throws -> [String] {
+        try String(contentsOf: invocationsURL, encoding: .utf8)
+            .split(separator: "\n")
+            .map(String.init)
+    }
+
+    private static func script(_ script: Script) -> String {
+        let exportCase: String
+        switch script {
+        case .success:
+            exportCase = """
+                if [ "${6:-}" = "--target-path" ]; then
+                  cat <<JSON
+            {
+              "ok": true,
+              "request_id": "local-action-export",
+              "command": "export_transcript",
+              "session_id": "$3",
+              "export_type": "$5",
+              "export_package_id": "export-package-process",
+              "target_path": "$7",
+              "warnings": []
+            }
+            JSON
+                else
+                  cat <<JSON
+            {
+              "ok": true,
+              "request_id": "local-action-copy",
+              "command": "export_transcript",
+              "session_id": "$3",
+              "export_type": "$5",
+              "export_package_id": "export-package-process",
+              "content": "Process runner copy content.",
+              "warnings": []
+            }
+            JSON
+                fi
+            """
+        case .structuredExportFailure:
+            exportCase = """
+                cat <<JSON
+            {
+              "ok": false,
+              "request_id": "local-action-export-failure",
+              "command": "export_transcript",
+              "session_id": "$3",
+              "export_type": "$5",
+              "code": "path_conflict",
+              "message": "Export target already exists.",
+              "details": {
+                "stage": "export",
+                "target_path": "/tmp/actions.md"
+              },
+              "warnings": []
+            }
+            JSON
+                exit 3
+            """
+        case .nonJSONExportFailure(let exitCode):
+            exportCase = """
+                printf '%s\\n' "export crashed at /Users/jerry/Movies/MeetingAssistant/session with sk-actionrawvalue" >&2
+                exit \(exitCode)
+            """
+        case .invalidJSONExportFailure:
+            exportCase = """
+                printf '%s\\n' "not json from /Users/jerry/Movies/MeetingAssistant/session sk-actionrawvalue"
+                exit 3
+            """
+        }
+
+        return """
+        #!/bin/sh
+        : "${MEETING_ASSISTANT_WORKSPACE:?missing workspace}"
+        printf '%s\\n' "$@" > "$MEETING_ASSISTANT_TEST_ARGS_FILE"
+        printf '%s\\n' "$*" >> "$MEETING_ASSISTANT_TEST_INVOCATIONS_FILE"
+        case "$1" in
+          export_transcript)
+        \(exportCase)
+            ;;
+          delete_session)
+            cat <<JSON
+        {
+          "ok": true,
+          "request_id": "local-action-delete",
+          "command": "delete_session",
+          "session_id": "$3",
+          "deleted": true,
+          "deleted_items": ["artifacts/transcript.json", "logs/processing.log"],
+          "retained_external_exports": ["/tmp/actions.md"],
+          "warnings": []
+        }
+        JSON
+            ;;
+          *)
+            exit 2
+            ;;
+        esac
+        """
     }
 }
 

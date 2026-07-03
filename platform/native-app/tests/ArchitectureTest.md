@@ -66,4 +66,6 @@ VS-MA-18/VS-MA-19 deterministic transcript action consumer boundary:
 3. Export may use the frozen `export_transcript` contract with `session_id`, `export_type=markdown` and an injected deterministic `target_path`; cancel or no destination must not call the command.
 4. Delete may use the frozen `delete_session` contract with `session_id`, optional `workspace_dir` and `confirm=true`; cancel must not call the command.
 5. It may expose stable `ma.transcriptAction.*` accessibility identifiers for copy/export/delete buttons, status, success, failure, delete prompt, confirm and cancel.
-6. It must not call processing-cli/provider internals, real helpers, network APIs, external GPT/Qwen/API, the real pasteboard, real file pickers or delete files directly.
+6. `TranscriptActionProcessRunner` is the only action file allowed to use `Process`/`Pipe`; it may call only public frozen `export_transcript` and `delete_session` flags, must not add `--format`, and must parse stdout JSON as the only product contract source.
+7. Future real clipboard, destination picker or delete executor implementations must stay behind the injected action protocols and must not be constructed by the view model.
+8. It must not call processing-cli/provider internals, real helpers, network APIs, external GPT/Qwen/API, the real pasteboard, real file pickers or delete files directly.

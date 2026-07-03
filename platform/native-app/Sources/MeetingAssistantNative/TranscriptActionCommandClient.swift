@@ -338,6 +338,93 @@ public struct TranscriptActionCommandFailure: Error, Equatable, LocalizedError, 
     }
 }
 
+public enum TranscriptActionBridgeError: Error, Equatable, LocalizedError, Sendable {
+    case invalidJSON(command: TranscriptActionCommandName, code: TranscriptActionErrorCode)
+    case launchFailed(command: TranscriptActionCommandName)
+    case processFailed(command: TranscriptActionCommandName, exitCode: Int32, code: TranscriptActionErrorCode)
+    case unexpectedCommand(expected: TranscriptActionCommandName, actual: TranscriptActionCommandName)
+
+    public var command: TranscriptActionCommandName {
+        switch self {
+        case .invalidJSON(let command, _), .launchFailed(let command), .processFailed(let command, _, _):
+            return command
+        case .unexpectedCommand(let expected, _):
+            return expected
+        }
+    }
+
+    public var code: TranscriptActionErrorCode {
+        switch self {
+        case .invalidJSON(_, let code), .processFailed(_, _, let code):
+            return code
+        case .launchFailed, .unexpectedCommand:
+            return "internal_error"
+        }
+    }
+
+    public var safeMessage: String {
+        switch self {
+        case .invalidJSON:
+            return "Transcript action command returned an invalid response."
+        case .launchFailed:
+            return "Transcript action command could not be launched."
+        case .processFailed:
+            return "Transcript action command failed before returning a contract response."
+        case .unexpectedCommand:
+            return "Transcript action command returned an unexpected response."
+        }
+    }
+
+    public var errorDescription: String? {
+        if case .processFailed(_, let exitCode, _) = self {
+            return "\(safeMessage) Exit code: \(exitCode). Error code: \(code.rawValue)."
+        }
+        return "\(safeMessage) Error code: \(code.rawValue)."
+    }
+}
+
+public enum TranscriptActionResponseDecoder {
+    public static func decodeExport(_ data: Data) throws -> ExportTranscriptResponse {
+        do {
+            let response = try JSONDecoder().decode(ExportTranscriptResponse.self, from: data)
+            guard response.command == .exportTranscript else {
+                throw TranscriptActionBridgeError.unexpectedCommand(
+                    expected: .exportTranscript,
+                    actual: response.command
+                )
+            }
+            return response
+        } catch let error as TranscriptActionBridgeError {
+            throw error
+        } catch {
+            throw TranscriptActionBridgeError.invalidJSON(
+                command: .exportTranscript,
+                code: "internal_error"
+            )
+        }
+    }
+
+    public static func decodeDelete(_ data: Data) throws -> DeleteSessionResponse {
+        do {
+            let response = try JSONDecoder().decode(DeleteSessionResponse.self, from: data)
+            guard response.command == .deleteSession else {
+                throw TranscriptActionBridgeError.unexpectedCommand(
+                    expected: .deleteSession,
+                    actual: response.command
+                )
+            }
+            return response
+        } catch let error as TranscriptActionBridgeError {
+            throw error
+        } catch {
+            throw TranscriptActionBridgeError.invalidJSON(
+                command: .deleteSession,
+                code: "internal_error"
+            )
+        }
+    }
+}
+
 public struct TranscriptExportDestinationRequest: Equatable, Sendable {
     public let sessionID: String
     public let exportType: TranscriptExportType
@@ -359,4 +446,156 @@ public protocol TranscriptClipboardWriting: Sendable {
 
 public protocol TranscriptExportDestinationSelecting: Sendable {
     func destination(for request: TranscriptExportDestinationRequest) async -> String?
+}
+
+public struct TranscriptActionProcessRunner: TranscriptActionCommandClient, Sendable {
+    public let executablePath: String
+    public let environment: [String: String]
+
+    public init(
+        executablePath: String? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) {
+        self.executablePath = executablePath
+            ?? environment["MEETING_ASSISTANT_CLI_PATH"]
+            ?? "meeting-assistant-cli"
+        self.environment = environment
+    }
+
+    public func exportTranscript(
+        _ request: ExportTranscriptRequest
+    ) async throws -> ExportTranscriptResponse {
+        let executablePath = executablePath
+        let environment = environment
+        return try await Task.detached(priority: .userInitiated) {
+            let arguments = Self.exportArguments(for: request)
+            let result = try Self.runProcess(
+                command: .exportTranscript,
+                executablePath: executablePath,
+                arguments: arguments,
+                environment: environment
+            )
+            if result.stdout.isEmpty && result.exitCode != 0 {
+                throw TranscriptActionBridgeError.processFailed(
+                    command: .exportTranscript,
+                    exitCode: result.exitCode,
+                    code: Self.errorCode(forExitCode: result.exitCode)
+                )
+            }
+            do {
+                return try TranscriptActionResponseDecoder.decodeExport(result.stdout)
+            } catch TranscriptActionBridgeError.invalidJSON(_, _) {
+                throw TranscriptActionBridgeError.invalidJSON(
+                    command: .exportTranscript,
+                    code: Self.errorCode(forExitCode: result.exitCode)
+                )
+            }
+        }.value
+    }
+
+    public func deleteSession(
+        _ request: DeleteSessionRequest
+    ) async throws -> DeleteSessionResponse {
+        let executablePath = executablePath
+        let environment = environment
+        return try await Task.detached(priority: .userInitiated) {
+            let arguments = Self.deleteArguments(for: request)
+            let result = try Self.runProcess(
+                command: .deleteSession,
+                executablePath: executablePath,
+                arguments: arguments,
+                environment: environment
+            )
+            if result.stdout.isEmpty && result.exitCode != 0 {
+                throw TranscriptActionBridgeError.processFailed(
+                    command: .deleteSession,
+                    exitCode: result.exitCode,
+                    code: Self.errorCode(forExitCode: result.exitCode)
+                )
+            }
+            do {
+                return try TranscriptActionResponseDecoder.decodeDelete(result.stdout)
+            } catch TranscriptActionBridgeError.invalidJSON(_, _) {
+                throw TranscriptActionBridgeError.invalidJSON(
+                    command: .deleteSession,
+                    code: Self.errorCode(forExitCode: result.exitCode)
+                )
+            }
+        }.value
+    }
+
+    private static func exportArguments(for request: ExportTranscriptRequest) -> [String] {
+        var arguments = [
+            TranscriptActionCommandName.exportTranscript.rawValue,
+            "--session-id",
+            request.sessionID,
+            "--export-type",
+            request.exportType.rawValue,
+        ]
+        if let targetPath = request.targetPath {
+            arguments.append(contentsOf: ["--target-path", targetPath])
+        }
+        return arguments
+    }
+
+    private static func deleteArguments(for request: DeleteSessionRequest) -> [String] {
+        var arguments = [
+            TranscriptActionCommandName.deleteSession.rawValue,
+            "--session-id",
+            request.sessionID,
+        ]
+        if let workspaceDir = request.workspaceDir {
+            arguments.append(contentsOf: ["--workspace-dir", workspaceDir])
+        }
+        arguments.append(contentsOf: ["--confirm", request.confirm ? "true" : "false"])
+        return arguments
+    }
+
+    private static func runProcess(
+        command: TranscriptActionCommandName,
+        executablePath: String,
+        arguments: [String],
+        environment: [String: String]
+    ) throws -> (stdout: Data, stderr: Data, exitCode: Int32) {
+        let process = Process()
+        let stdout = Pipe()
+        let stderr = Pipe()
+
+        if executablePath.contains("/") {
+            process.executableURL = URL(fileURLWithPath: executablePath)
+            process.arguments = arguments
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = [executablePath] + arguments
+        }
+        process.environment = environment
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        do {
+            try process.run()
+        } catch {
+            throw TranscriptActionBridgeError.launchFailed(command: command)
+        }
+        process.waitUntilExit()
+
+        return (
+            stdout.fileHandleForReading.readDataToEndOfFile(),
+            stderr.fileHandleForReading.readDataToEndOfFile(),
+            process.terminationStatus
+        )
+    }
+
+    private static func errorCode(forExitCode exitCode: Int32) -> TranscriptActionErrorCode {
+        switch exitCode {
+        case 2:
+            return "invalid_input"
+        case 3:
+            return "path_conflict"
+        case 4:
+            return "permission_denied"
+        default:
+            return "internal_error"
+        }
+    }
 }
