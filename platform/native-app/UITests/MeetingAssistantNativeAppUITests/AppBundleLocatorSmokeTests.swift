@@ -287,7 +287,11 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
     func testProcessingSuccessAndTranscriptOnlyDegradationFromLaunchedAppBundle() {
         let successApp = launchApp(fixture: "processing-success")
 
-        tapProcessingButton("ma.processing.startButton", in: successApp)
+        tapProcessingButton(
+            "ma.processing.startButton",
+            in: successApp,
+            expectingStatus: "Processing complete."
+        )
 
         assertElement("ma.processing.status", in: successApp, contains: "Processing complete.")
         assertElement(
@@ -309,7 +313,11 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
 
         let degradedApp = launchApp(fixture: "processing-transcript-only")
 
-        tapProcessingButton("ma.processing.startButton", in: degradedApp)
+        tapProcessingButton(
+            "ma.processing.startButton",
+            in: degradedApp,
+            expectingStatus: "Processing completed with transcript-only speaker labels."
+        )
 
         assertElement(
             "ma.processing.status",
@@ -388,7 +396,11 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         let failureFixture = try AppProcessingProcessFixture(mode: "transcript-failure")
         let failureApp = launchApp(fixture: "processing-failure", processingFixture: failureFixture)
 
-        tapProcessingButton("ma.processing.startButton", in: failureApp)
+        tapProcessingButton(
+            "ma.processing.startButton",
+            in: failureApp,
+            expectingStatus: "Processing failed."
+        )
 
         assertElement("ma.processing.status", in: failureApp, contains: "Processing failed.")
         assertElement("ma.processing.error", in: failureApp, contains: "Transcript adapter failed from process fixture.")
@@ -409,7 +421,11 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         let failureFixture = try AppProcessingProcessFixture(mode: "non-json-stderr")
         let app = launchApp(fixture: "processing-failure", processingFixture: failureFixture)
 
-        tapProcessingButton("ma.processing.startButton", in: app)
+        tapProcessingButton(
+            "ma.processing.startButton",
+            in: app,
+            expectingStatus: "Processing failed."
+        )
 
         assertElement("ma.processing.status", in: app, contains: "Processing failed.")
         assertElement(
@@ -435,6 +451,68 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             try failureFixture.invocationLines(),
             failedRetryProcessingInvocationLines(sessionID: "session-app-ui-processing")
         )
+    }
+
+    func testProcessingProcessRunnerWorkspaceArtifactsLoadThroughTranscriptReview() throws {
+        let processingFixture = try AppProcessingProcessFixture(mode: "workspace-success")
+        let processingApp = launchApp(fixture: "processing-success", processingFixture: processingFixture)
+
+        tapProcessingButton(
+            "ma.processing.startButton",
+            in: processingApp,
+            expectingStatus: "Processing complete."
+        )
+
+        assertElement("ma.processing.status", in: processingApp, contains: "Processing complete.")
+        assertElement(
+            "ma.processing.transcriptStatus",
+            in: processingApp,
+            contains: "Transcript transcript-process-fixture generated with 2 segments."
+        )
+        assertElement(
+            "ma.processing.speakerLabelStatus",
+            in: processingApp,
+            contains: "Speaker labels artifact artifact-process-speakers is available."
+        )
+        XCTAssertEqual(
+            try processingFixture.invocationLines(),
+            successfulProcessingInvocationLines(sessionID: "session-app-ui-processing")
+        )
+
+        let session = try processingFixture.sessionMetadata(sessionID: "session-app-ui-processing")
+        XCTAssertEqual(session["id"] as? String, "session-app-ui-processing")
+        XCTAssertEqual(session["source_type"] as? String, "native_recording")
+        XCTAssertEqual(session["status"] as? String, "transcribed")
+        let artifacts = try XCTUnwrap(session["artifacts"] as? [[String: Any]])
+        XCTAssertEqual(artifacts.count, 2)
+        XCTAssertEqual(artifacts.compactMap { $0["artifact_type"] as? String }, ["transcript_text", "speaker_labels"])
+        XCTAssertEqual(artifacts.compactMap { $0["capture_status"] as? String }, ["available", "available"])
+        XCTAssertEqual(artifacts.compactMap { $0["checksum"] as? String }.count, 2)
+
+        let reviewApp = launchApp(
+            workspaceURL: processingFixture.workspaceURL,
+            sessionID: "session-app-ui-processing"
+        )
+
+        assertElement("ma.transcript.heading", in: reviewApp, contains: "Native process bridge workspace fixture")
+        assertElement("ma.transcript.summary", in: reviewApp, contains: "Transcript has 1 segment for review.")
+        assertElement("ma.transcript.timestamp.seg-process-1", in: reviewApp, contains: "00:01-00:03")
+        assertElement(
+            "ma.transcript.text.seg-process-1",
+            in: reviewApp,
+            contains: "Native process bridge wrote transcript artifact."
+        )
+        assertElement(
+            "ma.transcript.speakerLabel.seg-process-1",
+            in: reviewApp,
+            contains: "Anonymous speaker SPEAKER_01"
+        )
+        assertElement(
+            "ma.transcript.speakerLabel.seg-process-1",
+            in: reviewApp,
+            contains: "not a verified identity"
+        )
+        assertDoesNotExist("ma.transcript.degradation", in: reviewApp)
     }
 
     private func launchApp(
@@ -583,6 +661,22 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         )
     }
 
+    private func waitForElement(
+        _ identifier: String,
+        in app: XCUIApplication,
+        contains expectedText: String,
+        timeout: TimeInterval
+    ) -> Bool {
+        let element = element(identifier, in: app)
+        let predicate = NSPredicate(
+            format: "label CONTAINS %@ OR value CONTAINS %@",
+            expectedText,
+            expectedText
+        )
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
     private func assertElement(
         _ identifier: String,
         in app: XCUIApplication,
@@ -681,6 +775,23 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         bringAppToForeground(app, beforeTapping: identifier, file: file, line: line)
         let control = hittableButton(identifier, in: app, file: file, line: line)
         clickButton(control, in: app, file: file, line: line)
+    }
+
+    private func tapProcessingButton(
+        _ identifier: String,
+        in app: XCUIApplication,
+        expectingStatus expectedStatus: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        for attempt in 0..<2 {
+            tapProcessingButton(identifier, in: app, file: file, line: line)
+            let timeout: TimeInterval = attempt == 0 ? 3 : 7
+            if waitForElement("ma.processing.status", in: app, contains: expectedStatus, timeout: timeout) {
+                return
+            }
+        }
+        assertElement("ma.processing.status", in: app, contains: expectedStatus, file: file, line: line)
     }
 
     private func hittableButton(
@@ -1066,5 +1177,15 @@ private final class AppProcessingProcessFixture {
         }
         let content = try String(contentsOf: invocationsURL, encoding: .utf8)
         return content.split(whereSeparator: \.isNewline).map(String.init)
+    }
+
+    func sessionMetadata(sessionID: String) throws -> [String: Any] {
+        let sessionURL = workspaceURL
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+            .appendingPathComponent("session.json", isDirectory: false)
+        let data = try Data(contentsOf: sessionURL)
+        let payload = try JSONSerialization.jsonObject(with: data)
+        return try XCTUnwrap(payload as? [String: Any])
     }
 }
