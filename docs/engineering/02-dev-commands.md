@@ -93,6 +93,8 @@ full-stack E2E 可在 manifest 中声明可选 `pre_start_command`，用于准�
 
 非业务 skeleton 命令只验证结构、边界、SBOM 占位和清单接线，不证明任何产品行为已经实现。后续在 skeleton 中实现真实录制、真实媒体处理、真实转写、真实 speaker labeling、外部模型调用或依赖下载前，必须先对齐 product-spec、验证矩阵、组件测试和安全/供应链规则。
 
+`platform/native-app/scripts/test.sh` 默认运行快速、确定性的 native-app 组件测试入口：component metadata 检查、Swift Testing 和 XCTest-hosted SwiftUI smoke。真实 `.app` 启动的 app-bundle XCUITest 因依赖 Xcode UI automation 和窗口前台状态，默认不进入本地快速 `test` gate；需要完整 native UI 证据时运行 `./platform/native-app/scripts/test-app-bundle.sh`，或设置 `MA_NATIVE_APP_RUN_XCUITEST=1 ./platform/native-app/scripts/test.sh`。`test-app-bundle.sh` 默认使用 `platform/native-app/build/DerivedData/AppBundleUITests` 下的忽略目录复用 Xcode DerivedData；如需一次性隔离构建，可用 `MA_NATIVE_APP_DERIVED_DATA_PATH` 指向临时目录。native UI、release-scope 或阶段收口证据不得只引用默认 skip 输出，必须明确记录 app-bundle XCUITest 命令。
+
 未来 dependency-check 命令必须只检查允许来源、人工安装状态、模型/runtime 路径、workspace 可写性和 macOS 权限状态，不得自动下载模型、二进制或驱动。
 
 ## 本机 Whisper Runtime Smoke 环境

@@ -18,6 +18,7 @@ required = [
     "component.json",
     "MeetingAssistantNative.xcodeproj/project.pbxproj",
     "MeetingAssistantNative.xcodeproj/xcshareddata/xcschemes/MeetingAssistantNative.xcscheme",
+    "scripts/test-app-bundle.sh",
     "App/MeetingAssistantNativeApp.swift",
     "tests/ArchitectureTest.md",
     "Sources/MeetingAssistantNative/DependencyCheckContract.swift",

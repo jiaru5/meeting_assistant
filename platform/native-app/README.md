@@ -19,6 +19,7 @@
 5. Swift Testing 覆盖 readiness 未通过不能 start、start/stop 成功、start/stop 失败、重复触发和 locator 常量。
 6. XCTest-hosted SwiftUI smoke 覆盖权限/依赖缺失状态、readiness blocked、fake recording start、recording、stop saved summary、start/stop failure，并通过生产 SwiftUI source contract 断言 `ma.permissionDependency.*` / `ma.recording.*` locator 和关键可见文案仍由视图定义使用。
 7. 持久 `MeetingAssistantNative.xcodeproj` 提供最小 macOS app bundle target 和 app-bundle XCUITest target；`AppBundleLocatorSmokeTests` 使用 `XCUIApplication()` 启动 `.app`，在有内置屏幕的本机通过 `MA_NATIVE_APP_TEST_DISPLAY=built-in` 将测试窗口定位到内置屏并断言窗口中心落在内置屏 frame 内，通过 deterministic launch fixture 覆盖默认 blocked readiness、ready fake start/stop、start failure error locator，且不调用真实 helper/CLI/capture/runtime。
+8. `scripts/test.sh` 默认运行快速组件测试，不启动真实 `.app` XCUITest；需要完整 app-bundle UI smoke 时运行 `scripts/test-app-bundle.sh`，或设置 `MA_NATIVE_APP_RUN_XCUITEST=1 scripts/test.sh`。`scripts/test-app-bundle.sh` 默认复用忽略目录 `build/DerivedData/AppBundleUITests` 以减少重复 Xcode 构建时间，必要时可用 `MA_NATIVE_APP_DERIVED_DATA_PATH` 指向隔离目录。
 
 当前已实现 VS-MA-14/VS-MA-15 controlled native capture artifact registration 部分证据：
 

@@ -29,6 +29,10 @@
 1. `OD-MA-008` 已关闭：团队分发、团队支持、团队账号、共享会议库和集中审计不属于当前产品范围；多人使用时各自在本地 Mac 上独立运行。因此本矩阵不新增团队分发相关 `PV-MA-*` 行；未来如重新提出团队协作、共享、分发或集中支持，必须先新增或调整对应 `CAP/AC/PV`。
 2. `OD-MA-009` 仍为 `watch`：当前只验证用户主动复制或导出 transcript 后自行整理会议纪要，覆盖入口仍是 `PV-MA-011` 的 no-auto-upload/no-external-API 边界。应用自动调用 GPT、外部 API 或本地 Qwen 进入范围前，必须先走 spec-change，新增 API、安全、数据和验证矩阵覆盖。
 
+## Native app XCUITest 执行策略
+
+`platform/native-app/scripts/test.sh` 默认是快速组件测试入口，覆盖 metadata 检查、Swift Testing 和 XCTest-hosted SwiftUI smoke。真实 `.app` 启动、窗口定位和 `XCUIApplication()` locator 证据由 `platform/native-app/scripts/test-app-bundle.sh` 提供；也可用 `MA_NATIVE_APP_RUN_XCUITEST=1 ./platform/native-app/scripts/test.sh` 在同一次组件测试中启用。下方矩阵行如果引用 `AppBundleLocatorSmokeTests.swift` 或 app-bundle XCUITest，交付证据必须明确记录 `test-app-bundle.sh` 或上述 env-enabled 命令；默认 `test.sh` 的 skip 输出不能单独作为 app-bundle 证据。
+
 ## Starter 基线矩阵
 
 | ID | 场景或规则 | 主事实源 | 验证类型 | 目标测试入口 | 当前证据 | 状态 |

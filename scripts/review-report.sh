@@ -137,6 +137,15 @@ recommended_validation() {
     echo '- `./scripts/security-check.sh`'
     echo '- `./scripts/supply-chain-check.sh current`'
   fi
+
+  if has_match "platform/native-app/App/*" \
+    || has_match "platform/native-app/Sources/*" \
+    || has_match "platform/native-app/tests/*" \
+    || has_match "platform/native-app/UITests/*" \
+    || has_match "platform/native-app/scripts/*" \
+    || has_match "platform/native-app/MeetingAssistantNative.xcodeproj/*"; then
+    echo '- `./platform/native-app/scripts/test-app-bundle.sh`'
+  fi
 }
 
 generate_report() {

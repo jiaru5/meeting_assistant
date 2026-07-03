@@ -72,6 +72,7 @@ agent 完成非平凡改动后，必须生成可复制到 PR 或交付说明中�
 5. 验证矩阵不能只写“未来测试”“后续补充”或“待接入”而没有目标文件/命令、阻塞缺口和关闭条件。
 6. 如果实现依赖真实 runtime、原生 capture 或本机权限状态，必须同时保留 fake/fixture 契约测试；真实环境 smoke 只能补充，不能替代确定性测试。
 7. 如果发现测试入口不足，review 结论应要求先关闭 testability gate，而不是扩大业务代码实现。
+8. native-app 默认 `test` gate 可跳过真实 app-bundle XCUITest 以保持本地快速反馈；审查 native UI、release-scope 或阶段收口证据时，必须单独记录 `./platform/native-app/scripts/test-app-bundle.sh` 或 `MA_NATIVE_APP_RUN_XCUITEST=1 ./platform/native-app/scripts/test.sh` 的结果。只有默认 skip 输出不能证明 `.app` 启动和 `XCUIApplication()` locator。
 
 ## 本地和 CI 必过项
 

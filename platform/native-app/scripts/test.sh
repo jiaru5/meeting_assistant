@@ -101,6 +101,7 @@ required_paths = (
     Path("tests/MeetingAssistantNativeTests/ProcessingStateViewModelTests.swift"),
     Path("UITests/MeetingAssistantNativeUITests/NativeControlPlaneSmokeTests.swift"),
     Path("UITests/MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests.swift"),
+    Path("scripts/test-app-bundle.sh"),
 )
 missing_paths = [str(path) for path in required_paths if not path.is_file()]
 if missing_paths:
@@ -141,10 +142,17 @@ SWIFT
 
 (cd "$tmp_dir" && swift test)
 
-xcodebuild test \
-  -project "$component_dir/MeetingAssistantNative.xcodeproj" \
-  -scheme "MeetingAssistantNative" \
-  -destination 'platform=macOS' \
-  -derivedDataPath "$tmp_dir/DerivedData"
+case "${MA_NATIVE_APP_RUN_XCUITEST:-0}" in
+  1|true|TRUE|yes|YES)
+    "$component_dir/scripts/test-app-bundle.sh"
+    ;;
+  0|false|FALSE|no|NO)
+    echo "native-app app-bundle XCUITest skipped. Run MA_NATIVE_APP_RUN_XCUITEST=1 ./platform/native-app/scripts/test.sh or ./platform/native-app/scripts/test-app-bundle.sh for full app-bundle UI smoke."
+    ;;
+  *)
+    echo "native-app test failed: MA_NATIVE_APP_RUN_XCUITEST must be 0/1, true/false, or yes/no." >&2
+    exit 2
+    ;;
+esac
 
 echo "native-app tests passed."
