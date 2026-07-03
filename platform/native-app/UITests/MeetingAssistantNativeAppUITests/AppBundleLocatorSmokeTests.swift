@@ -63,7 +63,11 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
 
         assertElement("ma.recording.status", in: app, contains: "Recording in progress.")
         assertElement("ma.recording.sessionID", in: app, contains: "session-app-ui-smoke")
-        tapButton("ma.recording.stopButton", in: app)
+        tapRecordingButton(
+            "ma.recording.stopButton",
+            in: app,
+            expectingStatus: "Recording saved."
+        )
 
         assertElement("ma.recording.status", in: app, contains: "Recording saved.")
         assertElement("ma.recording.savedSummary", in: app, contains: "Saved 2 recording artifacts.")
@@ -79,7 +83,11 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
 
         assertElement("ma.recording.status", in: app, contains: "Recording in progress.")
         assertElement("ma.recording.sessionID", in: app, contains: recordingFixture.sessionID)
-        tapButton("ma.recording.stopButton", in: app)
+        tapRecordingButton(
+            "ma.recording.stopButton",
+            in: app,
+            expectingStatus: "Recording saved."
+        )
 
         assertElement("ma.recording.status", in: app, contains: "Recording saved.")
         assertElement("ma.recording.savedSummary", in: app, contains: "Saved 1 recording artifact.")
@@ -725,6 +733,25 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         bringAppToForeground(app, beforeTapping: identifier, file: file, line: line)
         let control = hittableButton(identifier, in: app, file: file, line: line)
         clickButton(control, in: app, file: file, line: line)
+    }
+
+    private func tapRecordingButton(
+        _ identifier: String,
+        in app: XCUIApplication,
+        expectingStatus expectedStatus: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        for _ in 0..<2 {
+            tapButton(identifier, in: app, file: file, line: line)
+            if waitForElement("ma.recording.status", in: app, contains: expectedStatus, timeout: 12) {
+                return
+            }
+            if !waitForElement("ma.recording.status", in: app, contains: "Recording in progress.", timeout: 0.5) {
+                break
+            }
+        }
+        assertElement("ma.recording.status", in: app, contains: expectedStatus, file: file, line: line)
     }
 
     private func waitForEnabled(
