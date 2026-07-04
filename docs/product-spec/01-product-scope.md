@@ -4,15 +4,15 @@
 
 ## 产品一句话
 
-`meeting_assistant` 是一个本地 macOS 会议助手，面向个人自用的第一阶段，优先通过原生 macOS 录制能力记录线上会议或现场讨论，并产出可回查的视频、系统音频、麦克风音频、混合音频、转写文本和 best-effort 匿名说话人标签；多人使用时各自在本地 Mac 上独立运行，不提供团队分发或团队支持。
+`meeting_assistant` 是一个本地 macOS 会议助手，面向个人自用的第一阶段，优先通过原生 macOS 录制能力记录线上会议或现场讨论，通过设计化原生 Swift/SwiftUI app shell 承载预检、录制、处理、回查、导出和删除，并产出可回查的视频、系统音频、麦克风音频、混合音频、转写文本和 best-effort 匿名说话人标签；多人使用时各自在本地 Mac 上独立运行，不提供团队分发或团队支持。
 
 ## 阶段边界
 
 | 阶段 | 范围 | 说明 |
 |---|---|---|
-| Phase 1 MVP | 个人自用、本地 macOS、Apple Silicon、原生 macOS 录制优先、文件化产物流水线、音频转写、best-effort 匿名 speaker labels | MVP 实现目标 |
+| Phase 1 MVP | 个人自用、本地 macOS、Apple Silicon、原生 macOS 录制优先、设计化原生 app shell、文件化产物流水线、音频转写、best-effort 匿名 speaker labels | MVP 实现目标 |
 | 本地各自运行 | 多个使用者各自在自己的 Mac 上独立运行 | 不提供团队分发、共享空间、团队账号、集中审计或团队支持 |
-| 未来原生产品化 | 更完整桌面 UI、签名、公证、自动更新、自动纪要 | 不属于 MVP 必需能力 |
+| 未来原生产品化 | 签名、公证、自动更新、自动纪要和商业化分发体验 | 不属于 MVP 必需能力 |
 
 ## 目标
 
@@ -24,6 +24,7 @@
 | GOAL-MA-004 | 提供 best-effort 匿名 speaker labels | MVP 以 `SPEAKER_01` 这类匿名标签区分发言段落，不承诺真实姓名或完全准确率 | `AC-MA-008`, `PV-MA-008` |
 | GOAL-MA-005 | 保持模块解耦和可替换流水线 | 录制、媒体处理、转写、speaker labeling 和导出通过命令、文件和元数据衔接 | `AC-MA-004`, `AC-MA-005`, `AC-MA-009`, `AC-MA-011`, `PV-MA-004`, `PV-MA-005`, `PV-MA-009`, `PV-MA-011` |
 | GOAL-MA-006 | 让用户控制本地会议数据生命周期 | 用户能删除本地会话目录内的媒体、transcript、speaker labels、导出包和日志；workspace 外导出文件不由应用自动删除 | `AC-MA-012`, `PV-MA-012` |
+| GOAL-MA-007 | 用设计化原生 UI 承载完整本地工作流 | 用户不需要依赖原始调试 UI，也能在一个状态清晰、层级稳定、可访问的原生 shell 中触发预检、录制、处理、回查、导出和删除 | `AC-MA-013`, `PV-MA-013` |
 
 ## MVP 产品能力矩阵
 
@@ -43,6 +44,7 @@
 | CAP-MA-010 | transcript 回查状态 | 用户能本地回查会话标题、时间戳文本和匿名 speaker labels | Transcript review/export surface | `04-user-journeys-and-ui.md`, `12-ui-ux-design.md` | `AC-MA-010` | `PV-MA-010` |
 | CAP-MA-011 | transcript 复制或导出，且不自动上传外部工具 | 用户能主动把 transcript 带出本系统；应用不自动调用 GPT 或云端模型 | `export_transcript`, Transcript review/export surface | `06-api-contracts.md`, `07-data-and-events.md`, `13-security-and-compliance.md` | `AC-MA-011` | `PV-MA-011` |
 | CAP-MA-012 | 删除本地会议会话 | 用户能删除本地 workspace 内某个会话目录及其应用管理的产物 | `delete_session` | `03-permissions-and-identity.md`, `06-api-contracts.md`, `07-data-and-events.md`, `13-security-and-compliance.md` | `AC-MA-012` | `PV-MA-012` |
+| CAP-MA-013 | 设计化原生 app shell | 用户在接近效果图目标的原生界面中完成预检、录制、保存、处理、回查、导出和删除，而不是依赖仅有功能的调试控件 | Swift/SwiftUI app | `04-user-journeys-and-ui.md`, `12-ui-ux-design.md` | `AC-MA-013` | `PV-MA-013` |
 
 ## 非目标
 

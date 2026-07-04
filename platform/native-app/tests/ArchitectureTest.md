@@ -71,3 +71,12 @@ VS-MA-18/VS-MA-19 deterministic transcript action consumer boundary:
 8. The app bundle must default to `TranscriptActionFakeCommandClient`; only the Debug/XCTest-only test hook `MA_NATIVE_TRANSCRIPT_ACTION_CLIENT=process` may inject `TranscriptActionProcessRunner` with `MEETING_ASSISTANT_CLI_PATH` and `MEETING_ASSISTANT_WORKSPACE`; Release builds must ignore this env hook and fall back to fake.
 9. The app-bundle process-runner smoke may use only the native-owned `test-fixtures/transcript-action-command-fixture.sh`, which emits frozen action stdout JSON for controlled copy/export/delete success and safe bridge failure cases.
 10. It must not call processing-cli/provider internals, real helpers, network APIs, external GPT/Qwen/API, the real pasteboard, real file pickers or delete files directly.
+
+VS-MA-19A designed native shell boundary:
+
+1. This component may implement a designed native shell around the existing permission/dependency, recording, artifact, processing, transcript review and transcript action surfaces.
+2. `DesignedNativeShellViewModel` may project navigation state, status summaries, required artifact rows and processing step labels from existing view model states; it must not add command fields, artifact types, event schema, error codes, exit codes or business states.
+3. `DesignedNativeShellView` may expose stable `ma.shell.*` and `ma.sessionArtifact.*` accessibility identifiers, a navigation model and visual state hierarchy while preserving existing `ma.permissionDependency.*`, `ma.recording.*`, `ma.processing.*`, `ma.transcript.*` and `ma.transcriptAction.*` locators.
+4. The shell must keep primary controls wired to the existing command/helper/adapter clients: `check_dependencies`, `start_native_recording`, `stop_recording`, processing command bridge, `export_transcript` and `delete_session`; it must not create UI-only mock success.
+5. Debug/XCTest fixtures and process-runner hooks remain isolated behind existing `MA_NATIVE_*` test hooks; Release defaults must continue to use the safe default fake clients unless later product/spec changes approve otherwise.
+6. The shell must not implement uncontrolled capture, processing provider internals, transcription, speaker labeling, network APIs, automatic downloads, real pasteboard, real file pickers or direct delete behavior.

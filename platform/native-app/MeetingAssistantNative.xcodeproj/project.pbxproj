@@ -36,6 +36,9 @@
 			C00000000000000000000027 /* NativeRecordingCommandClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000029 /* NativeRecordingCommandClient.swift */; };
 			C00000000000000000000028 /* NativeCapturePermissionChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000030 /* NativeCapturePermissionChecker.swift */; };
 			C00000000000000000000029 /* AppleScreenCaptureKitNativeCaptureAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000031 /* AppleScreenCaptureKitNativeCaptureAdapter.swift */; };
+			C00000000000000000000030 /* DesignedNativeShellViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000032 /* DesignedNativeShellViewModel.swift */; };
+			C00000000000000000000031 /* DesignedNativeShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000033 /* DesignedNativeShellView.swift */; };
+			C00000000000000000000032 /* DesignedNativeShellAppBundleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000034 /* DesignedNativeShellAppBundleTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -80,6 +83,9 @@
 			B00000000000000000000029 /* NativeRecordingCommandClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRecordingCommandClient.swift; sourceTree = "<group>"; };
 			B00000000000000000000030 /* NativeCapturePermissionChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCapturePermissionChecker.swift; sourceTree = "<group>"; };
 			B00000000000000000000031 /* AppleScreenCaptureKitNativeCaptureAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleScreenCaptureKitNativeCaptureAdapter.swift; sourceTree = "<group>"; };
+			B00000000000000000000032 /* DesignedNativeShellViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignedNativeShellViewModel.swift; sourceTree = "<group>"; };
+			B00000000000000000000033 /* DesignedNativeShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignedNativeShellView.swift; sourceTree = "<group>"; };
+			B00000000000000000000034 /* DesignedNativeShellAppBundleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignedNativeShellAppBundleTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -157,6 +163,8 @@
 				B00000000000000000000023 /* ProcessingCommandFakeClient.swift */,
 				B00000000000000000000024 /* ProcessingStateViewModel.swift */,
 				B00000000000000000000025 /* ProcessingStateView.swift */,
+				B00000000000000000000032 /* DesignedNativeShellViewModel.swift */,
+				B00000000000000000000033 /* DesignedNativeShellView.swift */,
 			);
 			path = Sources/MeetingAssistantNative;
 			sourceTree = "<group>";
@@ -173,6 +181,7 @@
 			isa = PBXGroup;
 			children = (
 				B00000000000000000000010 /* AppBundleLocatorSmokeTests.swift */,
+				B00000000000000000000034 /* DesignedNativeShellAppBundleTests.swift */,
 			);
 			path = MeetingAssistantNativeAppUITests;
 			sourceTree = "<group>";
@@ -303,6 +312,8 @@
 				C00000000000000000000021 /* ProcessingCommandFakeClient.swift in Sources */,
 				C00000000000000000000022 /* ProcessingStateViewModel.swift in Sources */,
 				C00000000000000000000023 /* ProcessingStateView.swift in Sources */,
+				C00000000000000000000030 /* DesignedNativeShellViewModel.swift in Sources */,
+				C00000000000000000000031 /* DesignedNativeShellView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -311,6 +322,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C00000000000000000000010 /* AppBundleLocatorSmokeTests.swift in Sources */,
+				C00000000000000000000032 /* DesignedNativeShellAppBundleTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -14,6 +14,7 @@ grep -q "VS-MA-16 native processing state consumer boundary" tests/ArchitectureT
 grep -q "VS-MA-17 read-only transcript review boundary" tests/ArchitectureTest.md
 grep -q "read-only workspace transcript loading boundary" tests/ArchitectureTest.md
 grep -q "VS-MA-18/VS-MA-19 deterministic transcript action consumer boundary" tests/ArchitectureTest.md
+grep -q "VS-MA-19A designed native shell boundary" tests/ArchitectureTest.md
 grep -q "MA_NATIVE_TRANSCRIPT_ACTION_CLIENT=process" tests/ArchitectureTest.md
 grep -q "check_dependencies" tests/ArchitectureTest.md
 grep -q "session.json" tests/ArchitectureTest.md
@@ -25,6 +26,8 @@ grep -q "speaker_labels.json" tests/ArchitectureTest.md
 grep -q "ma.recording.artifact" tests/ArchitectureTest.md
 grep -q "ma.processing" tests/ArchitectureTest.md
 grep -q "ma.transcriptAction" tests/ArchitectureTest.md
+grep -q "ma.shell" tests/ArchitectureTest.md
+grep -q "ma.sessionArtifact" tests/ArchitectureTest.md
 test -f MeetingAssistantNative.xcodeproj/project.pbxproj
 test -f MeetingAssistantNative.xcodeproj/xcshareddata/xcschemes/MeetingAssistantNative.xcscheme
 test -f App/MeetingAssistantNativeApp.swift
@@ -54,13 +57,17 @@ test -f Sources/MeetingAssistantNative/ProcessingCommandProcessRunner.swift
 test -f Sources/MeetingAssistantNative/ProcessingCommandFakeClient.swift
 test -f Sources/MeetingAssistantNative/ProcessingStateViewModel.swift
 test -f Sources/MeetingAssistantNative/ProcessingStateView.swift
+test -f Sources/MeetingAssistantNative/DesignedNativeShellViewModel.swift
+test -f Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 test -x test-fixtures/processing-command-fixture.sh
 test -x test-fixtures/transcript-action-command-fixture.sh
 test -f tests/MeetingAssistantNativeTests/NativeRecordingCommandClientTests.swift
 test -f tests/MeetingAssistantNativeTests/TranscriptReviewActionsViewModelTests.swift
 test -f tests/MeetingAssistantNativeTests/ProcessingStateViewModelTests.swift
+test -f tests/MeetingAssistantNativeTests/DesignedNativeShellViewModelTests.swift
 test -f UITests/MeetingAssistantNativeUITests/NativeControlPlaneSmokeTests.swift
 test -f UITests/MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests.swift
+test -f UITests/MeetingAssistantNativeAppUITests/DesignedNativeShellAppBundleTests.swift
 
 grep -R -q "check_dependencies" Sources tests App
 grep -R -q "ma.permissionDependency" Sources tests App UITests
@@ -86,6 +93,10 @@ grep -R -q "TranscriptActionStaticDestinationSelector" Sources tests
 grep -R -q "ProcessingStateViewModel" Sources tests App UITests
 grep -R -q "ProcessingCommandFakeClient" Sources tests App UITests
 grep -R -q "ProcessingCommandProcessRunner" Sources tests App UITests
+grep -R -q "DesignedNativeShellViewModel" Sources tests App UITests
+grep -R -q "DesignedNativeShellView" Sources tests App UITests
+grep -R -q "ma.shell" Sources tests App UITests
+grep -R -q "ma.sessionArtifact" Sources tests App UITests
 grep -R -q "MA_NATIVE_RECORDING_CLIENT" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MA_NATIVE_RECORDING_WORKSPACE" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "isRecordingClientTestHookAllowed" App/MeetingAssistantNativeApp.swift
@@ -148,6 +159,7 @@ grep -R -q "MA_NATIVE_TRANSCRIPT_WORKSPACE" App UITests/MeetingAssistantNativeAp
 grep -R -q "XCTest" UITests
 grep -R -q "NSHostingController" UITests/MeetingAssistantNativeUITests
 grep -R -q "XCUIApplication" UITests/MeetingAssistantNativeAppUITests
+grep -R -q "DesignedNativeShellAppBundleTests" MeetingAssistantNative.xcodeproj/project.pbxproj
 grep -R -q "MA_NATIVE_APP_SMOKE_FIXTURE" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MeetingAssistantNativeAppUITests" MeetingAssistantNative.xcodeproj/project.pbxproj
 

@@ -21,7 +21,7 @@
 | 转写 | Adapter-first 本地转写；首个真实 runtime 使用本地 `whisper.cpp` CLI + multilingual Whisper-compatible 模型 | confirmed |
 | Speaker labeling | 本地 best-effort 匿名 speaker labeling；无可用引擎时降级 transcript-only | confirmed |
 | 纪要生成 | 非 MVP 必需；用户可手动复制 transcript 到 GPT | confirmed |
-| UI 交互面 | 最小 Swift/SwiftUI app + local helper / processing CLI | confirmed |
+| UI 交互面 | 设计化 Swift/SwiftUI native app shell + local helper / processing CLI；原始调试 UI 只作为中间形态 | confirmed |
 | 数据存储 | 本地文件和元数据，不要求远程数据库 | confirmed |
 | Cloud/API | MVP 应用不自动调用外部模型 API | confirmed for MVP boundary |
 
@@ -100,7 +100,7 @@ flowchart LR
 
 | 组件 | 职责 | 不负责 |
 |---|---|---|
-| `native-app` | 最小 Swift/SwiftUI app，提供原生录制控制、权限提示、录制状态和停止保存反馈 | 转写、speaker labeling、自动调用外部模型 |
+| `native-app` | 设计化 Swift/SwiftUI app shell，提供预检、原生录制控制、权限提示、录制状态、停止保存反馈、处理状态、transcript 回查、复制/导出和删除确认 | 转写、speaker labeling、自动调用外部模型 |
 | `native-helper` | 原生录制 helper 或本地服务边界，封装 capture adapter 和本地命令入口 | 业务数据解释、转写模型推理 |
 | `processing-cli` | 依赖检查、音频格式处理、混音、校验、标准化处理输入、转写 adapter、speaker labeling adapter、导出 | 原生录制 UI、真实身份识别、自动上传 |
 | `transcription-adapter` | 本地转写 adapter、时间戳 segments、transcript artifact | 真实身份识别、会议纪要生成 |
@@ -123,7 +123,7 @@ flowchart LR
 
 1. Phase 1 主路径是原生 macOS 录制，不以 OBS/BlackHole 作为主录制路径。
 2. 原生录制实现必须输出 `07-data-and-events.md` 定义的文件和元数据契约。
-3. 原生控制面采用最小 Swift/SwiftUI app + local helper / processing CLI 的组合。
+3. 原生控制面采用设计化 Swift/SwiftUI app shell + local helper / processing CLI 的组合；实现早期可先落地最小/调试 UI，但 MVP UI 完成口径必须回到 `12-ui-ux-design.md` 的 designed shell 契约。
 4. 具体 capture API、录制目标支持范围、视频编码、音频捕获方式和权限细节可以在组件骨架阶段以 adapter 方式细化，但不得改变 `07-data-and-events.md` 的 artifact contract。
 5. 录制层必须是可替换 adapter，不得和转写、speaker labeling 或导出强耦合。
 6. 如果系统音频或目标 capture 在 MVP 环境中被技术 spike 证明不可行或不稳定，只能先记录证据，并通过 `10-open-decisions.md`、ADR、主责分卷和验证矩阵更新后，才允许把 OBS/BlackHole/FFmpeg 等辅助路径纳入实现范围。
@@ -145,8 +145,9 @@ Phase 2 按本地组件纵切推进，不先创建 Web 前端、远程后端服�
 
 1. `processing-cli` 先实现 `check_dependencies`、稳定命令响应、错误码和契约测试。
 2. 再实现 artifact contract、导入媒体、normalized audio、transcript adapter fake、speaker-label transcript-only fallback 和导出。
-3. `native-app` 负责最小 Swift/SwiftUI 控制面，并通过 Swift Testing 与 XCUITest 验证关键状态。
-4. 每个真实产品行为进入实现时，必须同步更新对应 `PV-MA-*` 状态和证据。
+3. `native-app` 先负责最小 Swift/SwiftUI 控制面，并通过 Swift Testing 与 XCUITest 验证关键状态。
+4. 在录制、处理、回查、导出和删除边界具备可测证据后，`native-app` 必须升级为设计化原生 app shell；该 shell 仍只通过既有 command/helper/adapter 契约触发行为，不绕过 processing-cli 或 artifact contract。
+5. 每个真实产品行为进入实现时，必须同步更新对应 `PV-MA-*` 状态和证据。
 
 ## Bootstrap/Check 策略
 

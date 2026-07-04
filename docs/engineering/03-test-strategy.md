@@ -30,6 +30,7 @@ Phase 1 是本地 macOS 工具，不以 Web 前端、远程 HTTP API 或数据�
 | 本地命令契约测试 | JSON schema/assertions | `CMD-MA-*` 输入、输出、错误 code 和 fail-fast 行为 |
 | Native app 状态测试 | Swift Testing | Swift/SwiftUI view model、权限/依赖状态、录制状态转换 |
 | Native UI smoke | XCUITest | 开始/停止、权限缺失、录制中、失败/降级、导出入口和 accessible locator |
+| Native designed shell regression | Swift Testing、XCUITest、可选截图证据 | Preflight、recording、artifacts、processing、transcript、export/delete 的设计化 shell 导航、状态层级、主操作触发和 Debug/Release fixture 隔离 |
 | 本地文件契约测试 | Python/Swift 测试 | `session.json`、artifact registry、原始媒体保护、派生产物重试 |
 | Smoke E2E | manifest 驱动脚本 | `native-app` + `processing-cli` + workspace fixture 的受控端到端路径 |
 
@@ -49,7 +50,7 @@ native-app 的默认组件 `test` gate 优先服务本地快速反馈：Swift Te
 | Artifact schema | `07-data-and-events.md` 已定义 `session.json`、artifact registry、`transcript.json`、`speaker_labels.json` 或 delete summary 的最小字段和路径边界 | 先补文件契约测试和 fixture；不得通过 ad hoc 文件内容判断产品完成 |
 | 确定性 fixture | 测试使用临时 workspace、受控 clock 或可断言时间格式、小型媒体 fixture、fake adapter 和固定依赖状态；不得依赖用户真实会议数据或本机常驻服务 | 先补 fixture/fake adapter；真实 runtime smoke 只能作为附加证据 |
 | 本地转写 runtime smoke | VS-MA-06 使用 `runtime=whisper_cpp`、本地 `whisper.cpp` CLI 和用户人工准备的 multilingual Whisper-compatible 模型；`check_dependencies` 必须报告不含设备唯一标识的硬件 preflight；小 WAV fixture 必须包含中文为主且夹杂 `HTTP`、`LLM`、`clean architecture`、`EDA` 等英文技术词汇；不得自动下载模型或调用外部 API | runtime 或模型缺失时先覆盖 `dependency_missing`；硬件 preflight 只能证明部署适配风险，不能替代真实 mixed-language smoke；真实 runtime smoke 未能在标准门禁稳定运行前，`PV-MA-007` 保持 `partial` |
-| UI locator | SwiftUI 控件和状态有 accessible name、状态文本和稳定 accessibility identifier；测试可定位权限、依赖、录制、处理、回查、导出和删除状态 | 先补 view model、locator 和 XCUITest/Swift Testing 基础；不能只以人工截图作为长期证据 |
+| UI locator | SwiftUI 控件和状态有 accessible name、状态文本和稳定 accessibility identifier；测试可定位权限、依赖、录制、处理、回查、导出和删除状态；设计化 shell 必须证明导航、状态层级和主操作不退回原始调试 UI | 先补 view model、locator、XCUITest/Swift Testing 和必要截图证据；不能只以人工截图作为长期证据 |
 | 负向用例 | 至少覆盖 unknown field、非法 enum、缺失必填字段、权限缺失、依赖缺失、artifact 缺失、路径越界、symlink 逃逸、处理失败、导出冲突、确认缺失、no-auto-upload 和 no-auto-download | 先补负向测试；未覆盖的高风险边界必须写入验证矩阵缺口 |
 | 证据入口 | `06-product-validation-matrix.md` 必须写明目标测试文件或脚本、标准命令入口、当前证据、阻塞缺口和关闭条件 | 不能只写“未来测试”；缺少目标入口时不能标 `covered`，也不应扩大产品实现范围 |
 
@@ -66,6 +67,7 @@ native-app 的默认组件 `test` gate 优先服务本地快速反馈：Swift Te
 | `07-data-and-events.md` | migration、repository、事件契约、消费者幂等测试 |
 | `12-ui-ux-design.md` | 前端组件测试、Playwright E2E、视觉和可访问性检查 |
 | `12-ui-ux-design.md` 的原生 macOS UI | Swift Testing、XCUITest、可访问性 locator 检查 |
+| `12-ui-ux-design.md` 的设计化 native shell | Swift Testing、app-bundle XCUITest、locator 检查、Debug/Release hook 隔离检查和可选截图证据 |
 
 ## 高风险边界
 

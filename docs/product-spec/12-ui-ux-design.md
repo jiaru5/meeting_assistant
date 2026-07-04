@@ -4,7 +4,7 @@
 
 ## UI 状态
 
-Phase 1 控制面已确认为最小 Swift/SwiftUI app + local helper / processing CLI 的组合。图形入口负责原生录制控制和用户可见状态；helper/CLI 负责依赖检查、媒体处理、转写、speaker labeling 和导出。
+Phase 1 控制面已确认为设计化 Swift/SwiftUI native app shell + local helper / processing CLI 的组合。图形入口负责原生录制控制和用户可见状态；helper/CLI 负责依赖检查、媒体处理、转写、speaker labeling 和导出。当前只有功能和调试价值的 primitive native UI 只能作为中间实现或测试 fixture，不能作为 `CAP-MA-013` 的完成口径。
 
 ## UI 原则
 
@@ -26,6 +26,37 @@ Phase 1 控制面已确认为最小 Swift/SwiftUI app + local helper / processin
 | UI-MA-EXPORT-001 | transcript 复制/导出 | 明确由用户触发，不自动上传外部服务 | `CAP-MA-011` | `PV-MA-011` |
 | UI-MA-FALLBACK-001 | speaker labeling 降级 | 无可用引擎时显示 transcript-only 状态和原因 | `CAP-MA-008` | `PV-MA-008` |
 | UI-MA-DELETE-001 | 删除会话 | 删除前显示目标会话和影响范围，要求用户明确确认；删除后显示结果摘要 | `CAP-MA-012` | `PV-MA-012` |
+| UI-MA-SHELL-001 | 设计化原生 app shell | 同一原生 shell 覆盖预检、录制、artifacts、处理、transcript、导出和删除；主要操作必须触发现有 command/helper/adapter 契约，不使用 UI-only mock success | `CAP-MA-001`-`CAP-MA-013` | `PV-MA-013` |
+
+## 设计化原生 App Shell
+
+设计目标是可长期使用的 native macOS 工作台，而不是营销页、Web mock、调试面板或仅为测试暴露的控件集合。视觉效果图和 `output/product/meeting-assistant-ui-ux-prd.html` 等 derived artifact 可以作为实现参考，但不是事实源；若参考图与本分卷冲突，以本分卷为准。
+
+视觉和信息层级要求：
+
+1. 默认使用浅色、中性、高对比 UI，状态色只用于 ready、warning、error、recording、fallback 和 success 等明确语义。
+2. 页面应面向重复操作和状态扫描：保留紧凑信息密度、清晰分组、稳定主操作区和可见结果区，不做 hero/landing 页面。
+3. 控件圆角和间距应克制，并优先使用原生 macOS 控件语义；不得让装饰性卡片层级盖过权限、依赖、录制和处理状态。
+4. 主视图应支持一个稳定的导航模型，至少能进入 Preflight、Record meeting、Recent/session artifacts、Processing、Transcript、Exports/Delete 这些语义区域。
+5. 文案必须说明状态和下一步动作，不能用泛化错误替代 `permission_denied`、`dependency_missing`、`capture_failed`、`processing_failed`、`path_conflict` 等既有错误语义。
+
+必须覆盖的 shell 状态：
+
+1. Preflight：展示 workspace、macOS 权限、media tool、transcription runtime/model、speaker fallback 和 no-auto-upload/no-auto-download 边界。
+2. Recording setup：展示录制目标、系统音频和麦克风录制意图，以及开始录制前的阻断状态。
+3. Recording live：录制中状态、session id 或可识别会话摘要、可见停止动作和音轨/目标摘要必须稳定可见。
+4. Saved artifacts：停止后展示每类 artifact 的 available、missing、degraded 或 failed 状态，包含 `degradation_reason` 摘要和进入处理动作。
+5. Processing：展示 normalized audio、transcript、speaker labeling、export 准备等步骤，支持失败、重试和 transcript-only fallback。
+6. Transcript：展示 timestamped segments、文本、匿名 speaker labels 或降级原因，不暗示真实身份识别。
+7. Export/Delete：复制、导出和删除必须由用户主动触发；删除确认必须展示目标会话和影响范围。
+
+命令触发和测试边界：
+
+1. 生产目标 shell 的主按钮必须调用既有 `06-api-contracts.md` 和 `07-data-and-events.md` 定义的 command/helper/adapter 或其 read model，不得在 UI 层制造与文件契约无关的成功状态。
+2. Debug/XCTest fixture 可以驱动 deterministic 状态和 fake client，但必须通过 build configuration、environment hook 或 test-only fixture 隔离；Release 默认行为不得依赖这些 hook。
+3. 设计化 shell 的完成不能替代真实 native capture、真实 processing provider、真实 OS pasteboard/file picker/delete integration、完整 release bundle 或任意 `PV-MA-*` covered 证据。
+4. 每个 shell 区域必须有 XCUITest 可查询的 accessibility identifier，建议使用 `ma.preflight.*`、`ma.recording.*`、`ma.sessionArtifact.*`、`ma.processing.*`、`ma.transcript.*`、`ma.transcriptAction.*` 这类现有语义前缀。
+5. 新视觉层不得删除既有可见状态、accessible name 或稳定 locator；重命名 locator 必须同步测试、验证矩阵和交付说明。
 
 ## 页面或本地工具状态要求
 

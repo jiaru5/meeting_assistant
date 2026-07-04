@@ -119,6 +119,49 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         XCTAssertEqual(stopRequests, [StopRecordingRequest(sessionID: "session-ui-smoke")])
     }
 
+    func testDesignedNativeShellIsHostedWithNavigationStatusAndExistingSurfaces() {
+        let transcriptInput = hostedTranscriptInput()
+        let shellViewModel = DesignedNativeShellViewModel()
+        let permissionViewModel = PermissionDependencyStatusViewModel(
+            runner: UnusedDependencyCheckRunner(),
+            initialState: readyReadinessState()
+        )
+        let recordingViewModel = RecordingControlViewModel(
+            commandClient: FakeRecordingCommandClient(),
+            readinessState: readyReadinessState()
+        )
+        let processingViewModel = ProcessingStateViewModel(
+            commandClient: ProcessingCommandFakeClient(),
+            readinessState: readyReadinessState(),
+            defaultSessionID: "session-hosted-shell"
+        )
+        let transcriptViewModel = TranscriptReviewViewModel(input: transcriptInput)
+        let actionViewModel = TranscriptReviewActionsViewModel(input: transcriptInput)
+        let host = HostedSwiftUIView(
+            DesignedNativeShellView(
+                shellViewModel: shellViewModel,
+                permissionViewModel: permissionViewModel,
+                recordingViewModel: recordingViewModel,
+                processingViewModel: processingViewModel,
+                transcriptViewModel: transcriptViewModel,
+                transcriptActionViewModel: actionViewModel
+            )
+        )
+
+        host.assertHosted()
+        XCTAssertEqual(shellViewModel.selectedSectionLabel, "Preflight selected.")
+        shellViewModel.select(.actions)
+        host.flush()
+        XCTAssertEqual(shellViewModel.selectedSectionLabel, "Export and delete selected.")
+        XCTAssertEqual(
+            DesignedNativeShellViewModel.artifactRows(from: recordingViewModel.state.artifacts).map(\.artifactType),
+            ["screen_video", "system_audio", "microphone_audio", "mixed_audio"]
+        )
+        assertShellLocators()
+        SwiftUIViewSourceContract.assertDesignedNativeShellUsesAccessibleStates()
+        SwiftUIViewSourceContract.assertAppRootUsesDesignedNativeShell()
+    }
+
     func testStartFailureIsHostedWithStableFailureState() async {
         let client = FakeRecordingCommandClient(
             script: .startFailure(
@@ -532,6 +575,7 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         assertProcessingLocators()
         assertTranscriptLocators()
         assertTranscriptActionLocators()
+        assertShellLocators()
     }
 
     private func assertPermissionDependencyLocators(
@@ -821,6 +865,60 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
             line: line
         )
     }
+
+    private func assertShellLocators(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(
+            DesignedNativeShellAccessibilityID.root,
+            "ma.shell.root",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            DesignedNativeShellAccessibilityID.heading,
+            "ma.shell.heading",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            DesignedNativeShellAccessibilityID.navigation,
+            "ma.shell.navigation",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            DesignedNativeShellAccessibilityID.selectedSection,
+            "ma.shell.selectedSection",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            DesignedNativeShellAccessibilityID.navButton(.processing),
+            "ma.shell.nav.processing",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            DesignedNativeShellAccessibilityID.section(.actions),
+            "ma.shell.section.actions",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            DesignedNativeShellAccessibilityID.status("recording"),
+            "ma.shell.status.recording",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            DesignedNativeShellAccessibilityID.artifactStatus("system_audio"),
+            "ma.sessionArtifact.system_audio.status",
+            file: file,
+            line: line
+        )
+    }
 }
 
 private struct UnusedDependencyCheckRunner: DependencyCheckRunning {
@@ -1002,6 +1100,63 @@ private enum SwiftUIViewSourceContract {
         )
     }
 
+    static func assertDesignedNativeShellUsesAccessibleStates(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let source = readSource("DesignedNativeShellView.swift", file: file, line: line)
+        assertSource(
+            source,
+            contains: [
+                "Text(\"Meeting Assistant\")",
+                "Designed native app shell",
+                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.root)",
+                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.heading)",
+                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.navigation)",
+                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.selectedSection)",
+                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.statusBoard)",
+                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.commandRail)",
+                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.workspaceBoundary)",
+                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.recordingSetup)",
+                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.navButton(section))",
+                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.section(section))",
+                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.artifactStatus(row.artifactType))",
+                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.processingStep(step.id))",
+                "PermissionDependencyStatusView(viewModel: permissionViewModel)",
+                "RecordingControlView(viewModel: recordingViewModel)",
+                "ProcessingStateView(viewModel: processingViewModel)",
+                "TranscriptReviewView(viewModel: transcriptViewModel)",
+                "TranscriptReviewActionsView(viewModel: transcriptActionViewModel)",
+            ],
+            file: file,
+            line: line
+        )
+    }
+
+    static func assertAppRootUsesDesignedNativeShell(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let source = readAppSource("MeetingAssistantNativeApp.swift", file: file, line: line)
+        assertSource(
+            source,
+            contains: [
+                "@StateObject private var shellViewModel: DesignedNativeShellViewModel",
+                "_shellViewModel = StateObject(wrappedValue: DesignedNativeShellViewModel())",
+                "DesignedNativeShellView(",
+                "shellViewModel: shellViewModel",
+                "permissionViewModel: permissionViewModel",
+                "recordingViewModel: recordingViewModel",
+                "processingViewModel: processingViewModel",
+                "transcriptViewModel: transcriptViewModel",
+                "transcriptActionViewModel: transcriptActionViewModel",
+                ".defaultSize(width: 1180, height: 760)",
+            ],
+            file: file,
+            line: line
+        )
+    }
+
     static func assertAppBundleReleaseHooksRemainDisabled(
         file: StaticString = #filePath,
         line: UInt = #line
@@ -1073,6 +1228,40 @@ private enum SwiftUIViewSourceContract {
             )
         }
     }
+}
+
+private func hostedTranscriptInput() -> TranscriptReviewInput {
+    TranscriptReviewInput(
+        sessionTitle: "Hosted Shell Transcript",
+        transcript: TranscriptReviewTranscript(
+            id: "transcript-hosted-shell",
+            sessionID: "session-hosted-shell",
+            sourceArtifactID: "artifact-normalized-audio",
+            status: "succeeded",
+            segments: [
+                TranscriptReviewSegment(
+                    segmentID: "seg-hosted-shell",
+                    startMS: 1_000,
+                    endMS: 3_000,
+                    text: "Hosted shell transcript segment.",
+                    speakerLabel: "SPEAKER_01"
+                ),
+            ]
+        ),
+        speakerLabels: SpeakerLabelsReviewArtifact(
+            sessionID: "session-hosted-shell",
+            labels: [
+                SpeakerLabelReviewEntry(
+                    label: "SPEAKER_01",
+                    sessionID: "session-hosted-shell",
+                    isVerifiedIdentity: false
+                ),
+            ],
+            segmentMapping: [
+                SpeakerLabelSegmentMapping(segmentID: "seg-hosted-shell", label: "SPEAKER_01"),
+            ]
+        )
+    )
 }
 
 private func hostedReadinessStatusText(for phase: RecordingControlPhase) -> String {

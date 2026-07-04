@@ -12,11 +12,12 @@ struct MeetingAssistantNativeApp: App {
             NativeControlPlaneRootView(configuration: configuration)
                 .background(WindowPlacementView(placement: windowPlacement))
         }
-        .defaultSize(width: 900, height: 760)
+        .defaultSize(width: 1180, height: 760)
     }
 }
 
 private struct NativeControlPlaneRootView: View {
+    @StateObject private var shellViewModel: DesignedNativeShellViewModel
     @StateObject private var permissionViewModel: PermissionDependencyStatusViewModel
     @StateObject private var recordingViewModel: RecordingControlViewModel
     @StateObject private var processingViewModel: ProcessingStateViewModel
@@ -29,6 +30,7 @@ private struct NativeControlPlaneRootView: View {
         let recordingCommandClient = configuration.makeRecordingCommandClient()
         let processingCommandClient = configuration.makeProcessingCommandClient()
         let transcriptActionCommandClient = configuration.makeTranscriptActionCommandClient()
+        _shellViewModel = StateObject(wrappedValue: DesignedNativeShellViewModel())
         _permissionViewModel = StateObject(
             wrappedValue: PermissionDependencyStatusViewModel(
                 runner: StaticDependencyCheckRunner(response: configuration.dependencyResponse),
@@ -66,32 +68,14 @@ private struct NativeControlPlaneRootView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                PermissionDependencyStatusView(viewModel: permissionViewModel)
-                    .frame(minHeight: 360, maxHeight: 420)
-
-                Divider()
-
-                RecordingControlView(viewModel: recordingViewModel)
-
-                Divider()
-
-                ProcessingStateView(viewModel: processingViewModel)
-
-                Divider()
-
-                TranscriptReviewView(viewModel: transcriptViewModel)
-
-                if transcriptActionViewModel.state.isAvailable {
-                    Divider()
-
-                    TranscriptReviewActionsView(viewModel: transcriptActionViewModel)
-                }
-            }
-            .padding(20)
-            .frame(minWidth: 760, minHeight: 640, alignment: .topLeading)
-        }
+        DesignedNativeShellView(
+            shellViewModel: shellViewModel,
+            permissionViewModel: permissionViewModel,
+            recordingViewModel: recordingViewModel,
+            processingViewModel: processingViewModel,
+            transcriptViewModel: transcriptViewModel,
+            transcriptActionViewModel: transcriptActionViewModel
+        )
     }
 }
 

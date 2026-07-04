@@ -6,11 +6,11 @@
 
 | 交互面 ID | 入口 | 角色 | 目标 | 状态 |
 |---|---|---|---|---|
-| SURFACE-MA-001 | Minimal Swift/SwiftUI app | `ROLE-MA-LOCAL-USER` | 提供原生录制入口、权限状态、录制中状态和停止保存反馈 | confirmed for MVP |
+| SURFACE-MA-001 | Swift/SwiftUI designed native app shell | `ROLE-MA-LOCAL-USER` | 提供设计化原生工作流入口，覆盖预检、原生录制、录制中状态、停止保存、处理、回查、导出和删除确认 | confirmed for MVP; primitive debug UI is transitional only |
 | SURFACE-MA-002 | Local helper / processing CLI | `ROLE-MA-LOCAL-USER` | 执行依赖检查、媒体处理、转写、speaker labeling 和导出命令 | confirmed for MVP |
-| SURFACE-MA-003 | Transcript review/export surface | `ROLE-MA-LOCAL-USER` | 回查 transcript，复制或导出文本 | planned |
+| SURFACE-MA-003 | Transcript review/export surface | `ROLE-MA-LOCAL-USER` | 回查 transcript，复制或导出文本 | confirmed for MVP; evidence remains PV-gated |
 
-Phase 1 采用最小 Swift/SwiftUI app + local helper / processing CLI 的组合。非业务工程 skeleton 只用于注册 manifest 和门禁，不能替代本分卷定义的真实录制、转写和 speaker labeling 行为。
+Phase 1 采用设计化 Swift/SwiftUI native app shell + local helper / processing CLI 的组合。实现早期的最小或调试 UI 只用于逐步建立状态和测试边界，不能替代本分卷定义的真实录制、转写、speaker labeling 或 `CAP-MA-013` UI 完成口径。
 
 ## 用户旅程
 
@@ -40,6 +40,26 @@ Phase 1 采用最小 Swift/SwiftUI app + local helper / processing CLI 的组合
 2. Local helper / processing CLI 负责非交互任务，包括依赖检查、媒体处理、转写、speaker labeling 和导出。
 3. 两者只通过 `06-api-contracts.md` 的本地命令契约以及 `07-data-and-events.md` 的文件/元数据契约协作。
 4. 非业务工程 skeleton 不得被当作真实录制、真实转写或真实 speaker labeling 行为。
+
+## 设计化原生 App Shell 范围
+
+设计化原生 app shell 是 `SURFACE-MA-001` 的 MVP 目标形态。现有只具备功能和调试价值的原始 native UI 可以作为中间实现、Debug fixture 或 XCUITest 控制面，但不能作为 `CAP-MA-013` 的完成口径。
+
+该 shell 必须至少提供以下稳定入口：
+
+1. Preflight：展示 macOS 权限、workspace、媒体工具、转写 runtime/model 和 speaker-label fallback 状态。
+2. Record meeting：配置录制目标、系统音频和麦克风录制意图；开始后展示稳定录制中状态和停止动作。
+3. Session artifacts：停止后展示 `screen_video`、`system_audio`、`microphone_audio`、`mixed_audio` 的可用、缺失、降级或失败状态，以及进入处理链路的动作。
+4. Processing：展示 normalized audio、transcript、speaker labels、export 准备等流水线步骤，支持失败、降级和重试状态。
+5. Transcript：展示会话标题或时间、timestamped segments、匿名 speaker labels 或 transcript-only 降级原因。
+6. Export and delete：提供用户主动复制/导出 transcript，以及带影响范围说明的删除确认和结果摘要。
+
+交互规则：
+
+1. 生产目标 shell 的主要按钮必须触发现有允许的 command/helper/adapter 边界，包括 `check_dependencies`、`start_native_recording`、`stop_recording`、处理桥接、`export_transcript` 和 `delete_session`；不得只在 UI 本地伪造成功状态。
+2. Debug、XCTest 或 fixture-only fake 可以用于自动化测试，但必须被明确隔离；不能成为 Release 默认行为或产品验收的真实录制/真实处理证据。
+3. 设计化 shell 不改变命令字段、artifact type、error code、删除边界、no-auto-upload 或 no-auto-download 规则。
+4. 新导航和视觉结构必须保留关键状态的可访问标题、可见文案和 XCUITest 可查询 locator。
 
 ## 关键状态要求
 

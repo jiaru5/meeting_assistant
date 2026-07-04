@@ -214,6 +214,9 @@ ADR 记录决策背景、取舍和历史原因。当前可执行规则必须维�
 
 状态：Accepted
 
+后续更新：
+- ADR-20260704-01 将 MVP 的最终可见 UI 目标从“最小原生 App 控制面”升级为“设计化原生 app shell”。本 ADR 中关于 native app + local helper / processing CLI 解耦、activation skeleton 和文件化处理边界的决策仍然有效。
+
 背景：
 - 用户确认 Phase 1 应优先原生 macOS 录制。
 - Project activation 需要真实组件骨架、命令和 E2E 计划，但 adoption 模式不得实现业务行为。
@@ -245,6 +248,9 @@ ADR 记录决策背景、取舍和历史原因。当前可执行规则必须维�
 ## ADR-20260626-07: Phase 2 使用本地组件纵切和原生 UI 测试
 
 状态：Accepted
+
+后续更新：
+- ADR-20260704-01 在 `VS-MA-19` 后新增 `VS-MA-19A`，用于把已建立的 native 控制面升级为设计化原生 app shell。Phase 2 的 Swift Testing、XCUITest、native-first capture 和 processing-cli 边界决策仍然有效。
 
 背景：
 - Project activation 后，`native-app` 和 `processing-cli` 已存在为非业务 skeleton，但产品行为验证矩阵仍为 `planned`。
@@ -373,3 +379,32 @@ ADR 记录决策背景、取舍和历史原因。当前可执行规则必须维�
 - 共享安装包或私有团队分发：拒绝，因为当前没有团队分发和支持需求。
 - 签名公证后统一分发：当前拒绝，保留为未来产品化分发诉求。
 - 团队共享 workspace 或组织账号：拒绝，因为会引入新的权限、数据隔离、审计和支持边界。
+
+## ADR-20260704-01: MVP 增加设计化原生 App Shell 纵切
+
+状态：Accepted
+
+背景：
+- VS-MA-12 到 VS-MA-19 已逐步建立 native permission/dependency 状态、录制控制、处理状态、transcript 回查、复制/导出和删除入口，但当前 native UI 仍偏向功能调试面。
+- 用户确认目标不是仅有功能的原始 native 调试 UI，而是接近效果图的设计化 UI，并且该 UI 必须能触发录屏、处理、回查、导出和删除等既有本地能力。
+- 视觉效果图和 derived HTML 不是长期事实源；如果不把目标沉淀到 product-spec、验收和验证矩阵，后续容易把调试 UI 误报为 MVP UI 完成。
+
+决策：
+- Phase 1 MVP 增加 `CAP-MA-013`、`AC-MA-013` 和 `PV-MA-013`，用于追踪设计化原生 app shell。
+- 设计化 shell 是 Swift/SwiftUI native app 的目标形态，覆盖 Preflight、Record meeting、Session artifacts、Processing、Transcript、Export/Delete 等语义区域。
+- 设计化 shell 的主要按钮必须触发既有 command/helper/adapter 契约，包括依赖检查、开始/停止录制、处理桥接、导出和删除；不得只在 UI 层伪造成功。
+- Debug/XCTest fake 或 fixture 可以用于自动化测试，但必须与 Release 默认行为隔离。
+- 工程计划在 `VS-MA-19` 后、`VS-MA-20` 本地端到端 MVP smoke 前增加 `VS-MA-19A`，专门完成 designed native app shell 纵切。
+
+影响：
+- `01-product-scope.md` 新增设计化 shell 能力索引。
+- `04-user-journeys-and-ui.md` 明确 primitive debug UI 只是中间形态，并列出 shell 入口范围。
+- `09-acceptance-criteria.md` 新增 `AC-MA-013`。
+- `12-ui-ux-design.md` 维护 shell 的视觉、状态、触发和 locator 契约。
+- `docs/engineering/03-test-strategy.md`、`06-product-validation-matrix.md` 和 `07-development-plan.md` 需要补充对应测试入口、`PV-MA-013` 和 `VS-MA-19A`。
+- 该决策不改变命令字段、artifact type、error code、删除边界、no-auto-upload/no-auto-download 或 native-first capture 决策；真实录制、真实处理、真实 OS 集成和 release 放行仍由各自 `PV-MA-*` covered 证据决定。
+
+备选方案：
+- 直接给现有调试 UI 换样式：拒绝，因为会把临时控件结构固化为产品结构，且难以证明主操作触发了正确契约。
+- 等到 `VS-MA-23` release candidate 再做 UI：拒绝，因为 release gate 不应首次承载核心 UI 产品化风险。
+- 另建 Web UI 或营销页：拒绝，因为 Phase 1 事实源已确定本地 native macOS 工具，不以 Web 或营销页面作为 MVP 主入口。

@@ -11,7 +11,7 @@ from pathlib import Path
 metadata = json.loads(Path("component.json").read_text(encoding="utf-8"))
 if metadata.get("kind") != "project-component":
     raise SystemExit("native-app test failed: component kind must be project-component")
-expected_behavior = "permission_dependency_status_fake_recording_controlled_and_apple_screencapturekit_native_capture_artifact_registration_processing_state_transcript_review_and_actions"
+expected_behavior = "permission_dependency_status_fake_recording_controlled_and_apple_screencapturekit_native_capture_artifact_registration_processing_state_transcript_review_actions_and_designed_native_shell"
 if metadata.get("business_behavior") != expected_behavior:
     raise SystemExit(f"native-app test failed: business behavior must be {expected_behavior}")
 if metadata.get("allowed_before_project_mode") is not False:
@@ -32,6 +32,8 @@ if "native_capture_combined_recording_spike" not in metadata.get("allowed_capabi
     raise SystemExit("native-app test failed: missing combined recording spike capability")
 if "native_capture_artifact_registration" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app test failed: missing native capture artifact registration capability")
+if "designed_native_shell" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app test failed: missing designed native shell capability")
 
 architecture = Path("tests/ArchitectureTest.md").read_text(encoding="utf-8")
 required_phrases = (
@@ -44,8 +46,11 @@ required_phrases = (
     "VS-MA-17 read-only transcript review boundary",
     "read-only workspace transcript loading boundary",
     "VS-MA-18/VS-MA-19 deterministic transcript action consumer boundary",
+    "VS-MA-19A designed native shell boundary",
     "ma.transcriptAction.*",
     "ma.processing.*",
+    "ma.shell.*",
+    "ma.sessionArtifact.*",
     "MA_NATIVE_RECORDING_CLIENT=controlled",
     "MA_NATIVE_PROCESSING_CLIENT=process",
     "MA_NATIVE_TRANSCRIPT_ACTION_CLIENT=process",
@@ -95,6 +100,8 @@ required_paths = (
     Path("Sources/MeetingAssistantNative/ProcessingCommandFakeClient.swift"),
     Path("Sources/MeetingAssistantNative/ProcessingStateViewModel.swift"),
     Path("Sources/MeetingAssistantNative/ProcessingStateView.swift"),
+    Path("Sources/MeetingAssistantNative/DesignedNativeShellViewModel.swift"),
+    Path("Sources/MeetingAssistantNative/DesignedNativeShellView.swift"),
     Path("test-fixtures/processing-command-fixture.sh"),
     Path("test-fixtures/transcript-action-command-fixture.sh"),
     Path("tests/MeetingAssistantNativeTests/PermissionDependencyStatusViewModelTests.swift"),
@@ -103,8 +110,10 @@ required_paths = (
     Path("tests/MeetingAssistantNativeTests/TranscriptReviewViewModelTests.swift"),
     Path("tests/MeetingAssistantNativeTests/TranscriptReviewActionsViewModelTests.swift"),
     Path("tests/MeetingAssistantNativeTests/ProcessingStateViewModelTests.swift"),
+    Path("tests/MeetingAssistantNativeTests/DesignedNativeShellViewModelTests.swift"),
     Path("UITests/MeetingAssistantNativeUITests/NativeControlPlaneSmokeTests.swift"),
     Path("UITests/MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests.swift"),
+    Path("UITests/MeetingAssistantNativeAppUITests/DesignedNativeShellAppBundleTests.swift"),
     Path("scripts/test-app-bundle.sh"),
 )
 missing_paths = [str(path) for path in required_paths if not path.is_file()]

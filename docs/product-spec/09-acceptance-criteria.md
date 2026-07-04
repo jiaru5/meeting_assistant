@@ -17,8 +17,8 @@
 
 | AC ID | 能力 | 前置条件 | 操作 | 期望结果 | 验证矩阵 |
 |---|---|---|---|---|---|
-| AC-MA-001 | 录制前权限和环境预检 | Apple Silicon Mac，macOS 26.5.1，用户打开最小 Swift/SwiftUI app 或运行依赖检查 | 系统检查录屏、麦克风、文件写入、workspace、工具链和关键本地依赖状态 | 缺失必需权限或依赖时明确失败或阻断对应操作；UI 或命令输出指出缺失项和修复入口；不静默开始录制或处理 | `PV-MA-001` |
-| AC-MA-002 | 原生录制启动、持续状态和停止保存 | 录制前检查通过或缺失项已被用户修复 | 用户通过最小 Swift/SwiftUI app 启动原生录制并停止 | 创建 `MeetingSession`，状态从 `created` 进入 `recording` 再进入 `recorded` 或明确失败；录制中状态持续可见；停止后给出保存结果 | `PV-MA-002` |
+| AC-MA-001 | 录制前权限和环境预检 | Apple Silicon Mac，macOS 26.5.1，用户打开 Swift/SwiftUI app 或运行依赖检查 | 系统检查录屏、麦克风、文件写入、workspace、工具链和关键本地依赖状态 | 缺失必需权限或依赖时明确失败或阻断对应操作；UI 或命令输出指出缺失项和修复入口；不静默开始录制或处理 | `PV-MA-001` |
+| AC-MA-002 | 原生录制启动、持续状态和停止保存 | 录制前检查通过或缺失项已被用户修复 | 用户通过 Swift/SwiftUI app 启动原生录制并停止 | 创建 `MeetingSession`，状态从 `created` 进入 `recording` 再进入 `recorded` 或明确失败；录制中状态持续可见；停止后给出保存结果 | `PV-MA-002` |
 | AC-MA-003 | 会话和录制产物登记 | 原生录制结束，至少一个媒体产物可用或某类产物明确失败 | 系统登记录制结果 | 写入 `session.json` 和 artifact 列表；`screen_video`、`system_audio`、`microphone_audio`、`mixed_audio` 按可用性登记；无法生成的目标产物必须有 `capture_status` 和 `degradation_reason` | `PV-MA-003` |
 | AC-MA-004 | 导入已有媒体作为回退或测试路径 | 用户有本地媒体文件，且文件路径由用户显式选择 | 用户运行 `import_media` | 创建 `source_type=imported_media` 的 `MeetingSession`；只接受 `.wav`、`.m4a`、`.mp3`、`.mp4`、`.mov` 本地文件；音频登记为 `mixed_audio`，视频/容器登记为 `screen_video`；workspace 保存会话内 artifact 副本且源文件不被覆盖；不自动扫描、下载、上传、转码、转写或识别说话人；不支持格式、目录、缺失或非法路径返回 `invalid_input` | `PV-MA-004` |
 | AC-MA-005 | 本地依赖检查 | 新环境、依赖变化或处理前检查 | 用户运行 `check_dependencies`，自动化验证使用 `format=json` | 输出 macOS/架构、Swift 工具链、媒体工具、transcription adapter/runtime、speaker labeling runtime、workspace、权限状态和允许来源提示；缺失必需依赖时 `ok=false`；不自动下载模型、二进制或驱动 | `PV-MA-005` |
@@ -29,6 +29,7 @@
 | AC-MA-010 | transcript 回查状态 | transcript 已生成，speaker labels 可用或处于 transcript-only 降级 | 用户打开 transcript 回查入口 | 显示会话标题或时间、时间戳 segments、文本和匿名 speaker labels 或降级原因；不把 speaker labels 表述为真实身份 | `PV-MA-010` |
 | AC-MA-011 | transcript 复制或导出，且不自动上传外部工具 | transcript 已生成 | 用户复制或运行 `export_transcript` | 产出 `plain_text`、`markdown`、`json` 中至少一种格式或返回可复制文本；外部 GPT 处理仅由用户主动发起；应用不保存外部 API key、不自动上传 transcript、音频或视频 | `PV-MA-011` |
 | AC-MA-012 | 删除本地会议会话 | 会话位于当前 workspace，用户明确选择删除该会话 | 用户运行 `delete_session` 或在本地 UI 中确认删除 | 删除该会话目录内的媒体、transcript、speaker labels、导出包和日志；返回删除摘要；workspace 外导出文件不被自动删除；路径不存在或越界时返回可解释错误 | `PV-MA-012` |
+| AC-MA-013 | 设计化原生 app shell | 预检、录制、保存、处理、回查、导出和删除的 command/helper/adapter contract 已存在，或自动化测试使用受控 Debug/XCTest fixture | 用户打开 Swift/SwiftUI app，并在同一 designed native shell 中完成预检、开始/停止录制、查看 artifacts、触发处理、回查 transcript、复制/导出和删除确认 | UI 不再只是裸调试控件；必须具备稳定导航、清晰信息层级、状态面板或状态标记、可见主操作和可访问 locator；生产目标的主操作触发现有允许的 command/helper/adapter 边界，不在 UI 本地伪造成功；Debug/XCTest fake 必须与 Release 默认行为隔离；真实 capture、真实 processing、真实 OS 集成和发布放行仍以各自 `PV-MA-*` covered 证据为准 | `PV-MA-013` |
 
 ## 高风险验收维度
 
@@ -41,6 +42,7 @@
 7. 删除边界：删除会话只作用于当前 workspace 内的目标会话目录，不能删除 workspace 外导出文件或任意用户路径。
 8. Apple Silicon + macOS 26.5.1：MVP 验收环境以当前确认平台为准。
 9. 组件边界：非业务工程 skeleton 只能验证命令和契约，不实现或证明真实产品行为。
+10. UI 产品化：设计化 native shell 必须触发既有本地契约；视觉完成不能替代真实录制、真实处理、真实删除或 release 证据。
 
 ## 发布前验收
 
