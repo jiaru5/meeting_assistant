@@ -15,9 +15,6 @@ esac
 
 python3 scripts/action-pin-check.py
 ./scripts/project-manifest-check.sh "$phase"
-
-if [ "$phase" = "release" ]; then
-  python3 scripts/harness-runtime.py run-gate sbom
-fi
+python3 scripts/harness-runtime.py run-gate sbom
 
 echo "supply-chain-check passed: phase=$phase."

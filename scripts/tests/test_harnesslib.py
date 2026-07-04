@@ -687,6 +687,33 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("missing required validation evidence step harness-self-test", result.stderr + result.stdout)
 
+    def test_supply_chain_current_runs_registered_sbom_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            marker = fixture / "sbom-current.log"
+            command = [
+                sys.executable,
+                "-c",
+                f"from pathlib import Path; Path({str(marker)!r}).open('a').write('sbom\\n')",
+            ]
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["sbom"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/supply-chain-check.sh"), "current"],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "sbom\nsbom\n")
+            self.assertIn("supply-chain-check passed: phase=current", result.stdout)
+
     def test_insecure_agent_network_policy_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
