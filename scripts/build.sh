@@ -26,7 +26,8 @@ for component in manifest.get("components", []):
     if not isinstance(component_id, str) or not isinstance(component_path, str):
         continue
 
-    report_path = root / component_path / "build/build-report.json"
+    component_root = root / component_path
+    report_path = component_root / "build/build-report.json"
     if not report_path.is_file():
         failures.append(f"missing build report for production component {component_id}: {report_path.relative_to(root)}")
         continue
@@ -56,8 +57,36 @@ for component in manifest.get("components", []):
 
     if report.get("packages_macos_app") is True:
         failures.append(f"build report for production component {component_id} must not package a macOS app")
-    if not isinstance(report.get("sbom"), str) or not report["sbom"]:
+    sbom_reference = report.get("sbom")
+    if not isinstance(sbom_reference, str) or not sbom_reference:
         failures.append(f"build report for production component {component_id} must reference a component SBOM")
+    else:
+        sbom_names: list[str] = []
+        for sbom_path in sorted((component_root / "sbom").glob("*.cdx.json")):
+            relative_sbom_path = sbom_path.relative_to(root)
+            try:
+                sbom = json.loads(sbom_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                failures.append(
+                    f"invalid component SBOM JSON for production component {component_id}: "
+                    f"{relative_sbom_path}: {exc}"
+                )
+                continue
+            if not isinstance(sbom, dict):
+                failures.append(
+                    f"component SBOM for production component {component_id} must be a JSON object: "
+                    f"{relative_sbom_path}"
+                )
+                continue
+            metadata = sbom.get("metadata")
+            sbom_component = metadata.get("component") if isinstance(metadata, dict) else None
+            sbom_name = sbom_component.get("name") if isinstance(sbom_component, dict) else None
+            if isinstance(sbom_name, str) and sbom_name:
+                sbom_names.append(sbom_name)
+        if not sbom_names or sbom_reference not in sbom_names:
+            failures.append(
+                f"build report for production component {component_id} must reference a generated component SBOM name"
+            )
 
 if failures:
     print("build validation image evidence failed:", file=sys.stderr)
