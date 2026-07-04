@@ -714,6 +714,33 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertEqual(marker.read_text(encoding="utf-8"), "sbom\nsbom\n")
             self.assertIn("supply-chain-check passed: phase=current", result.stdout)
 
+    def test_security_check_runs_registered_security_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            marker = fixture / "security-current.log"
+            command = [
+                sys.executable,
+                "-c",
+                f"from pathlib import Path; Path({str(marker)!r}).open('a').write('security\\n')",
+            ]
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["security"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/security-check.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "security\nsecurity\n")
+            self.assertIn("security-check passed.", result.stdout)
+
     def test_supply_chain_current_fails_when_registered_sbom_gate_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
