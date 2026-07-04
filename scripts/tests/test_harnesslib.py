@@ -714,6 +714,42 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertEqual(marker.read_text(encoding="utf-8"), "sbom\nsbom\n")
             self.assertIn("supply-chain-check passed: phase=current", result.stdout)
 
+    def test_supply_chain_current_fails_when_registered_sbom_gate_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            marker = fixture / "sbom-current-failure.log"
+            command = [
+                sys.executable,
+                "-c",
+                (
+                    "import sys; "
+                    "from pathlib import Path; "
+                    f"Path({str(marker)!r}).open('a').write('failed\\n'); "
+                    "sys.stderr.write('sbom forced failure\\n'); "
+                    "sys.exit(17)"
+                ),
+            ]
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["sbom"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/supply-chain-check.sh"), "current"],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "failed\n")
+            self.assertIn("sbom forced failure", output)
+            self.assertIn("harness runtime failed", output)
+            self.assertNotIn("supply-chain-check passed: phase=current", result.stdout)
+
     def test_build_gate_requires_production_component_build_reports(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
