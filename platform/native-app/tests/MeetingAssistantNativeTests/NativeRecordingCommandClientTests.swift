@@ -506,6 +506,55 @@ struct NativeRecordingCommandClientTests {
     }
 
     @Test
+    func stopFinalizationPathConflictCanRetryWithoutCallingAdapterAgain() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .success(
+                artifacts: [
+                    .available(.screenVideo, data: data("retry-screen-video")),
+                    .available(.mixedAudio, data: data("retry-mixed-audio")),
+                ]
+            )
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-stop-retry",
+            adapter: adapter
+        )
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let outsideURL = workspace.appendingPathComponent("outside-video.mov")
+        try data("outside").write(to: outsideURL)
+        let screenURL = artifactURL(workspace, "session-stop-retry", "screen_video.mov")
+        try FileManager.default.createSymbolicLink(at: screenURL, withDestinationURL: outsideURL)
+
+        let blocked = try await client.stopRecording(StopRecordingRequest(sessionID: "session-stop-retry"))
+
+        #expect(blocked.ok == false)
+        #expect(blocked.code == .pathConflict)
+        #expect(await adapter.stopContexts.count == 1)
+        let outsideData = try Data(contentsOf: outsideURL)
+        #expect(outsideData == data("outside"))
+
+        try FileManager.default.removeItem(at: screenURL)
+        let retried = try await client.stopRecording(StopRecordingRequest(sessionID: "session-stop-retry"))
+
+        #expect(retried.ok == true)
+        #expect(retried.status == "recorded")
+        #expect(await adapter.stopContexts.count == 1)
+        let screen = try #require(retried.artifacts.first { $0.artifactType == "screen_video" })
+        #expect(screen.captureStatus == "available")
+        #expect(screen.checksum == (try checksum(for: screenURL)))
+        let mixed = try #require(retried.artifacts.first { $0.artifactType == "mixed_audio" })
+        #expect(mixed.captureStatus == "available")
+
+        let session = try readSessionJSON(workspace: workspace, sessionID: "session-stop-retry")
+        #expect(session["status"] as? String == "recorded")
+        let artifacts = try #require(session["artifacts"] as? [[String: Any]])
+        #expect(artifacts.count == 4)
+    }
+
+    @Test
     func sessionIDTraversalFailsClosedBeforeAdapterStart() async throws {
         let workspace = try temporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }

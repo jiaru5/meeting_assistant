@@ -8,6 +8,7 @@ public actor NativeRecordingCommandClient: RecordingCommandClient {
     private let timestampProvider: @Sendable () -> String
     private let requestIDProvider: @Sendable (RecordingCommandName) -> String
     private var activeSessions: [String: RecordingSessionReference] = [:]
+    private var pendingStopFinalizations: [String: PendingNativeStopFinalization] = [:]
 
     public init(
         permissionChecker: any NativeCapturePermissionChecking = StaticNativeCapturePermissionChecker(),
@@ -117,7 +118,16 @@ public actor NativeRecordingCommandClient: RecordingCommandClient {
                 reference: reference,
                 requestID: requestID
             ) {
+                pendingStopFinalizations.removeValue(forKey: request.sessionID)
                 return finalResponse
+            }
+
+            if let pending = pendingStopFinalizations[request.sessionID] {
+                return try finalizePendingStop(
+                    pending,
+                    reference: reference,
+                    requestID: requestID
+                )
             }
 
             let endedAt = timestampProvider()
@@ -130,27 +140,39 @@ public actor NativeRecordingCommandClient: RecordingCommandClient {
             )
             do {
                 let result = try await captureAdapter.stop(context)
-                return try sessionStore.finalizeRecording(
-                    reference: reference,
+                let pending = PendingNativeStopFinalization(
                     adapterArtifacts: result.artifacts,
                     endedAt: endedAt,
-                    defaultFailureReason: nil,
+                    defaultFailureReason: nil
+                )
+                pendingStopFinalizations[request.sessionID] = pending
+                return try finalizePendingStop(
+                    pending,
+                    reference: reference,
                     requestID: requestID
                 )
             } catch NativeCaptureAdapterFailure.stopFailed(let message, let partialArtifacts) {
-                return try sessionStore.finalizeRecording(
-                    reference: reference,
+                let pending = PendingNativeStopFinalization(
                     adapterArtifacts: partialArtifacts,
                     endedAt: endedAt,
-                    defaultFailureReason: message,
+                    defaultFailureReason: message
+                )
+                pendingStopFinalizations[request.sessionID] = pending
+                return try finalizePendingStop(
+                    pending,
+                    reference: reference,
                     requestID: requestID
                 )
             } catch let failure as NativeCaptureAdapterFailure {
-                return try sessionStore.finalizeRecording(
-                    reference: reference,
+                let pending = PendingNativeStopFinalization(
                     adapterArtifacts: [],
                     endedAt: endedAt,
-                    defaultFailureReason: failure.localizedDescription,
+                    defaultFailureReason: failure.localizedDescription
+                )
+                pendingStopFinalizations[request.sessionID] = pending
+                return try finalizePendingStop(
+                    pending,
+                    reference: reference,
                     requestID: requestID
                 )
             }
@@ -184,6 +206,22 @@ public actor NativeRecordingCommandClient: RecordingCommandClient {
         _ = try? await captureAdapter.stop(stopContext)
     }
 
+    private func finalizePendingStop(
+        _ pending: PendingNativeStopFinalization,
+        reference: RecordingSessionReference,
+        requestID: String
+    ) throws -> RecordingCommandResponse {
+        let response = try sessionStore.finalizeRecording(
+            reference: reference,
+            adapterArtifacts: pending.adapterArtifacts,
+            endedAt: pending.endedAt,
+            defaultFailureReason: pending.defaultFailureReason,
+            requestID: requestID
+        )
+        pendingStopFinalizations.removeValue(forKey: reference.sessionID)
+        return response
+    }
+
     private func storeFailureResponse(
         _ error: RecordingSessionStoreError,
         requestID: String,
@@ -208,4 +246,10 @@ public actor NativeRecordingCommandClient: RecordingCommandClient {
             message: error.localizedDescription
         )
     }
+}
+
+private struct PendingNativeStopFinalization: Sendable {
+    let adapterArtifacts: [NativeCaptureArtifactResult]
+    let endedAt: String
+    let defaultFailureReason: String?
 }
