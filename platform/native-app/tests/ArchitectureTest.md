@@ -39,6 +39,15 @@ Apple ScreenCaptureKit native capture adapter exception:
 7. The adapter must not call OBS, BlackHole, FFmpeg auxiliary capture, helper tools, `processing-cli`, processing commands, external APIs, network APIs, automatic downloads, real pasteboard, real file pickers or direct delete behavior.
 8. The app bundle must not enable this real adapter from a Release env hook. Existing Debug/XCTest-only hooks remain limited to `MA_NATIVE_RECORDING_CLIENT=controlled` and `MA_NATIVE_PROCESSING_CLIENT=process`.
 
+opt-in real native capture smoke boundary:
+
+1. `scripts/native-capture-smoke.sh` may run real ScreenCaptureKit capture only when invoked explicitly with `MA_NATIVE_CAPTURE_SMOKE=1`; default `scripts/test.sh`, app-bundle tests and Release app execution must not run it implicitly.
+2. The smoke may build a temporary Swift executable that composes only `NativeRecordingCommandClient`, `MacOSNativeCapturePermissionChecker`, `AppleScreenCaptureKitNativeCaptureAdapter` and `RecordingSessionStore`.
+3. The smoke may write to `build/native-capture-smoke/` or an explicit `MA_NATIVE_CAPTURE_SMOKE_WORKSPACE`, start a bounded screen recording, stop it, and validate existing `session.json`, `screen_video`, artifact status and `sha256:` checksum fields.
+4. The smoke must not add or change command fields, error codes, exit codes, artifact types, event schema, UI states or app-bundle env hooks.
+5. Permission denied, unknown permission, missing macOS runtime or missing ScreenCaptureKit output must remain fail-closed evidence and must not be reported as `covered` release readiness.
+6. The smoke must not call OBS, BlackHole, FFmpeg auxiliary capture, helper tools, `processing-cli`, processing commands, external APIs, network APIs, automatic downloads, real pasteboard, real file pickers or direct delete behavior.
+
 VS-MA-16 native processing state consumer boundary:
 
 1. This component may express `generate_transcript` and `generate_speaker_labels` through Swift command request/response models, a production `Process` runner, deterministic fake client, processing state view model and SwiftUI status view.

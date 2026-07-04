@@ -42,6 +42,14 @@
 6. 该 adapter 不通过 Release env hook 自动启用；现有 app bundle 仍默认 fake，Debug/XCTest-only hook 仍只启用 controlled recording fixture 或 processing process fixture。
 7. 该 spike 不引入 OBS、BlackHole、FFmpeg 辅助 capture，不调用 helper/processing-cli，不做 processing、transcription、speaker labeling、导出、删除、网络请求、自动下载、真实 pasteboard 或真实文件 picker。
 
+当前已新增 VS-MA-14/VS-MA-15 opt-in 真实 native capture smoke 入口：
+
+1. `scripts/native-capture-smoke.sh` 只能在显式设置 `MA_NATIVE_CAPTURE_SMOKE=1` 时运行，不属于默认 `scripts/test.sh`、app-bundle XCUITest 或 Release 门禁。
+2. 该脚本临时构建 Swift executable，组合既有 `NativeRecordingCommandClient`、`MacOSNativeCapturePermissionChecker`、`AppleScreenCaptureKitNativeCaptureAdapter` 和 `RecordingSessionStore`，不新增 command、artifact、error、exit code、UI state 或 app hook。
+3. 默认写入忽略目录 `build/native-capture-smoke/workspace-*`；可用 `MA_NATIVE_CAPTURE_SMOKE_WORKSPACE`、`MA_NATIVE_CAPTURE_SMOKE_DURATION_SECONDS`、`MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO` 和 `MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO` 显式覆盖。默认只请求屏幕录制，降低 microphone permission 对 smoke 的影响。
+4. 成功时脚本会验证 `session.json`、`screen_video` 为 `available`、录制文件非空、`sha256:` checksum 存在，并输出 JSON summary。权限 denied/unknown、macOS runtime 不足、显示处于 asleep/no-display 状态、ReplayKit stop failure 或 ScreenCaptureKit 未产出文件时必须 fail closed。
+5. 该 smoke 只能提供真实 ScreenCaptureKit 输出的本地 opt-in partial evidence；不证明独立系统音频或麦克风音频、生产 app 默认启用真实 adapter、native-to-processing invocation、release bundle 或任意 `PV-MA-*` 已 `covered`。
+
 当前已实现 VS-MA-16 native processing state consumer 边界：
 
 1. `ProcessingCommandClient` 只表达已冻结的 `generate_transcript` 和 `generate_speaker_labels` request/response 模型，失败 `details` 使用 tolerant decode 并只展示摘要。
