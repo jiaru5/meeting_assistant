@@ -519,6 +519,11 @@ public struct RecordingSessionStore: Sendable {
         }
 
         let components = relativePath.split(separator: "/", omittingEmptySubsequences: false)
+        guard components.allSatisfy({ !$0.isEmpty }) else {
+            throw RecordingSessionStoreError.pathConflict(
+                "Recording artifact path contains empty components: \(relativePath)"
+            )
+        }
         guard !components.contains(".."), !components.contains(".") else {
             throw RecordingSessionStoreError.pathConflict(
                 "Recording artifact path contains traversal components: \(relativePath)"
