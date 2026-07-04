@@ -714,6 +714,71 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertEqual(marker.read_text(encoding="utf-8"), "sbom\nsbom\n")
             self.assertIn("supply-chain-check passed: phase=current", result.stdout)
 
+    def test_build_gate_requires_production_component_build_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            for build_dir in fixture.glob("platform/*/build"):
+                shutil.rmtree(build_dir)
+            command = [
+                sys.executable,
+                "-c",
+                (
+                    "import json; "
+                    "from pathlib import Path; "
+                    "component = json.loads(Path('component.json').read_text(encoding='utf-8')); "
+                    "Path('build').mkdir(exist_ok=True); "
+                    "report = {"
+                    "'component': component['id'], "
+                    "'release_gate_image': 'validation-only', "
+                    "'digest_pinned_base': True, "
+                    "'non_root_user': True, "
+                    "'packages_runtime_or_model': False, "
+                    "'auto_downloads': False, "
+                    "'sbom': 'meeting-assistant-' + component['id']"
+                    "}; "
+                    "Path('build/build-report.json').write_text(json.dumps(report), encoding='utf-8')"
+                ),
+            ]
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["build"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/build.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("build validation image evidence reports passed", result.stdout)
+
+    def test_build_gate_fails_when_production_component_build_report_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            for build_dir in fixture.glob("platform/*/build"):
+                shutil.rmtree(build_dir)
+            command = [sys.executable, "-c", "from pathlib import Path; Path('build').mkdir(exist_ok=True)"]
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["build"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/build.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("missing build report for production component", result.stderr + result.stdout)
+
     def test_insecure_agent_network_policy_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
