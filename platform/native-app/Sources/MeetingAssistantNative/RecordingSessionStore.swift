@@ -391,6 +391,14 @@ public struct RecordingSessionStore: Sendable {
         defaultFailureReason: String?
     ) throws -> [RecordingArtifactMetadata] {
         let byType = Dictionary(grouping: results, by: \.artifactType)
+        for artifactType in NativeCaptureArtifactType.allCases {
+            if (byType[artifactType]?.count ?? 0) > 1 {
+                throw RecordingSessionStoreError.pathConflict(
+                    "Recording capture adapter returned multiple \(artifactType.rawValue) artifacts."
+                )
+            }
+        }
+
         return try NativeCaptureArtifactType.allCases.map { artifactType in
             let result = byType[artifactType]?.first ?? defaultResult(
                 artifactType: artifactType,

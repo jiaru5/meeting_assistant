@@ -837,6 +837,46 @@ struct NativeRecordingCommandClientTests {
     }
 
     @Test
+    func duplicateAdapterArtifactTypeFailsClosedOnStop() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .success(
+                artifacts: [
+                    .available(.screenVideo, data: data("first-screen-video")),
+                    .available(
+                        .screenVideo,
+                        relativePath: "artifacts/screen_video_duplicate.mov",
+                        data: data("second-screen-video")
+                    ),
+                ]
+            )
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-duplicate-artifact-type",
+            adapter: adapter
+        )
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+
+        let response = try await client.stopRecording(
+            StopRecordingRequest(sessionID: "session-duplicate-artifact-type")
+        )
+
+        #expect(response.ok == false)
+        #expect(response.code == .pathConflict)
+        #expect(await adapter.stopContexts.count == 1)
+        #expect(!FileManager.default.fileExists(
+            atPath: artifactURL(workspace, "session-duplicate-artifact-type", "screen_video.mov").path
+        ))
+        #expect(!FileManager.default.fileExists(
+            atPath: artifactURL(workspace, "session-duplicate-artifact-type", "screen_video_duplicate.mov").path
+        ))
+        let session = try readSessionJSON(workspace: workspace, sessionID: "session-duplicate-artifact-type")
+        #expect(session["status"] as? String == "recording")
+    }
+
+    @Test
     func nonAvailableArtifactSymlinkFailsClosedOnStop() async throws {
         let workspace = try temporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
