@@ -738,6 +738,71 @@ struct NativeRecordingCommandClientTests {
     }
 
     @Test
+    func adapterArtifactTraversalPathFailsClosedOnStop() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .success(
+                artifacts: [
+                    .available(
+                        .screenVideo,
+                        relativePath: "artifacts/../outside-video.mov",
+                        data: data("screen-video")
+                    ),
+                ]
+            )
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-artifact-traversal",
+            adapter: adapter
+        )
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let escapedURL = sessionRoot(workspace, "session-artifact-traversal")
+            .appendingPathComponent("outside-video.mov")
+
+        let response = try await client.stopRecording(StopRecordingRequest(sessionID: "session-artifact-traversal"))
+
+        #expect(response.ok == false)
+        #expect(response.code == .pathConflict)
+        #expect(await adapter.stopContexts.count == 1)
+        #expect(!FileManager.default.fileExists(atPath: escapedURL.path))
+    }
+
+    @Test
+    func adapterArtifactAbsolutePathFailsClosedOnStop() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let outsideURL = workspace.appendingPathComponent("outside-absolute-video.mov")
+        try data("outside").write(to: outsideURL)
+        let adapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .success(
+                artifacts: [
+                    .available(
+                        .screenVideo,
+                        relativePath: outsideURL.path,
+                        data: data("screen-video")
+                    ),
+                ]
+            )
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-artifact-absolute",
+            adapter: adapter
+        )
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+
+        let response = try await client.stopRecording(StopRecordingRequest(sessionID: "session-artifact-absolute"))
+
+        #expect(response.ok == false)
+        #expect(response.code == .pathConflict)
+        #expect(await adapter.stopContexts.count == 1)
+        let outsideData = try Data(contentsOf: outsideURL)
+        #expect(outsideData == data("outside"))
+    }
+
+    @Test
     func nonAvailableArtifactSymlinkFailsClosedOnStop() async throws {
         let workspace = try temporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
