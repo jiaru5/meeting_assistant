@@ -181,6 +181,78 @@ public struct RecordingSessionStore: Sendable {
         return response(for: session, requestID: requestID)
     }
 
+    public func existingSessionReference(
+        sessionID: String,
+        workspaceURL: URL
+    ) throws -> RecordingSessionReference {
+        guard Self.isValidSessionID(sessionID) else {
+            throw RecordingSessionStoreError.invalidSessionID(sessionID)
+        }
+
+        let workspaceRoot = try plannedWorkspaceRoot(workspaceURL)
+        let sessionsURL = workspaceRoot.appendingPathComponent("sessions", isDirectory: true)
+            .standardizedFileURL
+        guard Self.isWithin(sessionsURL, root: workspaceRoot) else {
+            throw RecordingSessionStoreError.pathConflict(
+                "Recording sessions directory escapes the workspace boundary: \(sessionsURL.path)"
+            )
+        }
+        guard Self.fileExists(sessionsURL) else {
+            let sessionJSON = sessionsURL
+                .appendingPathComponent(sessionID, isDirectory: true)
+                .appendingPathComponent("session.json", isDirectory: false)
+            throw RecordingSessionStoreError.sessionNotFound(sessionJSON.path)
+        }
+        guard Self.isExistingDirectory(sessionsURL), !Self.isSymlink(sessionsURL) else {
+            throw RecordingSessionStoreError.pathConflict(
+                "Recording sessions directory is not a managed directory: \(sessionsURL.path)"
+            )
+        }
+
+        let sessionURL = sessionsURL.appendingPathComponent(sessionID, isDirectory: true)
+            .standardizedFileURL
+        guard Self.isWithin(sessionURL, root: workspaceRoot) else {
+            throw RecordingSessionStoreError.pathConflict(
+                "Recording session path escapes the workspace boundary: \(sessionURL.path)"
+            )
+        }
+        guard Self.fileExists(sessionURL) else {
+            throw RecordingSessionStoreError.sessionNotFound(
+                sessionURL.appendingPathComponent("session.json", isDirectory: false).path
+            )
+        }
+        guard Self.isExistingDirectory(sessionURL), !Self.isSymlink(sessionURL) else {
+            throw RecordingSessionStoreError.pathConflict(
+                "Recording session directory is not a managed directory: \(sessionURL.path)"
+            )
+        }
+
+        let artifactsURL = sessionURL.appendingPathComponent("artifacts", isDirectory: true)
+            .standardizedFileURL
+        guard Self.isWithin(artifactsURL, root: sessionURL) else {
+            throw RecordingSessionStoreError.pathConflict(
+                "Recording artifacts directory escapes the session boundary: \(artifactsURL.path)"
+            )
+        }
+        guard Self.fileExists(artifactsURL),
+              Self.isExistingDirectory(artifactsURL),
+              !Self.isSymlink(artifactsURL)
+        else {
+            throw RecordingSessionStoreError.pathConflict(
+                "Recording artifacts directory is not a managed directory: \(artifactsURL.path)"
+            )
+        }
+
+        let reference = RecordingSessionReference(
+            sessionID: sessionID,
+            workspaceURL: workspaceRoot,
+            sessionURL: sessionURL,
+            artifactsURL: artifactsURL
+        )
+        _ = try loadSession(reference: reference)
+        return reference
+    }
+
     private func plannedWorkspaceRoot(_ url: URL) throws -> URL {
         let standardized = url.standardizedFileURL
         if Self.fileExists(standardized) {

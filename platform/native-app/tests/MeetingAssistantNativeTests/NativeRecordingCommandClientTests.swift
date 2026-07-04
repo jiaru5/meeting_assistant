@@ -506,6 +506,88 @@ struct NativeRecordingCommandClientTests {
     }
 
     @Test
+    func stopAfterClientRestartReturnsFinalArtifactsWithoutCallingAdapterAgain() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let initialAdapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .success(
+                artifacts: [
+                    .available(.screenVideo, data: data("restart-screen-video")),
+                    .available(.mixedAudio, data: data("restart-mixed-audio")),
+                ]
+            )
+        )
+        let initialClient = nativeClient(
+            workspace: workspace,
+            sessionID: "session-restart-final",
+            adapter: initialAdapter
+        )
+        _ = try await initialClient.startNativeRecording(startRequest(workspace: workspace))
+        let recorded = try await initialClient.stopRecording(
+            StopRecordingRequest(sessionID: "session-restart-final")
+        )
+        let restartedAdapter = ControlledNativeCaptureAdapter()
+        let restartedClient = nativeClient(
+            workspace: workspace,
+            sessionID: "unused-after-restart",
+            recoveryWorkspace: workspace,
+            adapter: restartedAdapter
+        )
+
+        let recovered = try await restartedClient.stopRecording(
+            StopRecordingRequest(sessionID: "session-restart-final")
+        )
+
+        #expect(recorded.ok == true)
+        #expect(recovered.ok == true)
+        #expect(recovered.status == "recorded")
+        #expect(recovered.artifacts == recorded.artifacts)
+        #expect(await initialAdapter.stopContexts.count == 1)
+        #expect(await restartedAdapter.stopContexts.isEmpty)
+    }
+
+    @Test
+    func stopAfterClientRestartFailsClosedWhenAdapterLostRecordingState() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let initialAdapter = ControlledNativeCaptureAdapter()
+        let initialClient = nativeClient(
+            workspace: workspace,
+            sessionID: "session-restart-orphan",
+            adapter: initialAdapter
+        )
+        _ = try await initialClient.startNativeRecording(startRequest(workspace: workspace))
+        let screenURL = artifactURL(workspace, "session-restart-orphan", "screen_video.mov")
+        try data("partial-screen-video").write(to: screenURL)
+        let restartedAdapter = ControlledNativeCaptureAdapter()
+        let restartedClient = nativeClient(
+            workspace: workspace,
+            sessionID: "unused-after-orphan-restart",
+            recoveryWorkspace: workspace,
+            adapter: restartedAdapter
+        )
+
+        let response = try await restartedClient.stopRecording(
+            StopRecordingRequest(sessionID: "session-restart-orphan")
+        )
+
+        #expect(response.ok == false)
+        #expect(response.code == .captureFailed)
+        #expect(response.status == "failed")
+        #expect(await restartedAdapter.stopContexts.count == 1)
+        #expect(try Data(contentsOf: screenURL) == data("partial-screen-video"))
+        #expect(response.details.contains { $0.contains("Native capture session was not started.") })
+        let session = try readSessionJSON(workspace: workspace, sessionID: "session-restart-orphan")
+        #expect(session["status"] as? String == "failed")
+        let artifacts = try #require(session["artifacts"] as? [[String: Any]])
+        #expect(artifacts.count == 4)
+        #expect(artifacts.allSatisfy { $0["capture_status"] as? String == "failed" })
+        #expect(artifacts.allSatisfy {
+            ($0["degradation_reason"] as? String)?.contains("Native capture session was not started.") == true
+        })
+    }
+
+    @Test
     func stopFinalizationPathConflictCanRetryWithoutCallingAdapterAgain() async throws {
         let workspace = try temporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
@@ -762,12 +844,14 @@ private func nativeClient(
     workspace: URL,
     sessionID: String,
     permissions: NativeCapturePermissionSnapshot = .granted,
+    recoveryWorkspace: URL? = nil,
     adapter: any NativeCaptureAdapter
 ) -> NativeRecordingCommandClient {
     nativeClient(
         workspace: workspace,
         sessionID: sessionID,
         permissionChecker: StaticNativeCapturePermissionChecker(snapshot: permissions),
+        recoveryWorkspace: recoveryWorkspace,
         adapter: adapter
     )
 }
@@ -776,14 +860,17 @@ private func nativeClient(
     workspace: URL,
     sessionID: String,
     permissionChecker: any NativeCapturePermissionChecking,
+    recoveryWorkspace: URL? = nil,
     adapter: any NativeCaptureAdapter
 ) -> NativeRecordingCommandClient {
-    NativeRecordingCommandClient(
+    let recoveryWorkspaceURL = recoveryWorkspace ?? workspace
+    return NativeRecordingCommandClient(
         permissionChecker: permissionChecker,
         captureAdapter: adapter,
         sessionIDProvider: { sessionID },
         timestampProvider: { fixedTimestamp },
-        requestIDProvider: { command in "request-\(command.rawValue)" }
+        requestIDProvider: { command in "request-\(command.rawValue)" },
+        recoveryWorkspaceURLProvider: { recoveryWorkspaceURL }
     )
 }
 

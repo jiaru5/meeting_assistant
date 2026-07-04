@@ -7,6 +7,7 @@ public actor NativeRecordingCommandClient: RecordingCommandClient {
     private let sessionIDProvider: @Sendable () -> String
     private let timestampProvider: @Sendable () -> String
     private let requestIDProvider: @Sendable (RecordingCommandName) -> String
+    private let recoveryWorkspaceURLProvider: @Sendable () -> URL
     private var activeSessions: [String: RecordingSessionReference] = [:]
     private var pendingStopFinalizations: [String: PendingNativeStopFinalization] = [:]
 
@@ -24,6 +25,9 @@ public actor NativeRecordingCommandClient: RecordingCommandClient {
         },
         requestIDProvider: @escaping @Sendable (RecordingCommandName) -> String = { command in
             "local-native-\(command.rawValue)-\(UUID().uuidString.lowercased())"
+        },
+        recoveryWorkspaceURLProvider: @escaping @Sendable () -> URL = {
+            RecordingSessionStore.defaultWorkspaceURL
         }
     ) {
         self.permissionChecker = permissionChecker
@@ -32,6 +36,7 @@ public actor NativeRecordingCommandClient: RecordingCommandClient {
         self.sessionIDProvider = sessionIDProvider
         self.timestampProvider = timestampProvider
         self.requestIDProvider = requestIDProvider
+        self.recoveryWorkspaceURLProvider = recoveryWorkspaceURLProvider
     }
 
     public func startNativeRecording(
@@ -103,13 +108,15 @@ public actor NativeRecordingCommandClient: RecordingCommandClient {
         _ request: StopRecordingRequest
     ) async throws -> RecordingCommandResponse {
         let requestID = requestIDProvider(.stopRecording)
-        guard let reference = activeSessions[request.sessionID] else {
-            return RecordingCommandResponse.failure(
+        let reference: RecordingSessionReference
+        do {
+            reference = try recordingSessionReferenceForStop(sessionID: request.sessionID)
+        } catch let error as RecordingSessionStoreError {
+            return storeFailureResponse(
+                error,
                 requestID: requestID,
                 command: .stopRecording,
-                sessionID: request.sessionID,
-                code: .notFound,
-                message: "Recording session is not active."
+                sessionID: request.sessionID
             )
         }
 
@@ -192,6 +199,19 @@ public actor NativeRecordingCommandClient: RecordingCommandClient {
                 message: error.localizedDescription
             )
         }
+    }
+
+    private func recordingSessionReferenceForStop(sessionID: String) throws -> RecordingSessionReference {
+        if let reference = activeSessions[sessionID] {
+            return reference
+        }
+
+        let reference = try sessionStore.existingSessionReference(
+            sessionID: sessionID,
+            workspaceURL: recoveryWorkspaceURLProvider()
+        )
+        activeSessions[sessionID] = reference
+        return reference
     }
 
     private func stopCaptureAfterStartFailure(context: NativeCaptureStartContext) async {
