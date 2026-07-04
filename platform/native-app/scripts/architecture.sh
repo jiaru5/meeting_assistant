@@ -119,6 +119,8 @@ grep -R -q "MA_NATIVE_APP_REAL_CAPTURE_SMOKE" UITests/MeetingAssistantNativeAppU
 grep -q "MA_NATIVE_APP_REAL_CAPTURE_SMOKE" scripts/test-app-bundle.sh
 grep -q "test-without-building" scripts/test-app-bundle.sh
 grep -q "PlistBuddy" scripts/test-app-bundle.sh
+grep -q "permission_denied" scripts/test-app-bundle.sh
+grep -q "real-capture-app-bundle-smoke.log" scripts/test-app-bundle.sh
 grep -R -q "MA_NATIVE_PROCESSING_CLIENT" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MA_NATIVE_APP_XCTEST" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "isProcessClientTestHookAllowed" App/MeetingAssistantNativeApp.swift

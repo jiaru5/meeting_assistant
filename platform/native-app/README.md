@@ -57,7 +57,7 @@
 3. 该测试从设计化 shell 点击既有 `ma.recording.startButton` 和 `ma.recording.stopButton`，通过 Debug/XCTest-only `MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit` 选择真实 `AppleScreenCaptureKitNativeCaptureAdapter`，并仍经由 `NativeRecordingCommandClient`、`MacOSNativeCapturePermissionChecker` 和 `RecordingSessionStore`。
 4. 该 smoke 设置 `MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO=false` 和 `MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO=false`，默认只证明 screen-only 真实录制，降低麦克风权限对 UI smoke 的影响。
 5. 成功时验证 UI 状态为 saved、`screen_video` 为 `available`、其他音频 artifact 按未请求策略为 `missing`，并校验 workspace `session.json`、`screen_video` 文件非空和 `sha256:` checksum。
-6. 如果 macOS 没有给测试 app bundle Screen Recording 权限，Start 会 fail closed，UI 暴露 `ma.recording.error`，通常为 `permission_denied`；这类失败是本机 TCC 环境 blocker，不得报告为真实录制通过。
+6. 如果 macOS 没有给测试 app bundle Screen Recording / Screen & System Audio Recording 权限，Start 会 fail closed，UI 暴露 `ma.recording.error`，通常为 `permission_denied`；脚本会把 xcodebuild 输出保存到 `build/DerivedData/AppBundleUITests/real-capture-app-bundle-smoke.log`，并打印系统设置入口、app bundle 位置和重跑命令。这类失败是本机 TCC 环境 blocker，不得报告为真实录制通过。
 7. 该 smoke 不属于默认 `scripts/test.sh`、默认 app-bundle XCUITest 或 Release 门禁；通过也仍是 partial evidence，不证明生产 app 默认启用真实 adapter、独立音频产物、native-to-processing invocation 或 release readiness。
 
 当前已实现 VS-MA-16 native processing state consumer 边界：
