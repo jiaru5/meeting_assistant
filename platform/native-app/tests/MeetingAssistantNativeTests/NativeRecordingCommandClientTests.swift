@@ -837,6 +837,45 @@ struct NativeRecordingCommandClientTests {
     }
 
     @Test
+    func adapterArtifactCrossTypePathFailsClosedOnStop() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .success(
+                artifacts: [
+                    .available(
+                        .screenVideo,
+                        relativePath: "artifacts/mixed_audio.wav",
+                        data: data("screen-video")
+                    ),
+                ]
+            )
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-artifact-cross-type-path",
+            adapter: adapter
+        )
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+
+        let response = try await client.stopRecording(
+            StopRecordingRequest(sessionID: "session-artifact-cross-type-path")
+        )
+
+        #expect(response.ok == false)
+        #expect(response.code == .pathConflict)
+        #expect(await adapter.stopContexts.count == 1)
+        #expect(!FileManager.default.fileExists(
+            atPath: artifactURL(workspace, "session-artifact-cross-type-path", "screen_video.mov").path
+        ))
+        #expect(!FileManager.default.fileExists(
+            atPath: artifactURL(workspace, "session-artifact-cross-type-path", "mixed_audio.wav").path
+        ))
+        let session = try readSessionJSON(workspace: workspace, sessionID: "session-artifact-cross-type-path")
+        #expect(session["status"] as? String == "recording")
+    }
+
+    @Test
     func duplicateAdapterArtifactTypeFailsClosedOnStop() async throws {
         let workspace = try temporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }

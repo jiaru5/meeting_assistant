@@ -450,6 +450,7 @@ public struct RecordingSessionStore: Sendable {
             }
             let artifactURL = try managedArtifactURL(
                 relativePath: relativePath,
+                artifactType: artifactType,
                 reference: reference
             )
             try writeAvailableArtifactData(data, to: artifactURL)
@@ -470,9 +471,13 @@ public struct RecordingSessionStore: Sendable {
                 ?? defaultDegradationReason(
                     artifactType: artifactType,
                     status: result.status,
-                    defaultFailureReason: defaultFailureReason
-                )
-            let artifactURL = try managedArtifactURL(relativePath: relativePath, reference: reference)
+                defaultFailureReason: defaultFailureReason
+            )
+            let artifactURL = try managedArtifactURL(
+                relativePath: relativePath,
+                artifactType: artifactType,
+                reference: reference
+            )
             try validateManagedArtifactRegistrationTarget(artifactURL)
             return RecordingArtifactMetadata(
                 id: artifactID,
@@ -501,6 +506,7 @@ public struct RecordingSessionStore: Sendable {
 
     private func managedArtifactURL(
         relativePath: String,
+        artifactType: NativeCaptureArtifactType,
         reference: RecordingSessionReference
     ) throws -> URL {
         guard !relativePath.isEmpty,
@@ -516,6 +522,13 @@ public struct RecordingSessionStore: Sendable {
         guard !components.contains(".."), !components.contains(".") else {
             throw RecordingSessionStoreError.pathConflict(
                 "Recording artifact path contains traversal components: \(relativePath)"
+            )
+        }
+        guard let filename = components.last,
+              filename.hasPrefix("\(artifactType.rawValue).")
+        else {
+            throw RecordingSessionStoreError.pathConflict(
+                "Recording artifact path does not match artifact type \(artifactType.rawValue): \(relativePath)"
             )
         }
 
