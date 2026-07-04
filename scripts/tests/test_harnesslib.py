@@ -820,6 +820,41 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertFalse(marker.exists())
             self.assertNotIn("supply-chain-check passed: phase=current", result.stdout)
 
+    def test_supply_chain_current_fails_when_production_component_uses_shell_sbom_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            marker = fixture / "sbom-current-shell.log"
+            command = [
+                sys.executable,
+                "-c",
+                f"from pathlib import Path; Path({str(marker)!r}).open('a').write('sbom\\n')",
+            ]
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            production_components = [
+                component for component in manifest["components"] if component.get("production") is True
+            ]
+            self.assertGreaterEqual(len(production_components), 1)
+            for component in manifest["components"]:
+                component["commands"]["sbom"] = command
+            production_components[0]["commands"]["sbom"] = ["sh", "-c", "printf shell > \"$1\"", "sh", str(marker)]
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/supply-chain-check.sh"), "current"],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("harness manifest validation failed for phase=current", output)
+            self.assertIn("commands.sbom must be a non-empty argv array", output)
+            self.assertFalse(marker.exists())
+            self.assertNotIn("supply-chain-check passed: phase=current", result.stdout)
+
     def test_build_gate_requires_production_component_build_reports(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
