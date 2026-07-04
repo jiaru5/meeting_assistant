@@ -695,7 +695,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             app.activate()
         }
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10), "Expected app bundle to run foreground.")
-        XCTAssertTrue(appWindow(in: app).waitForExistence(timeout: 5), "Expected app bundle window to exist.")
+        _ = waitForAppWindow(in: app, context: "after launch")
         assertWindowIsOnBuiltInScreen(app)
         launchedApp = app
         return app
@@ -735,7 +735,58 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
     }
 
     private func appWindow(in app: XCUIApplication) -> XCUIElement {
-        app.windows.firstMatch
+        materializedAppWindow(in: app) ?? app.windows.firstMatch
+    }
+
+    private func materializedAppWindow(in app: XCUIApplication) -> XCUIElement? {
+        app.windows.allElementsBoundByIndex.first { window in
+            window.exists && hasUsableFrame(window.frame)
+        }
+    }
+
+    private func waitForAppWindow(
+        in app: XCUIApplication,
+        context: String,
+        timeout: TimeInterval = 15,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        var attempts = 0
+
+        while Date() < deadline {
+            attempts += 1
+            if app.state != .runningForeground {
+                app.activate()
+                _ = app.wait(for: .runningForeground, timeout: 2)
+            }
+
+            if let window = materializedAppWindow(in: app) {
+                return window
+            }
+
+            let firstWindow = app.windows.firstMatch
+            if firstWindow.waitForExistence(timeout: 1), hasUsableFrame(firstWindow.frame) {
+                return firstWindow
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+
+        XCTFail(
+            "Expected app window \(context). \(appWindowDiagnostics(app, attempts: attempts))",
+            file: file,
+            line: line
+        )
+        return app.windows.firstMatch
+    }
+
+    private func appWindowDiagnostics(_ app: XCUIApplication, attempts: Int) -> String {
+        let windows = app.windows.allElementsBoundByIndex
+        let windowSummary = windows.prefix(5).enumerated().map { index, window in
+            "window[\(index)] exists=\(window.exists) hittable=\(window.isHittable) frame=\(window.frame) label=\(window.label) value=\(String(describing: window.value))"
+        }.joined(separator: "; ")
+        return "attempts=\(attempts); appState=\(app.state.rawValue); windows=\(windows.count); \(windowSummary.isEmpty ? "no materialized windows" : windowSummary)"
     }
 
     private func assertWindowIsOnBuiltInScreen(
@@ -1149,12 +1200,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             file: file,
             line: line
         )
-        XCTAssertTrue(
-            appWindow(in: app).waitForExistence(timeout: 5),
-            "Expected app window before tapping \(identifier).",
-            file: file,
-            line: line
-        )
+        _ = waitForAppWindow(in: app, context: "before tapping \(identifier)", file: file, line: line)
     }
 
     private func scrollTowardTranscriptActions(
