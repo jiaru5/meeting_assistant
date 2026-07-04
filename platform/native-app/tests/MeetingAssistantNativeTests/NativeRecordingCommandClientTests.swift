@@ -803,6 +803,40 @@ struct NativeRecordingCommandClientTests {
     }
 
     @Test
+    func adapterArtifactUnsafeFormatFailsClosedOnStop() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .success(
+                artifacts: [
+                    .available(
+                        .screenVideo,
+                        format: "mp4/../../outside",
+                        data: data("screen-video")
+                    ),
+                ]
+            )
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-artifact-unsafe-format",
+            adapter: adapter
+        )
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let escapedURL = sessionRoot(workspace, "session-artifact-unsafe-format")
+            .appendingPathComponent("outside")
+
+        let response = try await client.stopRecording(
+            StopRecordingRequest(sessionID: "session-artifact-unsafe-format")
+        )
+
+        #expect(response.ok == false)
+        #expect(response.code == .pathConflict)
+        #expect(await adapter.stopContexts.count == 1)
+        #expect(!FileManager.default.fileExists(atPath: escapedURL.path))
+    }
+
+    @Test
     func nonAvailableArtifactSymlinkFailsClosedOnStop() async throws {
         let workspace = try temporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
