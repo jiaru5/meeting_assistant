@@ -682,6 +682,42 @@ struct NativeRecordingCommandClientTests {
     }
 
     @Test
+    func sessionDirectorySymlinkFailsClosedBeforeAdapterStop() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .success(artifacts: [.available(.screenVideo, data: data("screen-video"))])
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-directory-symlink",
+            adapter: adapter
+        )
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let sessionURL = sessionRoot(workspace, "session-directory-symlink")
+        let outsideSessionURL = workspace.appendingPathComponent("outside-session-root", isDirectory: true)
+        try FileManager.default.createDirectory(at: outsideSessionURL, withIntermediateDirectories: false)
+        try Data(contentsOf: sessionURL.appendingPathComponent("session.json"))
+            .write(to: outsideSessionURL.appendingPathComponent("session.json"))
+        try FileManager.default.removeItem(at: sessionURL)
+        try FileManager.default.createSymbolicLink(
+            at: sessionURL,
+            withDestinationURL: outsideSessionURL
+        )
+
+        let response = try await client.stopRecording(
+            StopRecordingRequest(sessionID: "session-directory-symlink")
+        )
+
+        #expect(response.ok == false)
+        #expect(response.code == .pathConflict)
+        #expect(await adapter.stopContexts.isEmpty)
+        #expect(!FileManager.default.fileExists(
+            atPath: outsideSessionURL.appendingPathComponent("artifacts/screen_video.mov").path
+        ))
+    }
+
+    @Test
     func artifactSymlinkFailsClosedOnStop() async throws {
         let workspace = try temporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
