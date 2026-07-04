@@ -738,6 +738,43 @@ struct NativeRecordingCommandClientTests {
     }
 
     @Test
+    func artifactDirectorySymlinkFailsClosedOnStop() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter(
+            stopBehavior: .success(artifacts: [.available(.screenVideo, data: data("screen-video"))])
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-artifact-directory-symlink",
+            adapter: adapter
+        )
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let outsideDirectory = workspace.appendingPathComponent("outside-artifacts", isDirectory: true)
+        try FileManager.default.createDirectory(at: outsideDirectory, withIntermediateDirectories: false)
+        let artifactsDirectory = sessionRoot(workspace, "session-artifact-directory-symlink")
+            .appendingPathComponent("artifacts", isDirectory: true)
+        try FileManager.default.removeItem(at: artifactsDirectory)
+        try FileManager.default.createSymbolicLink(
+            at: artifactsDirectory,
+            withDestinationURL: outsideDirectory
+        )
+
+        let response = try await client.stopRecording(
+            StopRecordingRequest(sessionID: "session-artifact-directory-symlink")
+        )
+
+        #expect(response.ok == false)
+        #expect(response.code == .pathConflict)
+        #expect(await adapter.stopContexts.count == 1)
+        #expect(!FileManager.default.fileExists(
+            atPath: outsideDirectory.appendingPathComponent("screen_video.mov").path
+        ))
+        let session = try readSessionJSON(workspace: workspace, sessionID: "session-artifact-directory-symlink")
+        #expect(session["status"] as? String == "recording")
+    }
+
+    @Test
     func adapterArtifactTraversalPathFailsClosedOnStop() async throws {
         let workspace = try temporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
