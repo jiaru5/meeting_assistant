@@ -186,12 +186,95 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
-guard CommandLine.arguments.count == 4 else {
-    fail("usage: NativeTranscriptBridgeSmoke <workspace> <session-id> <transcript-id>")
+guard CommandLine.arguments.count == 5 else {
+    fail("usage: NativeTranscriptBridgeSmoke <workspace> <session-id> <transcript-id> <repo-root>")
 }
 
 let workspaceURL = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 let sessionID = CommandLine.arguments[2]
+let repoRootURL = URL(fileURLWithPath: CommandLine.arguments[4], isDirectory: true)
+
+func assertSourceContains(_ url: URL, _ requiredSnippets: [String], label: String) {
+    let source: String
+    do {
+        source = try String(contentsOf: url, encoding: .utf8)
+    } catch {
+        fail("\\(label): could not read source at \\(url.path): \\(error)")
+    }
+    for snippet in requiredSnippets where !source.contains(snippet) {
+        fail("\\(label): missing source snippet: \\(snippet)")
+    }
+}
+
+func assertDesignedShellContract(repoRootURL: URL) {
+    let sectionIDs = DesignedNativeShellSection.allCases.map(\\.rawValue)
+    guard sectionIDs == ["preflight", "recording", "artifacts", "processing", "transcript", "actions"] else {
+        fail("designed native shell section order drifted: \\(sectionIDs)")
+    }
+    guard DesignedNativeShellSection.recording.title == "Record meeting" else {
+        fail("designed native shell recording section title drifted")
+    }
+    guard DesignedNativeShellAccessibilityID.root == "ma.shell.root" else {
+        fail("designed native shell root locator drifted")
+    }
+    guard DesignedNativeShellAccessibilityID.navButton(.processing) == "ma.shell.nav.processing" else {
+        fail("designed native shell processing nav locator drifted")
+    }
+    guard DesignedNativeShellAccessibilityID.section(.actions) == "ma.shell.section.actions" else {
+        fail("designed native shell actions section locator drifted")
+    }
+    guard DesignedNativeShellAccessibilityID.processingStep("speakerLabels") == "ma.shell.processingStep.speakerLabels" else {
+        fail("designed native shell processing step locator drifted")
+    }
+    guard DesignedNativeShellAccessibilityID.artifactStatus("mixed_audio") == "ma.sessionArtifact.mixed_audio.status" else {
+        fail("designed native shell artifact status locator drifted")
+    }
+
+    let appSourceURL = repoRootURL.appendingPathComponent("platform/native-app/App/MeetingAssistantNativeApp.swift")
+    let appSource: String
+    do {
+        appSource = try String(contentsOf: appSourceURL, encoding: .utf8)
+    } catch {
+        fail("designed native shell app root: could not read source at \\(appSourceURL.path): \\(error)")
+    }
+    for snippet in [
+        "@StateObject private var shellViewModel: DesignedNativeShellViewModel",
+        "_shellViewModel = StateObject(wrappedValue: DesignedNativeShellViewModel())",
+        "DesignedNativeShellView(",
+        "shellViewModel: shellViewModel",
+        "permissionViewModel: permissionViewModel",
+        "recordingViewModel: recordingViewModel",
+        "processingViewModel: processingViewModel",
+        "transcriptViewModel: transcriptViewModel",
+        "transcriptActionViewModel: transcriptActionViewModel",
+    ] where !appSource.contains(snippet) {
+        fail("designed native shell app root: missing source snippet: \\(snippet)")
+    }
+    if appSource.contains("PermissionDependencyStatusView(viewModel: permissionViewModel)") {
+        fail("designed native shell app root must not mount primitive debug UI directly")
+    }
+
+    let shellSourceURL = repoRootURL.appendingPathComponent("platform/native-app/Sources/MeetingAssistantNative/DesignedNativeShellView.swift")
+    assertSourceContains(
+        shellSourceURL,
+        [
+            "Text(\\\"Meeting Assistant\\\")",
+            "Designed native app shell",
+            ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.root)",
+            ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.statusBoard)",
+            ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.commandRail)",
+            "PermissionDependencyStatusView(viewModel: permissionViewModel)",
+            "RecordingControlView(viewModel: recordingViewModel)",
+            "ProcessingStateView(viewModel: processingViewModel)",
+            "TranscriptReviewView(viewModel: transcriptViewModel)",
+            "TranscriptReviewActionsView(viewModel: transcriptActionViewModel)",
+        ],
+        label: "designed native shell source"
+    )
+}
+
+assertDesignedShellContract(repoRootURL: repoRootURL)
+
 let input: TranscriptReviewInput
 do {
     input = try TranscriptReviewWorkspaceLoader.load(
@@ -258,6 +341,7 @@ guard let degradation = viewModel.state.degradationReason, !degradation.isEmpty 
 }
 
 print("native transcript bridge smoke passed.")
+print("designed native shell bridge smoke passed.")
 """,
         encoding="utf-8",
     )
@@ -353,7 +437,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-native-bridge-") as t
     if not shutil.which("swift"):
         raise AssertionError("native Swift bridge cannot run: swift executable was not found; install Xcode or Command Line Tools")
     completed = subprocess.run(
-        ["swift", "run", "NativeTranscriptBridgeSmoke", str(workspace), session_id, str(transcript["id"])],
+        ["swift", "run", "NativeTranscriptBridgeSmoke", str(workspace), session_id, str(transcript["id"]), str(ROOT)],
         cwd=swift_root,
         text=True,
         capture_output=True,
@@ -366,6 +450,8 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-native-bridge-") as t
         )
     if "native transcript bridge smoke passed." not in completed.stdout:
         raise AssertionError(f"native Swift bridge success marker missing: {completed.stdout!r}")
+    if "designed native shell bridge smoke passed." not in completed.stdout:
+        raise AssertionError(f"designed native shell bridge success marker missing: {completed.stdout!r}")
     after_bridge_checksums = {
         "session.json": sha256(session_dir / "session.json"),
         "transcript.json": sha256(transcript_path),
@@ -375,4 +461,5 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-native-bridge-") as t
         raise AssertionError("native Swift bridge changed processing artifacts")
 
 print("processing-to-native transcript bridge e2e smoke passed.")
+print("designed native shell bridge smoke passed.")
 PY

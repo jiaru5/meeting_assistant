@@ -39,16 +39,17 @@ run_stage() {
 
 run_stage "processing local smoke" "p2-c processing local e2e smoke passed." "./platform/e2e/smoke-test.sh"
 run_stage "capture-style processing smoke" "capture-style processing e2e smoke passed." "./platform/e2e/capture-processing-smoke.sh"
-run_stage "native transcript bridge smoke" "processing-to-native transcript bridge e2e smoke passed." "./platform/e2e/native-transcript-bridge-smoke.sh"
+run_stage "native transcript bridge and designed shell smoke" "designed native shell bridge smoke passed." "./platform/e2e/native-transcript-bridge-smoke.sh"
 
 echo "VS-MA-20 provider/e2e attribution [non-contract]: import processing chain remains in scope."
 echo "VS-MA-20 provider/e2e attribution [non-contract]: native_recording-style provider chain remains in scope."
 echo "VS-MA-20 provider/e2e attribution [non-contract]: native read bridge checksum remains in scope."
+echo "VS-MA-20 provider/e2e attribution [non-contract]: designed native shell app-root and ma.shell locator bridge remain in scope."
 echo "VS-MA-20 provider/e2e attribution [non-contract]: no-auto-pull precondition remains in scope."
-echo "VS-MA-20 provider/e2e attribution [non-contract]: real native capture, native UI, and release bundle are not proven by this provider smoke."
+echo "VS-MA-20 provider/e2e attribution [non-contract]: real native capture, app-bundle UI launch, and release bundle are not proven by this provider smoke."
 echo "VS-MA-23 provider/e2e release readiness [non-contract]: processing local command chain passed."
 echo "VS-MA-23 provider/e2e release readiness [non-contract]: capture-style provider artifact and failure-redaction chain passed."
-echo "VS-MA-23 provider/e2e release readiness [non-contract]: native read bridge artifact-consumption smoke passed."
+echo "VS-MA-23 provider/e2e release readiness [non-contract]: native read bridge and designed shell app-root smoke passed."
 echo "VS-MA-23 provider/e2e release readiness [non-contract]: product-validation release blockers remain authoritative until Main PM closes PV partial rows."
 
 echo "full-stack e2e smoke passed."

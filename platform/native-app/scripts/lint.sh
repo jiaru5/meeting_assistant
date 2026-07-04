@@ -48,6 +48,8 @@ required = [
     "Sources/MeetingAssistantNative/ProcessingCommandFakeClient.swift",
     "Sources/MeetingAssistantNative/ProcessingStateViewModel.swift",
     "Sources/MeetingAssistantNative/ProcessingStateView.swift",
+    "Sources/MeetingAssistantNative/DesignedNativeShellViewModel.swift",
+    "Sources/MeetingAssistantNative/DesignedNativeShellView.swift",
     "test-fixtures/processing-command-fixture.sh",
     "test-fixtures/transcript-action-command-fixture.sh",
     "tests/MeetingAssistantNativeTests/PermissionDependencyStatusViewModelTests.swift",
@@ -56,7 +58,9 @@ required = [
     "tests/MeetingAssistantNativeTests/TranscriptReviewViewModelTests.swift",
     "tests/MeetingAssistantNativeTests/TranscriptReviewActionsViewModelTests.swift",
     "tests/MeetingAssistantNativeTests/ProcessingStateViewModelTests.swift",
+    "tests/MeetingAssistantNativeTests/DesignedNativeShellViewModelTests.swift",
     "UITests/MeetingAssistantNativeUITests/NativeControlPlaneSmokeTests.swift",
+    "UITests/MeetingAssistantNativeAppUITests/DesignedNativeShellAppBundleTests.swift",
     "UITests/MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests.swift",
     "sbom/native-app.cdx.json",
 ]
@@ -69,7 +73,7 @@ if metadata.get("id") != "native-app":
     raise SystemExit("native-app lint failed: component id mismatch")
 if metadata.get("kind") != "project-component":
     raise SystemExit("native-app lint failed: component kind must be project-component")
-expected_behavior = "permission_dependency_status_fake_recording_controlled_and_apple_screencapturekit_native_capture_artifact_registration_processing_state_transcript_review_and_actions"
+expected_behavior = "permission_dependency_status_fake_recording_controlled_and_apple_screencapturekit_native_capture_artifact_registration_processing_state_transcript_review_actions_and_designed_native_shell"
 if metadata.get("business_behavior") != expected_behavior:
     raise SystemExit(f"native-app lint failed: business behavior must be {expected_behavior}")
 if "read_only_workspace_transcript_loading" not in metadata.get("allowed_capabilities", []):
@@ -88,6 +92,8 @@ if "native_capture_combined_recording_spike" not in metadata.get("allowed_capabi
     raise SystemExit("native-app lint failed: missing combined recording spike capability")
 if "native_capture_artifact_registration" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app lint failed: missing native capture artifact registration capability")
+if "designed_native_shell" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app lint failed: missing designed native shell capability")
 
 project = (root / "MeetingAssistantNative.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
 required_project_snippets = [
@@ -108,6 +114,9 @@ required_project_snippets = [
     "ProcessingCommandFakeClient.swift",
     "ProcessingStateViewModel.swift",
     "ProcessingStateView.swift",
+    "DesignedNativeShellViewModel.swift",
+    "DesignedNativeShellView.swift",
+    "DesignedNativeShellAppBundleTests.swift",
     "NativeCaptureAdapter.swift",
     "ControlledNativeCaptureAdapter.swift",
     "AppleScreenCaptureKitNativeCaptureAdapter.swift",
