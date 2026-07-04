@@ -10,4 +10,10 @@ if grep -R -n -E 'curl |wget |brew install|pip install|npm install|API_KEY|SECRE
   exit 1
 fi
 
+if find scripts -type f ! -name security.sh ! -name architecture.sh -print0 |
+  xargs -0 grep -n -E 'curl |wget |brew install|pip install|npm install|API_KEY|SECRET|TOKEN'; then
+  echo "native-app security failed: forbidden network, install, or secret marker found in component scripts." >&2
+  exit 1
+fi
+
 echo "native-app security check passed."

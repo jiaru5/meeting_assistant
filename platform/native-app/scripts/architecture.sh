@@ -10,6 +10,8 @@ grep -q "VS-MA-12 boundary" tests/ArchitectureTest.md
 grep -q "VS-MA-13 fake recording boundary" tests/ArchitectureTest.md
 grep -q "VS-MA-14/VS-MA-15 controlled native capture artifact registration boundary" tests/ArchitectureTest.md
 grep -q "Apple ScreenCaptureKit native capture adapter exception" tests/ArchitectureTest.md
+grep -q "opt-in real native capture smoke boundary" tests/ArchitectureTest.md
+grep -q "opt-in real native capture app-bundle smoke boundary" tests/ArchitectureTest.md
 grep -q "VS-MA-16 native processing state consumer boundary" tests/ArchitectureTest.md
 grep -q "VS-MA-17 read-only transcript review boundary" tests/ArchitectureTest.md
 grep -q "read-only workspace transcript loading boundary" tests/ArchitectureTest.md
@@ -21,6 +23,9 @@ grep -q "session.json" tests/ArchitectureTest.md
 grep -q "screen_video" tests/ArchitectureTest.md
 grep -q "mixed_audio" tests/ArchitectureTest.md
 grep -q "capture_failed" tests/ArchitectureTest.md
+grep -q "MA_NATIVE_CAPTURE_SMOKE=1" tests/ArchitectureTest.md
+grep -q "MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1" tests/ArchitectureTest.md
+grep -q "MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit" tests/ArchitectureTest.md
 grep -q "transcript.json" tests/ArchitectureTest.md
 grep -q "speaker_labels.json" tests/ArchitectureTest.md
 grep -q "ma.recording.artifact" tests/ArchitectureTest.md
@@ -30,6 +35,7 @@ grep -q "ma.shell" tests/ArchitectureTest.md
 grep -q "ma.sessionArtifact" tests/ArchitectureTest.md
 test -f MeetingAssistantNative.xcodeproj/project.pbxproj
 test -f MeetingAssistantNative.xcodeproj/xcshareddata/xcschemes/MeetingAssistantNative.xcscheme
+test -x scripts/native-capture-smoke.sh
 test -f App/MeetingAssistantNativeApp.swift
 test -f Sources/MeetingAssistantNative/DependencyCheckContract.swift
 test -f Sources/MeetingAssistantNative/PermissionDependencyStatusViewModel.swift
@@ -80,6 +86,13 @@ grep -R -q "RecordingSessionStore" Sources tests
 grep -R -q "ControlledNativeCaptureAdapter" Sources tests
 grep -R -q "AppleScreenCaptureKitNativeCaptureAdapter" Sources tests
 grep -R -q "producesCombinedRecordingFile" Sources tests
+grep -q "MA_NATIVE_CAPTURE_SMOKE" scripts/native-capture-smoke.sh
+grep -q "NativeRecordingCommandClient" scripts/native-capture-smoke.sh
+grep -q "MacOSNativeCapturePermissionChecker" scripts/native-capture-smoke.sh
+grep -q "AppleScreenCaptureKitNativeCaptureAdapter" scripts/native-capture-smoke.sh
+grep -q "RecordingSessionStore" scripts/native-capture-smoke.sh
+grep -q "session.json" scripts/native-capture-smoke.sh
+grep -q "screen_video" scripts/native-capture-smoke.sh
 grep -R -q "ma.processing" Sources tests App UITests
 grep -R -q "ma.transcript" Sources tests App UITests
 grep -R -q "ma.transcriptAction" Sources tests App UITests
@@ -100,6 +113,14 @@ grep -R -q "ma.sessionArtifact" Sources tests App UITests
 grep -R -q "MA_NATIVE_RECORDING_CLIENT" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MA_NATIVE_RECORDING_WORKSPACE" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "isRecordingClientTestHookAllowed" App/MeetingAssistantNativeApp.swift
+grep -R -q "isRealNativeCaptureSmokeEnabled" App/MeetingAssistantNativeApp.swift
+grep -R -q "MA_NATIVE_CAPTURE_SMOKE" App UITests/MeetingAssistantNativeAppUITests
+grep -R -q "MA_NATIVE_APP_REAL_CAPTURE_SMOKE" UITests/MeetingAssistantNativeAppUITests
+grep -q "MA_NATIVE_APP_REAL_CAPTURE_SMOKE" scripts/test-app-bundle.sh
+grep -q "test-without-building" scripts/test-app-bundle.sh
+grep -q "PlistBuddy" scripts/test-app-bundle.sh
+grep -q "permission_denied" scripts/test-app-bundle.sh
+grep -q "real-capture-app-bundle-smoke.log" scripts/test-app-bundle.sh
 grep -R -q "MA_NATIVE_PROCESSING_CLIENT" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MA_NATIVE_APP_XCTEST" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "isProcessClientTestHookAllowed" App/MeetingAssistantNativeApp.swift
@@ -233,7 +254,25 @@ if grep -n -E "$apple_adapter_forbidden" "$apple_adapter_file"; then
   exit 1
 fi
 
-app_bundle_forbidden='meeting_assistant_cli|ProcessingCLIDependencyCheckRunner|DependencyCheckProcessRunner|native-helper|processing-cli|helper[[:space:]]+tool|ScreenCaptureKit|AVCapture|CGDisplayStream|SCStream|AVAudioEngine|AVAudioRecorder|generate_transcript|generate_speaker_labels|normalize_audio|import_media|export_transcript|delete_session|URLSession|URLRequest|NWConnection|NWListener|https?://|curl|wget'
+if grep -n -E 'MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit|[Oo][Bb][Ss]|[Bb]lack[Hh]ole|[Ff][Ff]mpeg|curl[[:space:]]|wget[[:space:]]|brew install|pip install|npm install|generate_transcript|generate_speaker_labels|normalize_audio|import_media|export_transcript|delete_session|processing-cli|meeting_assistant_cli|URLSession|URLRequest|NWConnection|NWListener|https?://|NSPasteboard|NSOpenPanel|NSSavePanel' scripts/native-capture-smoke.sh; then
+  echo "native-app architecture check failed: opt-in native capture smoke must stay on NativeRecordingCommandClient, Apple adapter, permission checker, and session artifact validation only." >&2
+  exit 1
+fi
+
+if grep -R --include '*.swift' -n -E 'AppleScreenCaptureKitNativeCaptureAdapter|apple_screencapturekit' App | grep -v 'App/MeetingAssistantNativeApp.swift'; then
+  echo "native-app architecture check failed: only the app root may select the opt-in Apple ScreenCaptureKit app-bundle smoke hook." >&2
+  exit 1
+fi
+
+if ! grep -q 'case "apple_screencapturekit", "apple-screencapturekit"' App/MeetingAssistantNativeApp.swift ||
+   ! grep -q 'isRealNativeCaptureSmokeEnabled(environment)' App/MeetingAssistantNativeApp.swift ||
+   ! grep -q 'AppleScreenCaptureKitNativeCaptureAdapter()' App/MeetingAssistantNativeApp.swift ||
+   ! grep -q 'MacOSNativeCapturePermissionChecker()' App/MeetingAssistantNativeApp.swift; then
+  echo "native-app architecture check failed: Apple ScreenCaptureKit app-bundle hook must stay explicit, permission-checked, and smoke-gated." >&2
+  exit 1
+fi
+
+app_bundle_forbidden='meeting_assistant_cli|ProcessingCLIDependencyCheckRunner|DependencyCheckProcessRunner|native-helper|processing-cli|helper[[:space:]]+tool|AVCapture|CGDisplayStream|SCStream|AVAudioEngine|AVAudioRecorder|generate_transcript|generate_speaker_labels|normalize_audio|import_media|export_transcript|delete_session|URLSession|URLRequest|NWConnection|NWListener|https?://|curl|wget'
 
 if grep -R --include '*.swift' -n -E "$app_bundle_forbidden" App UITests/MeetingAssistantNativeAppUITests; then
   echo "native-app architecture check failed: app-bundle smoke must keep processing command strings inside the native-owned shell fixture and must not call provider internals, capture frameworks, downloads, or network APIs." >&2

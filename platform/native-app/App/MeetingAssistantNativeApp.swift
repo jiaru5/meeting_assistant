@@ -43,7 +43,9 @@ private struct NativeControlPlaneRootView: View {
                 readinessState: readinessState,
                 title: "UI smoke recording",
                 captureTarget: .screen,
-                workspaceURL: recordingWorkspaceURL
+                workspaceURL: recordingWorkspaceURL,
+                captureSystemAudio: configuration.captureSystemAudio,
+                captureMicrophoneAudio: configuration.captureMicrophoneAudio
             )
         )
         _processingViewModel = StateObject(
@@ -244,6 +246,8 @@ private struct NativeControlPlaneFixtureConfiguration {
     let deleteScript: TranscriptActionFakeCommandClient.DeleteScript
     let exportDestinationPath: String?
     let workspaceDir: String?
+    let captureSystemAudio: Bool
+    let captureMicrophoneAudio: Bool
 
     init(
         dependencyResponse: DependencyCheckResponse,
@@ -256,7 +260,9 @@ private struct NativeControlPlaneFixtureConfiguration {
         exportScript: TranscriptActionFakeCommandClient.ExportScript,
         deleteScript: TranscriptActionFakeCommandClient.DeleteScript,
         exportDestinationPath: String?,
-        workspaceDir: String?
+        workspaceDir: String?,
+        captureSystemAudio: Bool? = nil,
+        captureMicrophoneAudio: Bool? = nil
     ) {
         self.dependencyResponse = dependencyResponse
         self.recordingScript = recordingScript
@@ -269,6 +275,14 @@ private struct NativeControlPlaneFixtureConfiguration {
         self.deleteScript = deleteScript
         self.exportDestinationPath = exportDestinationPath
         self.workspaceDir = workspaceDir
+        self.captureSystemAudio = captureSystemAudio ?? Self.captureAudioFlag(
+            named: "MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO",
+            defaultValue: true
+        )
+        self.captureMicrophoneAudio = captureMicrophoneAudio ?? Self.captureAudioFlag(
+            named: "MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO",
+            defaultValue: true
+        )
     }
 
     var readinessState: PermissionDependencyStatusState {
@@ -295,6 +309,13 @@ private struct NativeControlPlaneFixtureConfiguration {
                 sessionIDProvider: { sessionID },
                 timestampProvider: { "2026-07-01T00:00:00Z" },
                 requestIDProvider: { command in "app-controlled-\(command.rawValue)" }
+            )
+        case .appleScreenCaptureKit:
+            return NativeRecordingCommandClient(
+                permissionChecker: MacOSNativeCapturePermissionChecker(),
+                captureAdapter: AppleScreenCaptureKitNativeCaptureAdapter(),
+                sessionIDProvider: { sessionID },
+                requestIDProvider: { command in "app-apple-screencapturekit-\(command.rawValue)" }
             )
         }
     }
@@ -664,6 +685,17 @@ private struct NativeControlPlaneFixtureConfiguration {
             .map { String($0.dropFirst(prefix.count)) }
     }
 
+    private static func captureAudioFlag(named name: String, defaultValue: Bool) -> Bool {
+        switch ProcessInfo.processInfo.environment[name]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "1", "true", "yes":
+            return true
+        case "0", "false", "no":
+            return false
+        default:
+            return defaultValue
+        }
+    }
+
     private static func recordingWorkspaceURL(
         environment: [String: String],
         arguments: [String]
@@ -704,6 +736,7 @@ private struct NativeControlPlaneFixtureConfiguration {
 private enum NativeRecordingClientMode {
     case fake
     case controlled
+    case appleScreenCaptureKit
 
     static func fromLaunchEnvironment(
         _ environment: [String: String],
@@ -712,13 +745,22 @@ private enum NativeRecordingClientMode {
         let rawValue = environment["MA_NATIVE_RECORDING_CLIENT"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        guard rawValue == "controlled",
+        guard let rawValue,
               workspaceURL != nil,
-              isRecordingClientTestHookAllowed(environment)
-        else {
+              isRecordingClientTestHookAllowed(environment) else {
             return .fake
         }
-        return .controlled
+        switch rawValue {
+        case "controlled":
+            return .controlled
+        case "apple_screencapturekit", "apple-screencapturekit":
+            guard isRealNativeCaptureSmokeEnabled(environment) else {
+                return .fake
+            }
+            return .appleScreenCaptureKit
+        default:
+            return .fake
+        }
     }
 
     private static func isRecordingClientTestHookAllowed(_ environment: [String: String]) -> Bool {
@@ -727,6 +769,15 @@ private enum NativeRecordingClientMode {
         #else
         return false
         #endif
+    }
+
+    private static func isRealNativeCaptureSmokeEnabled(_ environment: [String: String]) -> Bool {
+        switch environment["MA_NATIVE_CAPTURE_SMOKE"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "1", "true", "yes":
+            return true
+        default:
+            return false
+        }
     }
 }
 

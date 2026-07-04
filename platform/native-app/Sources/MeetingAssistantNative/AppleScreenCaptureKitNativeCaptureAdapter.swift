@@ -269,10 +269,10 @@ private enum AppleScreenCaptureKitAdapterError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .noRecordingFile(let path):
-            return "ScreenCaptureKit recording file was not found at \(path)."
-        case .emptyRecordingFile(let path):
-            return "ScreenCaptureKit recording file was empty at \(path)."
+        case .noRecordingFile:
+            return "ScreenCaptureKit recording file was not produced."
+        case .emptyRecordingFile:
+            return "ScreenCaptureKit recording file was empty."
         }
     }
 }

@@ -19,6 +19,7 @@ required = [
     "MeetingAssistantNative.xcodeproj/project.pbxproj",
     "MeetingAssistantNative.xcodeproj/xcshareddata/xcschemes/MeetingAssistantNative.xcscheme",
     "scripts/test-app-bundle.sh",
+    "scripts/native-capture-smoke.sh",
     "App/MeetingAssistantNativeApp.swift",
     "tests/ArchitectureTest.md",
     "Sources/MeetingAssistantNative/DependencyCheckContract.swift",
@@ -90,6 +91,10 @@ if "apple_screencapturekit_native_capture_adapter" not in metadata.get("allowed_
     raise SystemExit("native-app lint failed: missing Apple ScreenCaptureKit native capture capability")
 if "native_capture_combined_recording_spike" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app lint failed: missing combined recording spike capability")
+if "opt_in_apple_screencapturekit_native_capture_smoke" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app lint failed: missing opt-in Apple ScreenCaptureKit native capture smoke capability")
+if "debug_xctest_apple_screencapturekit_app_bundle_smoke" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app lint failed: missing Debug/XCTest Apple ScreenCaptureKit app-bundle smoke capability")
 if "native_capture_artifact_registration" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app lint failed: missing native capture artifact registration capability")
 if "designed_native_shell" not in metadata.get("allowed_capabilities", []):

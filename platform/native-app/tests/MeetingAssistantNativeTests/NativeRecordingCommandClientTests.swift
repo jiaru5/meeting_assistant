@@ -156,6 +156,30 @@ struct NativeRecordingCommandClientTests {
     }
 
     @Test
+    func startStoreFailureStopsAdapterBestEffort() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let sessionID = "session-existing-root"
+        try FileManager.default.createDirectory(
+            at: sessionRoot(workspace, sessionID),
+            withIntermediateDirectories: true
+        )
+        let adapter = ControlledNativeCaptureAdapter()
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: sessionID,
+            adapter: adapter
+        )
+
+        let response = try await client.startNativeRecording(startRequest(workspace: workspace))
+
+        #expect(response.ok == false)
+        #expect(response.code == .pathConflict)
+        #expect(await adapter.startContexts.count == 1)
+        #expect(await adapter.stopContexts.count == 1)
+    }
+
+    @Test
     func stopWritesFourTargetArtifactsWithChecksumAndDegradationReasons() async throws {
         let workspace = try temporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
@@ -411,6 +435,7 @@ struct NativeRecordingCommandClientTests {
         #expect(response.artifacts.count == 4)
         #expect(response.artifacts.allSatisfy { $0.captureStatus == "failed" })
         #expect(response.details.allSatisfy { $0.contains("ScreenCaptureKit failed to finish native capture") })
+        #expect(response.details.allSatisfy { !$0.contains("combined_recording.mp4") })
 
         let session = try readSessionJSON(workspace: workspace, sessionID: "session-sck-no-media")
         #expect(session["status"] as? String == "failed")

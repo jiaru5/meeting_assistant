@@ -58,10 +58,16 @@ public actor NativeRecordingCommandClient: RecordingCommandClient {
                 startedAt: startedAt
             )
             try await captureAdapter.start(context)
-            let reference = try sessionStore.createRecordingSession(
-                context: context,
-                title: request.title
-            )
+            let reference: RecordingSessionReference
+            do {
+                reference = try sessionStore.createRecordingSession(
+                    context: context,
+                    title: request.title
+                )
+            } catch {
+                await stopCaptureAfterStartFailure(context: context)
+                throw error
+            }
             activeSessions[sessionID] = reference
             return .successfulStart(
                 requestID: requestID,
@@ -164,6 +170,18 @@ public actor NativeRecordingCommandClient: RecordingCommandClient {
                 message: error.localizedDescription
             )
         }
+    }
+
+    private func stopCaptureAfterStartFailure(context: NativeCaptureStartContext) async {
+        let endedAt = timestampProvider()
+        let stopContext = NativeCaptureStopContext(
+            sessionID: context.sessionID,
+            workspaceURL: context.workspaceURL,
+            sessionURL: context.sessionURL,
+            artifactsURL: context.artifactsURL,
+            endedAt: endedAt
+        )
+        _ = try? await captureAdapter.stop(stopContext)
     }
 
     private func storeFailureResponse(

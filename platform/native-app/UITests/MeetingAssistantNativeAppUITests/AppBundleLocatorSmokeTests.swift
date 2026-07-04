@@ -81,7 +81,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
 
         tapButton("ma.recording.startButton", in: app)
 
-        assertElement("ma.recording.status", in: app, contains: "Recording in progress.")
+        assertRecordingStarted(in: app)
         assertElement("ma.recording.sessionID", in: app, contains: recordingFixture.sessionID)
         tapRecordingButton(
             "ma.recording.stopButton",
@@ -140,6 +140,53 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             try processingFixture.invocationLines(),
             successfulProcessingInvocationLines(sessionID: "session-app-ui-smoke")
         )
+    }
+
+    func testOptInAppleScreenCaptureKitRecordsFromDesignedShellWhenExplicitlyEnabled() throws {
+        guard ProcessInfo.processInfo.environment["MA_NATIVE_APP_REAL_CAPTURE_SMOKE"] == "1" else {
+            throw XCTSkip("Set MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1 to run the opt-in app-bundle ScreenCaptureKit smoke.")
+        }
+
+        let recordingFixture = try AppAppleScreenCaptureKitRecordingFixture()
+        defer { recordingFixture.cleanup() }
+        let app = launchApp(fixture: "ready", realCaptureFixture: recordingFixture)
+
+        tapButton("ma.recording.startButton", in: app)
+
+        assertRecordingStarted(in: app)
+        assertElement("ma.recording.sessionID", in: app, contains: recordingFixture.sessionID)
+        Thread.sleep(forTimeInterval: 2.2)
+        tapRecordingButton(
+            "ma.recording.stopButton",
+            in: app,
+            expectingStatus: "Recording saved."
+        )
+
+        assertElement("ma.recording.status", in: app, contains: "Recording saved.")
+        assertElement("ma.recording.savedSummary", in: app, contains: "Saved 1 recording artifact.")
+        assertElement("ma.recording.artifact.screen_video.status", in: app, contains: "screen_video: available")
+        assertElement("ma.recording.artifact.system_audio.status", in: app, contains: "system_audio: missing")
+        assertElement("ma.recording.artifact.microphone_audio.status", in: app, contains: "microphone_audio: missing")
+        assertElement("ma.recording.artifact.mixed_audio.status", in: app, contains: "mixed_audio: missing")
+
+        let session = try recordingFixture.sessionMetadata()
+        XCTAssertEqual(session["id"] as? String, recordingFixture.sessionID)
+        XCTAssertEqual(session["source_type"] as? String, "native_recording")
+        XCTAssertEqual(session["status"] as? String, "recorded")
+        let artifacts = try XCTUnwrap(session["artifacts"] as? [[String: Any]])
+        let screenVideo = try XCTUnwrap(artifacts.first { $0["artifact_type"] as? String == "screen_video" })
+        XCTAssertEqual(screenVideo["capture_status"] as? String, "available")
+        let screenVideoPath = try XCTUnwrap(screenVideo["path"] as? String)
+        XCTAssertTrue(screenVideoPath.hasPrefix("artifacts/"))
+        XCTAssertFalse(screenVideoPath.contains(".."))
+        let checksum = try XCTUnwrap(screenVideo["checksum"] as? String)
+        XCTAssertTrue(checksum.hasPrefix("sha256:"))
+        let screenVideoURL = recordingFixture.sessionRootURL.appendingPathComponent(screenVideoPath)
+        let fileSize = try XCTUnwrap(screenVideoURL.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+        XCTAssertGreaterThan(fileSize, 0)
+        XCTAssertEqual(artifacts.first { $0["artifact_type"] as? String == "system_audio" }?["capture_status"] as? String, "missing")
+        XCTAssertEqual(artifacts.first { $0["artifact_type"] as? String == "microphone_audio" }?["capture_status"] as? String, "missing")
+        XCTAssertEqual(artifacts.first { $0["artifact_type"] as? String == "mixed_audio" }?["capture_status"] as? String, "missing")
     }
 
     func testStartFailureFixtureShowsStableErrorLocatorFromLaunchedAppBundle() {
@@ -606,6 +653,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         workspaceURL: URL? = nil,
         sessionID: String? = nil,
         recordingFixture: AppControlledRecordingFixture? = nil,
+        realCaptureFixture: AppAppleScreenCaptureKitRecordingFixture? = nil,
         processingFixture: AppProcessingProcessFixture? = nil,
         transcriptActionFixture: AppTranscriptActionProcessFixture? = nil
     ) -> XCUIApplication {
@@ -631,6 +679,9 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         if let recordingFixture {
             recordingFixture.applyLaunchEnvironment(to: app)
         }
+        if let realCaptureFixture {
+            realCaptureFixture.applyLaunchEnvironment(to: app)
+        }
         if let processingFixture {
             processingFixture.applyLaunchEnvironment(to: app)
         }
@@ -644,7 +695,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             app.activate()
         }
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10), "Expected app bundle to run foreground.")
-        XCTAssertTrue(appWindow(in: app).waitForExistence(timeout: 5), "Expected app bundle window to exist.")
+        _ = waitForAppWindow(in: app, context: "after launch")
         assertWindowIsOnBuiltInScreen(app)
         launchedApp = app
         return app
@@ -684,7 +735,58 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
     }
 
     private func appWindow(in app: XCUIApplication) -> XCUIElement {
-        app.windows.firstMatch
+        materializedAppWindow(in: app) ?? app.windows.firstMatch
+    }
+
+    private func materializedAppWindow(in app: XCUIApplication) -> XCUIElement? {
+        app.windows.allElementsBoundByIndex.first { window in
+            window.exists && hasUsableFrame(window.frame)
+        }
+    }
+
+    private func waitForAppWindow(
+        in app: XCUIApplication,
+        context: String,
+        timeout: TimeInterval = 15,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        var attempts = 0
+
+        while Date() < deadline {
+            attempts += 1
+            if app.state != .runningForeground {
+                app.activate()
+                _ = app.wait(for: .runningForeground, timeout: 2)
+            }
+
+            if let window = materializedAppWindow(in: app) {
+                return window
+            }
+
+            let firstWindow = app.windows.firstMatch
+            if firstWindow.waitForExistence(timeout: 1), hasUsableFrame(firstWindow.frame) {
+                return firstWindow
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+
+        XCTFail(
+            "Expected app window \(context). \(appWindowDiagnostics(app, attempts: attempts))",
+            file: file,
+            line: line
+        )
+        return app.windows.firstMatch
+    }
+
+    private func appWindowDiagnostics(_ app: XCUIApplication, attempts: Int) -> String {
+        let windows = app.windows.allElementsBoundByIndex
+        let windowSummary = windows.prefix(5).enumerated().map { index, window in
+            "window[\(index)] exists=\(window.exists) hittable=\(window.isHittable) frame=\(window.frame) label=\(window.label) value=\(String(describing: window.value))"
+        }.joined(separator: "; ")
+        return "attempts=\(attempts); appState=\(app.state.rawValue); windows=\(windows.count); \(windowSummary.isEmpty ? "no materialized windows" : windowSummary)"
     }
 
     private func assertWindowIsOnBuiltInScreen(
@@ -765,6 +867,35 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         )
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func assertRecordingStarted(
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        if waitForElement("ma.recording.status", in: app, contains: "Recording in progress.", timeout: 8) {
+            return
+        }
+
+        let status = elementDescription("ma.recording.status", in: app)
+        let error = elementDescription("ma.recording.error", in: app)
+        XCTFail(
+            "Expected ma.recording.status to contain Recording in progress. Actual status: \(status). Error: \(error)",
+            file: file,
+            line: line
+        )
+    }
+
+    private func elementDescription(_ identifier: String, in app: XCUIApplication) -> String {
+        let element = app
+            .descendants(matching: .any)
+            .matching(identifier: identifier)
+            .firstMatch
+        guard element.waitForExistence(timeout: 1) else {
+            return "<missing>"
+        }
+        return "label=\(element.label), value=\(String(describing: element.value))"
     }
 
     private func assertElement(
@@ -1069,12 +1200,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             file: file,
             line: line
         )
-        XCTAssertTrue(
-            appWindow(in: app).waitForExistence(timeout: 5),
-            "Expected app window before tapping \(identifier).",
-            file: file,
-            line: line
-        )
+        _ = waitForAppWindow(in: app, context: "before tapping \(identifier)", file: file, line: line)
     }
 
     private func scrollTowardTranscriptActions(
@@ -1286,6 +1412,48 @@ private final class AppControlledRecordingFixture {
         sessionRootURL
             .appendingPathComponent("artifacts", isDirectory: true)
             .appendingPathComponent(filename, isDirectory: false)
+    }
+
+    func cleanup() {
+        try? FileManager.default.removeItem(at: rootURL)
+    }
+}
+
+private final class AppAppleScreenCaptureKitRecordingFixture {
+    let rootURL: URL
+    let workspaceURL: URL
+    let sessionID = "session-app-ui-smoke"
+
+    var sessionRootURL: URL {
+        workspaceURL
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+    }
+
+    init() throws {
+        rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ma-native-real-capture-app-\(UUID().uuidString)", isDirectory: true)
+        workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        cleanup()
+    }
+
+    func applyLaunchEnvironment(to app: XCUIApplication) {
+        app.launchEnvironment["MA_NATIVE_RECORDING_CLIENT"] = "apple_screencapturekit"
+        app.launchEnvironment["MA_NATIVE_CAPTURE_SMOKE"] = "1"
+        app.launchEnvironment["MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO"] = "false"
+        app.launchEnvironment["MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO"] = "false"
+        app.launchEnvironment["MA_NATIVE_APP_XCTEST"] = "1"
+        app.launchEnvironment["MA_NATIVE_RECORDING_WORKSPACE"] = workspaceURL.path
+    }
+
+    func sessionMetadata() throws -> [String: Any] {
+        let data = try Data(contentsOf: sessionRootURL.appendingPathComponent("session.json"))
+        let payload = try JSONSerialization.jsonObject(with: data)
+        return try XCTUnwrap(payload as? [String: Any])
     }
 
     func cleanup() {

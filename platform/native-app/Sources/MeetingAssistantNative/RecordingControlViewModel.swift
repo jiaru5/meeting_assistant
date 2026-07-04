@@ -118,19 +118,25 @@ public final class RecordingControlViewModel: ObservableObject {
     private let title: String?
     private let captureTarget: RecordingCaptureTarget
     private let workspaceURL: URL?
+    private let captureSystemAudio: Bool
+    private let captureMicrophoneAudio: Bool
 
     public init(
         commandClient: any RecordingCaptureControlling = FakeRecordingCommandClient(),
         readinessState: PermissionDependencyStatusState = .idle,
         title: String? = nil,
         captureTarget: RecordingCaptureTarget = .screen,
-        workspaceURL: URL? = nil
+        workspaceURL: URL? = nil,
+        captureSystemAudio: Bool = true,
+        captureMicrophoneAudio: Bool = true
     ) {
         self.commandClient = commandClient
         self.canStartRecording = readinessState.canStartRecording
         self.title = title
         self.captureTarget = captureTarget
         self.workspaceURL = workspaceURL
+        self.captureSystemAudio = captureSystemAudio
+        self.captureMicrophoneAudio = captureMicrophoneAudio
         self.state = readinessState.canStartRecording ? .ready : .idle
     }
 
@@ -163,8 +169,8 @@ public final class RecordingControlViewModel: ObservableObject {
         await start(
             title: title,
             captureTarget: captureTarget,
-            captureSystemAudio: true,
-            captureMicrophoneAudio: true
+            captureSystemAudio: captureSystemAudio,
+            captureMicrophoneAudio: captureMicrophoneAudio
         )
     }
 
