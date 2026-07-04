@@ -76,6 +76,7 @@ if [[ "$real_capture_smoke" == "1" || "$real_capture_smoke" == "true" || "$real_
   set -e
 
   if [[ "$test_status" -ne 0 ]]; then
+    echo "native-app real capture app-bundle XCUITest failed. Captured xcodebuild log: $real_capture_log" >&2
     if grep -q "permission_denied" "$real_capture_log"; then
       print_real_capture_permission_help "$app_bundle_path"
     fi
