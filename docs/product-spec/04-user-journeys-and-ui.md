@@ -57,7 +57,7 @@ Phase 1 采用设计化 Swift/SwiftUI native app shell + local helper / processi
 交互规则：
 
 1. 生产目标 shell 的主要按钮必须触发现有允许的 command/helper/adapter 边界，包括 `check_dependencies`、`start_native_recording`、`stop_recording`、处理桥接、`export_transcript` 和 `delete_session`；不得只在 UI 本地伪造成功状态。
-2. Debug、XCTest 或 fixture-only fake 可以用于自动化测试，但必须被明确隔离；不能成为 Release 默认行为或产品验收的真实录制/真实处理证据。
+2. 非 XCTest app runtime 的处理和 transcript action command client 默认走本地 process runner；Debug、XCTest 或 fixture-only fake 可以用于自动化测试，但必须被明确隔离，不能成为 Release 默认行为或产品验收的真实录制/真实处理证据。
 3. 设计化 shell 不改变命令字段、artifact type、error code、删除边界、no-auto-upload 或 no-auto-download 规则。
 4. 新导航和视觉结构必须保留关键状态的可访问标题、可见文案和 XCUITest 可查询 locator。
 

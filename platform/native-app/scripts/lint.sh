@@ -42,6 +42,7 @@ required = [
     "Sources/MeetingAssistantNative/TranscriptReviewView.swift",
     "Sources/MeetingAssistantNative/TranscriptActionCommandClient.swift",
     "Sources/MeetingAssistantNative/TranscriptActionFakeCommandClient.swift",
+    "Sources/MeetingAssistantNative/TranscriptActionOSClients.swift",
     "Sources/MeetingAssistantNative/TranscriptReviewActionsViewModel.swift",
     "Sources/MeetingAssistantNative/TranscriptReviewActionsView.swift",
     "Sources/MeetingAssistantNative/ProcessingCommandClient.swift",
@@ -83,6 +84,8 @@ if "fake_transcript_action_command_client" not in metadata.get("allowed_capabili
     raise SystemExit("native-app lint failed: missing fake transcript action capability")
 if "transcript_action_process_runner" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app lint failed: missing transcript action process runner capability")
+if "transcript_action_os_clipboard_and_save_panel" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app lint failed: missing transcript action OS boundary capability")
 if "processing_command_consumer" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app lint failed: missing processing command consumer capability")
 if "controlled_native_capture_adapter" not in metadata.get("allowed_capabilities", []):
@@ -112,6 +115,7 @@ required_project_snippets = [
     "TranscriptReviewView.swift",
     "TranscriptActionCommandClient.swift",
     "TranscriptActionFakeCommandClient.swift",
+    "TranscriptActionOSClients.swift",
     "TranscriptReviewActionsViewModel.swift",
     "TranscriptReviewActionsView.swift",
     "ProcessingCommandClient.swift",
@@ -142,6 +146,8 @@ required_app_snippets = [
     "MA_NATIVE_PROCESSING_CLIENT",
     "MA_NATIVE_TRANSCRIPT_ACTION_CLIENT",
     "isTranscriptActionClientTestHookAllowed",
+    "TranscriptActionPasteboardClipboard",
+    "TranscriptActionSavePanelDestinationSelector",
 ]
 missing_app_snippets = [snippet for snippet in required_app_snippets if snippet not in app_source]
 if missing_app_snippets:

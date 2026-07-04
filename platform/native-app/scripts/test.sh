@@ -22,6 +22,8 @@ if "fake_transcript_action_command_client" not in metadata.get("allowed_capabili
     raise SystemExit("native-app test failed: missing fake transcript action capability")
 if "transcript_action_process_runner" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app test failed: missing transcript action process runner capability")
+if "transcript_action_os_clipboard_and_save_panel" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app test failed: missing transcript action OS boundary capability")
 if "processing_command_consumer" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app test failed: missing processing command consumer capability")
 if "controlled_native_capture_adapter" not in metadata.get("allowed_capabilities", []):
@@ -52,6 +54,9 @@ required_phrases = (
     "VS-MA-17 read-only transcript review boundary",
     "read-only workspace transcript loading boundary",
     "VS-MA-18/VS-MA-19 deterministic transcript action consumer boundary",
+    "TranscriptActionOSClients.swift",
+    "NSPasteboard",
+    "NSSavePanel",
     "VS-MA-19A designed native shell boundary",
     "ma.transcriptAction.*",
     "ma.processing.*",
@@ -103,6 +108,7 @@ required_paths = (
     Path("Sources/MeetingAssistantNative/TranscriptReviewView.swift"),
     Path("Sources/MeetingAssistantNative/TranscriptActionCommandClient.swift"),
     Path("Sources/MeetingAssistantNative/TranscriptActionFakeCommandClient.swift"),
+    Path("Sources/MeetingAssistantNative/TranscriptActionOSClients.swift"),
     Path("Sources/MeetingAssistantNative/TranscriptReviewActionsViewModel.swift"),
     Path("Sources/MeetingAssistantNative/TranscriptReviewActionsView.swift"),
     Path("Sources/MeetingAssistantNative/ProcessingCommandClient.swift"),
@@ -163,7 +169,7 @@ let package = Package(
 )
 SWIFT
 
-(cd "$tmp_dir" && swift test)
+(cd "$tmp_dir" && MEETING_ASSISTANT_REPO_ROOT="$component_dir/../.." swift test)
 
 case "${MA_NATIVE_APP_RUN_XCUITEST:-0}" in
   1|true|TRUE|yes|YES)

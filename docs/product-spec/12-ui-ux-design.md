@@ -23,7 +23,7 @@ Phase 1 控制面已确认为设计化 Swift/SwiftUI native app shell + local he
 | UI-MA-DEPS-001 | 依赖检查 | 显示缺失依赖、版本、模型路径或不可用能力 | `CAP-MA-005` | `PV-MA-005` |
 | UI-MA-PROCESSING-001 | 处理状态 | 显示标准化音频、转写、speaker labeling 的处理中、失败、可重试或完成状态 | `CAP-MA-006`, `CAP-MA-007`, `CAP-MA-008`, `CAP-MA-009` | `PV-MA-006`, `PV-MA-007`, `PV-MA-008`, `PV-MA-009` |
 | UI-MA-TRANSCRIPT-001 | transcript 回查 | 显示时间戳、文本和匿名 speaker labels 或 transcript-only 降级原因 | `CAP-MA-010` | `PV-MA-010` |
-| UI-MA-EXPORT-001 | transcript 复制/导出 | 明确由用户触发，不自动上传外部服务 | `CAP-MA-011` | `PV-MA-011` |
+| UI-MA-EXPORT-001 | transcript 复制/导出 | 明确由用户触发，不自动上传外部服务；生产 app 复制写入 macOS pasteboard，导出通过用户确认的保存目标，XCTest fixture 可注入 memory clipboard 和 deterministic target | `CAP-MA-011` | `PV-MA-011` |
 | UI-MA-FALLBACK-001 | speaker labeling 降级 | 无可用引擎时显示 transcript-only 状态和原因 | `CAP-MA-008` | `PV-MA-008` |
 | UI-MA-DELETE-001 | 删除会话 | 删除前显示目标会话和影响范围，要求用户明确确认；删除后显示结果摘要 | `CAP-MA-012` | `PV-MA-012` |
 | UI-MA-SHELL-001 | 设计化原生 app shell | 同一原生 shell 覆盖预检、录制、artifacts、处理、transcript、导出和删除；主要操作必须触发现有 command/helper/adapter 契约，不使用 UI-only mock success | `CAP-MA-001`-`CAP-MA-013` | `PV-MA-013` |
@@ -53,10 +53,12 @@ Phase 1 控制面已确认为设计化 Swift/SwiftUI native app shell + local he
 命令触发和测试边界：
 
 1. 生产目标 shell 的主按钮必须调用既有 `06-api-contracts.md` 和 `07-data-and-events.md` 定义的 command/helper/adapter 或其 read model，不得在 UI 层制造与文件契约无关的成功状态。
-2. Debug/XCTest fixture 可以驱动 deterministic 状态和 fake client，但必须通过 build configuration、environment hook 或 test-only fixture 隔离；Release 默认行为不得依赖这些 hook。
-3. 设计化 shell 的完成不能替代真实 native capture、真实 processing provider、真实 OS pasteboard/file picker/delete integration、完整 release bundle 或任意 `PV-MA-*` covered 证据。
-4. 每个 shell 区域必须有 XCUITest 可查询的 accessibility identifier，建议使用 `ma.preflight.*`、`ma.recording.*`、`ma.sessionArtifact.*`、`ma.processing.*`、`ma.transcript.*`、`ma.transcriptAction.*` 这类现有语义前缀。
-5. 新视觉层不得删除既有可见状态、accessible name 或稳定 locator；重命名 locator 必须同步测试、验证矩阵和交付说明。
+2. 生产 app 的 transcript copy/export OS 边界必须位于注入协议后：copy 只在 `export_transcript` 成功返回可复制文本后写入 macOS pasteboard，export 只在用户确认保存目标后把该目标传给 `export_transcript`；Debug/XCTest fixture 继续使用 memory clipboard 和 deterministic target。
+3. 非 XCTest app runtime 的 processing 和 transcript action command client 默认使用本地 process runner，分别调用既有 `generate_transcript` / `generate_speaker_labels` 和 `export_transcript` / `delete_session` 契约；显式 fake client hook 只允许 Debug/XCTest fixture 使用。
+4. Debug/XCTest fixture 可以驱动 deterministic 状态和 fake client，但必须通过 build configuration、environment hook 或 test-only fixture 隔离；Release 默认行为不得依赖这些 hook。
+5. 设计化 shell 的完成不能替代真实 native capture、真实 processing provider、完整 release bundle 或任意 `PV-MA-*` covered 证据；delete 仍必须通过 `delete_session` 契约执行，不得在 UI 层直接删除任意文件。
+6. 每个 shell 区域必须有 XCUITest 可查询的 accessibility identifier，建议使用 `ma.preflight.*`、`ma.recording.*`、`ma.sessionArtifact.*`、`ma.processing.*`、`ma.transcript.*`、`ma.transcriptAction.*` 这类现有语义前缀。
+7. 新视觉层不得删除既有可见状态、accessible name 或稳定 locator；重命名 locator 必须同步测试、验证矩阵和交付说明。
 
 ## 页面或本地工具状态要求
 

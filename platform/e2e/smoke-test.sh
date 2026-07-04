@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import stat
 import sys
@@ -48,6 +49,90 @@ def write_fixture_wav(path: Path) -> None:
         handle.setsampwidth(2)
         handle.setframerate(8000)
         handle.writeframes(bytes(frames))
+
+
+def require_host_tool(name: str) -> Path:
+    resolved = shutil.which(name)
+    if not resolved:
+        raise AssertionError(f"real media fixture smoke requires `{name}` on PATH")
+    return Path(resolved)
+
+
+def run_media_tool(args: list[str], label: str) -> str:
+    completed = subprocess.run(
+        args,
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(
+            f"{label}: expected exit 0, got {completed.returncode}\n"
+            f"stdout={completed.stdout}\nstderr={completed.stderr}"
+        )
+    return completed.stdout
+
+
+def write_fixture_mp4(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    ffmpeg = require_host_tool("ffmpeg")
+    run_media_tool(
+        [
+            str(ffmpeg),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=32x32:rate=1:duration=1",
+            "-frames:v",
+            "1",
+            "-an",
+            "-c:v",
+            "mpeg4",
+            "-pix_fmt",
+            "yuv420p",
+            str(path),
+        ],
+        "ffmpeg real mp4 fixture generation",
+    )
+
+
+def assert_media_decodable(path: Path, *, expected_stream_type: str, format_hint: str, label: str) -> None:
+    ffprobe = require_host_tool("ffprobe")
+    stdout = run_media_tool(
+        [
+            str(ffprobe),
+            "-v",
+            "error",
+            "-show_entries",
+            "format=format_name,duration:stream=codec_type,codec_name",
+            "-of",
+            "json",
+            str(path),
+        ],
+        f"ffprobe {label}",
+    )
+    payload = json.loads(stdout)
+    streams = payload.get("streams")
+    if not isinstance(streams, list) or not streams:
+        raise AssertionError(f"{label}: ffprobe did not return streams")
+    if not any(stream.get("codec_type") == expected_stream_type for stream in streams if isinstance(stream, dict)):
+        raise AssertionError(f"{label}: expected {expected_stream_type} stream, got {streams!r}")
+    media_format = payload.get("format")
+    if not isinstance(media_format, dict):
+        raise AssertionError(f"{label}: ffprobe did not return format")
+    if format_hint not in str(media_format.get("format_name", "")):
+        raise AssertionError(f"{label}: expected format containing {format_hint!r}, got {media_format!r}")
+    try:
+        duration = float(media_format.get("duration", "0"))
+    except (TypeError, ValueError) as exc:
+        raise AssertionError(f"{label}: invalid duration {media_format.get('duration')!r}") from exc
+    if duration <= 0:
+        raise AssertionError(f"{label}: expected positive duration, got {duration}")
 
 
 def write_fake_executable(directory: Path, name: str) -> Path:
@@ -270,6 +355,100 @@ def artifact_by_type(session: dict, artifact_type: str) -> dict:
     return matches[0]
 
 
+def assert_real_media_import(
+    workspace: Path,
+    source: Path,
+    *,
+    expected_artifact_type: str,
+    expected_format: str,
+    expected_stream_type: str,
+    format_hint: str,
+) -> None:
+    source_checksum = sha256(source)
+    assert_media_decodable(
+        source,
+        expected_stream_type=expected_stream_type,
+        format_hint=format_hint,
+        label=f"{source.name} source",
+    )
+    response = run_cli(
+        workspace,
+        ["import_media", "--path", str(source), "--title", f"Real {expected_format} fixture"],
+        expected_exit=0,
+        command="import_media",
+    )
+    assert_response_shape(response, "import_media", ok=True)
+    if response["source_type"] != "imported_media":
+        raise AssertionError(f"{source.name}: import_media source_type drifted")
+    if len(response.get("artifacts", [])) != 1:
+        raise AssertionError(f"{source.name}: import_media must return exactly one artifact")
+    session_id = str(response["session_id"])
+    session_dir = workspace / "sessions" / session_id
+    assert_native_readable_session_file(session_dir)
+    session = load_json(session_dir / "session.json")
+    if session["id"] != session_id or session["source_type"] != "imported_media":
+        raise AssertionError(f"{source.name}: session metadata drifted")
+    artifact = response["artifacts"][0]
+    if artifact["format"] != expected_format:
+        raise AssertionError(f"{source.name}: expected artifact format {expected_format}, got {artifact['format']!r}")
+    artifact_path = assert_artifact_schema(session_dir, artifact, expected_artifact_type)
+    if sha256(source) != source_checksum:
+        raise AssertionError(f"{source.name}: source checksum changed during import")
+    if sha256(artifact_path) != source_checksum:
+        raise AssertionError(f"{source.name}: imported artifact checksum differs from source")
+    assert_media_decodable(
+        artifact_path,
+        expected_stream_type=expected_stream_type,
+        format_hint=format_hint,
+        label=f"{source.name} imported artifact",
+    )
+    if {artifact_item["artifact_type"] for artifact_item in session.get("artifacts", [])} != {expected_artifact_type}:
+        raise AssertionError(f"{source.name}: import created unexpected derived artifacts")
+    assert_no_temp_leftovers(session_dir)
+
+
+def run_real_media_import_decode_smoke(root: Path) -> None:
+    workspace = root / "real-media-import-workspace"
+    fixtures = root / "real-media-fixtures"
+    wav_fixture = fixtures / "real-import.wav"
+    mp4_fixture = fixtures / "real-import.mp4"
+    write_fixture_wav(wav_fixture)
+    write_fixture_mp4(mp4_fixture)
+
+    assert_real_media_import(
+        workspace,
+        wav_fixture,
+        expected_artifact_type="mixed_audio",
+        expected_format="wav",
+        expected_stream_type="audio",
+        format_hint="wav",
+    )
+    assert_real_media_import(
+        workspace,
+        mp4_fixture,
+        expected_artifact_type="screen_video",
+        expected_format="mp4",
+        expected_stream_type="video",
+        format_hint="mp4",
+    )
+
+    sessions_before = sorted(path.name for path in (workspace / "sessions").iterdir())
+    unsupported = fixtures / "unsupported.txt"
+    unsupported.write_text("not media", encoding="utf-8")
+    invalid_response = run_cli(
+        workspace,
+        ["import_media", "--path", str(unsupported)],
+        expected_exit=2,
+        command="import_media",
+    )
+    assert_response_shape(invalid_response, "import_media", ok=False, code="invalid_input")
+    sessions_after = sorted(path.name for path in (workspace / "sessions").iterdir())
+    if sessions_after != sessions_before:
+        raise AssertionError("import_media invalid suffix created or removed sessions")
+
+    evidence_marker("real wav/mp4 decode import smoke verified")
+
+
 with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
     root = Path(tmp)
     workspace = root / "workspace"
@@ -300,6 +479,8 @@ with tempfile.TemporaryDirectory(prefix="meeting-assistant-p2c-") as tmp:
     if workspace.exists():
         raise AssertionError("delete_session invalid path traversal: workspace should not be created")
     evidence_marker("invalid delete exit-code path verified")
+
+    run_real_media_import_decode_smoke(root)
 
     import_response = run_cli(
         workspace,

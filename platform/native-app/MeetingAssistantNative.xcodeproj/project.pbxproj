@@ -25,6 +25,7 @@
 		C00000000000000000000016 /* TranscriptActionFakeCommandClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000018 /* TranscriptActionFakeCommandClient.swift */; };
 		C00000000000000000000017 /* TranscriptReviewActionsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000019 /* TranscriptReviewActionsViewModel.swift */; };
 		C00000000000000000000018 /* TranscriptReviewActionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000020 /* TranscriptReviewActionsView.swift */; };
+		C00000000000000000000033 /* TranscriptActionOSClients.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000035 /* TranscriptActionOSClients.swift */; };
 		C00000000000000000000019 /* ProcessingCommandClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000021 /* ProcessingCommandClient.swift */; };
 			C00000000000000000000020 /* ProcessingCommandProcessRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000022 /* ProcessingCommandProcessRunner.swift */; };
 			C00000000000000000000021 /* ProcessingCommandFakeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000023 /* ProcessingCommandFakeClient.swift */; };
@@ -72,6 +73,7 @@
 		B00000000000000000000018 /* TranscriptActionFakeCommandClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptActionFakeCommandClient.swift; sourceTree = "<group>"; };
 		B00000000000000000000019 /* TranscriptReviewActionsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptReviewActionsViewModel.swift; sourceTree = "<group>"; };
 		B00000000000000000000020 /* TranscriptReviewActionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptReviewActionsView.swift; sourceTree = "<group>"; };
+		B00000000000000000000035 /* TranscriptActionOSClients.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptActionOSClients.swift; sourceTree = "<group>"; };
 		B00000000000000000000021 /* ProcessingCommandClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingCommandClient.swift; sourceTree = "<group>"; };
 		B00000000000000000000022 /* ProcessingCommandProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingCommandProcessRunner.swift; sourceTree = "<group>"; };
 			B00000000000000000000023 /* ProcessingCommandFakeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingCommandFakeClient.swift; sourceTree = "<group>"; };
@@ -156,6 +158,7 @@
 				B00000000000000000000015 /* TranscriptReviewView.swift */,
 				B00000000000000000000017 /* TranscriptActionCommandClient.swift */,
 				B00000000000000000000018 /* TranscriptActionFakeCommandClient.swift */,
+				B00000000000000000000035 /* TranscriptActionOSClients.swift */,
 				B00000000000000000000019 /* TranscriptReviewActionsViewModel.swift */,
 				B00000000000000000000020 /* TranscriptReviewActionsView.swift */,
 				B00000000000000000000021 /* ProcessingCommandClient.swift */,
@@ -305,6 +308,7 @@
 				C00000000000000000000013 /* TranscriptReviewView.swift in Sources */,
 				C00000000000000000000015 /* TranscriptActionCommandClient.swift in Sources */,
 				C00000000000000000000016 /* TranscriptActionFakeCommandClient.swift in Sources */,
+				C00000000000000000000033 /* TranscriptActionOSClients.swift in Sources */,
 				C00000000000000000000017 /* TranscriptReviewActionsViewModel.swift in Sources */,
 				C00000000000000000000018 /* TranscriptReviewActionsView.swift in Sources */,
 				C00000000000000000000019 /* ProcessingCommandClient.swift in Sources */,

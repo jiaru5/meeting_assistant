@@ -120,6 +120,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
 
         let app = XCUIApplication()
         app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
+        app.launchEnvironment["MA_NATIVE_APP_XCTEST"] = "1"
         if builtInScreen() != nil {
             app.launchEnvironment["MA_NATIVE_APP_TEST_DISPLAY"] = "built-in"
         }

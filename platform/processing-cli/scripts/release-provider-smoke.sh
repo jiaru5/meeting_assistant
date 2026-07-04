@@ -12,7 +12,9 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from meeting_assistant_cli.transcription_runtime_config import (
@@ -179,6 +181,84 @@ def check_model_sidecar(
     messages.append(f"VS-MA-23 provider release smoke [non-contract]: model {label} sidecar accepted: {sidecar_resolved}")
 
 
+def check_real_dependency_json(env: dict[str, str], blockers: list[str], messages: list[str]) -> None:
+    with tempfile.TemporaryDirectory(prefix="meeting-assistant-release-deps-") as tmp:
+        workspace = Path(tmp) / "workspace"
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "meeting_assistant_cli",
+                "check_dependencies",
+                "--workspace-dir",
+                str(workspace),
+                "--format",
+                "json",
+            ],
+            cwd=Path.cwd(),
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    if completed.returncode != 0:
+        blockers.append(
+            "check_dependencies real env blocker: expected exit 0, got "
+            f"{completed.returncode}; stderr={completed.stderr.strip()!r}"
+        )
+        return
+    lines = [line for line in completed.stdout.splitlines() if line.strip()]
+    if len(lines) != 1:
+        blockers.append(
+            "check_dependencies real env blocker: expected exactly one JSON stdout line, "
+            f"got {len(lines)}"
+        )
+        return
+    try:
+        payload = json.loads(lines[0])
+    except json.JSONDecodeError as exc:
+        blockers.append(f"check_dependencies real env blocker: stdout is not JSON ({exc.__class__.__name__})")
+        return
+    if not isinstance(payload, dict) or payload.get("ok") is not True or payload.get("command") != "check_dependencies":
+        blockers.append("check_dependencies real env blocker: response must be ok=true for check_dependencies")
+        return
+    checks_payload = payload.get("checks")
+    if not isinstance(checks_payload, list):
+        blockers.append("check_dependencies real env blocker: checks must be a list")
+        return
+    checks = {
+        str(item.get("id")): item
+        for item in checks_payload
+        if isinstance(item, dict) and item.get("id")
+    }
+    required_status = {
+        "transcription.runtime": "available",
+        "transcription.model": "available",
+        "transcription.model.multilingual": "reported",
+        "transcription.hardware": "supported",
+        "dependency_downloads.automatic": "not_attempted",
+        "dependency_sources.allowed": "reported",
+        "workspace.writable": "creatable",
+    }
+    for check_id, status in required_status.items():
+        item = checks.get(check_id)
+        if item is None:
+            blockers.append(f"check_dependencies real env blocker: missing check {check_id}")
+            continue
+        if item.get("status") != status or item.get("ok") is not True:
+            blockers.append(
+                "check_dependencies real env blocker: "
+                f"{check_id} expected status={status} ok=true, got {item!r}"
+            )
+    warnings = payload.get("warnings")
+    if not isinstance(warnings, list):
+        blockers.append("check_dependencies real env blocker: warnings must be a list")
+    messages.append(
+        "VS-MA-23 provider release smoke [non-contract]: real check_dependencies JSON accepted "
+        "for runtime/model/hardware/no-auto-download."
+    )
+
+
 env = dict(os.environ)
 blockers: list[str] = []
 messages: list[str] = []
@@ -213,6 +293,9 @@ disallowed_roots = [
 runtime_path = resolve_runtime_executable(env) if TRANSCRIPTION_RUNTIME_ENV not in missing_env else None
 model_path = resolve_model_path(env) if TRANSCRIPTION_MODEL_ENV not in missing_env else None
 audio_path = Path(env[TRANSCRIPTION_SMOKE_AUDIO_ENV]).expanduser() if TRANSCRIPTION_SMOKE_AUDIO_ENV not in missing_env else None
+
+if not missing_env:
+    check_real_dependency_json(env, blockers, messages)
 
 if TRANSCRIPTION_RUNTIME_ENV not in missing_env:
     runtime_value = env.get(TRANSCRIPTION_RUNTIME_ENV, "").strip()

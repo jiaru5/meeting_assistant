@@ -30,6 +30,7 @@ private struct NativeControlPlaneRootView: View {
         let recordingCommandClient = configuration.makeRecordingCommandClient()
         let processingCommandClient = configuration.makeProcessingCommandClient()
         let transcriptActionCommandClient = configuration.makeTranscriptActionCommandClient()
+        let transcriptActionOSClients = configuration.makeTranscriptActionOSClients()
         _shellViewModel = StateObject(wrappedValue: DesignedNativeShellViewModel())
         _permissionViewModel = StateObject(
             wrappedValue: PermissionDependencyStatusViewModel(
@@ -60,10 +61,8 @@ private struct NativeControlPlaneRootView: View {
             wrappedValue: TranscriptReviewActionsViewModel(
                 input: configuration.transcriptInput,
                 commandClient: transcriptActionCommandClient,
-                clipboard: TranscriptActionMemoryClipboard(),
-                destinationSelector: TranscriptActionStaticDestinationSelector(
-                    targetPath: configuration.exportDestinationPath
-                ),
+                clipboard: transcriptActionOSClients.clipboard,
+                destinationSelector: transcriptActionOSClients.destinationSelector,
                 workspaceDir: configuration.workspaceDir
             )
         )
@@ -352,6 +351,23 @@ private struct NativeControlPlaneFixtureConfiguration {
             )
         case .process:
             return TranscriptActionProcessRunner(environment: environment)
+        }
+    }
+
+    func makeTranscriptActionOSClients(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> (clipboard: any TranscriptClipboardWriting, destinationSelector: any TranscriptExportDestinationSelecting) {
+        switch NativeTranscriptActionOSClientMode.fromLaunchEnvironment(environment) {
+        case .deterministic:
+            return (
+                TranscriptActionMemoryClipboard(),
+                TranscriptActionStaticDestinationSelector(targetPath: exportDestinationPath)
+            )
+        case .system:
+            return (
+                TranscriptActionPasteboardClipboard(),
+                TranscriptActionSavePanelDestinationSelector()
+            )
         }
     }
 
@@ -789,10 +805,14 @@ private enum NativeProcessingClientMode {
         let rawValue = environment["MA_NATIVE_PROCESSING_CLIENT"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        guard rawValue == "process", isProcessClientTestHookAllowed(environment) else {
-            return .fake
+        switch rawValue {
+        case .some("fake"):
+            return isProcessClientTestHookAllowed(environment) ? .fake : .process
+        case .some("process"):
+            return .process
+        default:
+            return isNativeAppXCTestEnvironment(environment) ? .fake : .process
         }
-        return .process
     }
 
     private static func isProcessClientTestHookAllowed(_ environment: [String: String]) -> Bool {
@@ -812,10 +832,14 @@ private enum NativeTranscriptActionClientMode {
         let rawValue = environment["MA_NATIVE_TRANSCRIPT_ACTION_CLIENT"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        guard rawValue == "process", isTranscriptActionClientTestHookAllowed(environment) else {
-            return .fake
+        switch rawValue {
+        case .some("fake"):
+            return isTranscriptActionClientTestHookAllowed(environment) ? .fake : .process
+        case .some("process"):
+            return .process
+        default:
+            return isNativeAppXCTestEnvironment(environment) ? .fake : .process
         }
-        return .process
     }
 
     private static func isTranscriptActionClientTestHookAllowed(_ environment: [String: String]) -> Bool {
@@ -824,6 +848,18 @@ private enum NativeTranscriptActionClientMode {
         #else
         return false
         #endif
+    }
+}
+
+private enum NativeTranscriptActionOSClientMode {
+    case deterministic
+    case system
+
+    static func fromLaunchEnvironment(_ environment: [String: String]) -> NativeTranscriptActionOSClientMode {
+        if isNativeAppXCTestEnvironment(environment) {
+            return .deterministic
+        }
+        return .system
     }
 }
 

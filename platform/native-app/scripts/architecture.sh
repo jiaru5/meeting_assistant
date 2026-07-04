@@ -193,7 +193,10 @@ if grep -R --include '*.swift' -n -E "$apple_framework_forbidden" Sources tests 
   exit 1
 fi
 
-if grep -R --include '*.swift' -n -E 'normalize_audio|URLSession|URLRequest|URLSessionConfiguration|NWConnection|NWListener|WebSocket|https?://|NSPasteboard|API_KEY|SECRET|TOKEN' Sources tests App UITests; then
+action_os_boundary_file='Sources/MeetingAssistantNative/TranscriptActionOSClients.swift'
+
+if grep -R --include '*.swift' -n -E 'normalize_audio|URLSession|URLRequest|URLSessionConfiguration|NWConnection|NWListener|WebSocket|https?://|NSPasteboard|API_KEY|SECRET|TOKEN' Sources tests App UITests |
+  grep -v -F "$action_os_boundary_file"; then
   echo "native-app architecture check failed: native-app must not implement processing normalization, external network calls, real pasteboard, or secrets." >&2
   exit 1
 fi
@@ -282,12 +285,26 @@ fi
 grep -q "TranscriptActionProcessRunner" Sources/MeetingAssistantNative/TranscriptActionCommandClient.swift
 grep -q "TranscriptActionMemoryClipboard" Sources/MeetingAssistantNative/TranscriptActionFakeCommandClient.swift
 grep -q "TranscriptActionStaticDestinationSelector" Sources/MeetingAssistantNative/TranscriptActionFakeCommandClient.swift
+grep -q "TranscriptActionPasteboardClipboard" "$action_os_boundary_file"
+grep -q "TranscriptActionSavePanelDestinationSelector" "$action_os_boundary_file"
+grep -q "NSPasteboard.general" "$action_os_boundary_file"
+grep -q "NSSavePanel" "$action_os_boundary_file"
+grep -q "TranscriptActionPasteboardClipboard" App/MeetingAssistantNativeApp.swift
+grep -q "TranscriptActionSavePanelDestinationSelector" App/MeetingAssistantNativeApp.swift
 
 action_process_boundary_file='Sources/MeetingAssistantNative/TranscriptActionCommandClient.swift'
 action_os_boundary_forbidden='(^[[:space:]]*import[[:space:]]+(AppKit|ScreenCaptureKit|AVFoundation|CoreAudio|CoreMediaIO|ReplayKit|Network)\b|NSTask\b|posix_spawn|execv|system[[:space:]]*\(|popen[[:space:]]*\(|meeting_assistant_cli|ProcessingCLIDependencyCheckRunner|DependencyCheckProcessRunner|native-helper|processing-cli|helper[[:space:]]+tool|ScreenCaptureKit|AVCapture|CGDisplayStream|SCStream|AVAudioEngine|AVAudioRecorder|NSPasteboard|NSOpenPanel|NSSavePanel|FileManager\b|OutputStream\b|InputStream\b|createFile[[:space:]]*\(|createDirectory[[:space:]]*\(|removeItem[[:space:]]*\(|copyItem[[:space:]]*\(|moveItem[[:space:]]*\(|\.(write|write(to|Bytes))[[:space:]]*\(|URLSession|URLRequest|URLSessionConfiguration|NWConnection|NWListener|WebSocket|https?://)'
 
-if grep -R --include 'TranscriptAction*.swift' --include 'TranscriptReviewActions*.swift' -n -E "$action_os_boundary_forbidden" Sources; then
+if grep -R --include 'TranscriptAction*.swift' --include 'TranscriptReviewActions*.swift' -n -E "$action_os_boundary_forbidden" Sources |
+  grep -v -F "$action_os_boundary_file"; then
   echo "native-app architecture check failed: transcript action consumer must keep OS effects behind injected boundaries and must not call helpers/provider internals, real pasteboard, file pickers, direct file mutation/deletion, capture APIs, or network APIs." >&2
+  exit 1
+fi
+
+action_os_client_forbidden='(^[[:space:]]*import[[:space:]]+(ScreenCaptureKit|AVFoundation|CoreAudio|CoreMediaIO|ReplayKit|Network)\b|NSTask\b|Process\b|Pipe\b|ProcessInfo\b|posix_spawn|execv|system[[:space:]]*\(|popen[[:space:]]*\(|meeting_assistant_cli|ProcessingCLIDependencyCheckRunner|DependencyCheckProcessRunner|native-helper|processing-cli|helper[[:space:]]+tool|NSOpenPanel|FileManager\b|FileHandle\b|OutputStream\b|InputStream\b|createFile[[:space:]]*\(|createDirectory[[:space:]]*\(|removeItem[[:space:]]*\(|copyItem[[:space:]]*\(|moveItem[[:space:]]*\(|\.(write|write(to|Bytes))[[:space:]]*\(|URLSession|URLRequest|URLSessionConfiguration|NWConnection|NWListener|WebSocket|https?://)'
+
+if grep -n -E "$action_os_client_forbidden" "$action_os_boundary_file"; then
+  echo "native-app architecture check failed: transcript action OS clients may only use NSPasteboard and NSSavePanel behind injected protocols." >&2
   exit 1
 fi
 

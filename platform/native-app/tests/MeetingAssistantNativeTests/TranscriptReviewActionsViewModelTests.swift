@@ -705,6 +705,34 @@ struct TranscriptReviewActionsViewModelTests {
     }
 
     @Test
+    func savePanelDestinationSelectorSuggestsSafeFileNames() {
+        #expect(
+            TranscriptActionSavePanelDestinationSelector.suggestedFilename(
+                for: TranscriptExportDestinationRequest(
+                    sessionID: "meeting/actions 2026.07.04",
+                    exportType: .markdown
+                )
+            ) == "meeting-actions-2026.07.04.md"
+        )
+        #expect(
+            TranscriptActionSavePanelDestinationSelector.suggestedFilename(
+                for: TranscriptExportDestinationRequest(
+                    sessionID: "../",
+                    exportType: .plainText
+                )
+            ) == "meeting-transcript.txt"
+        )
+        #expect(
+            TranscriptActionSavePanelDestinationSelector.suggestedFilename(
+                for: TranscriptExportDestinationRequest(
+                    sessionID: "session-actions",
+                    exportType: .json
+                )
+            ) == "session-actions.json"
+        )
+    }
+
+    @Test
     func unavailableWithoutTranscriptContextDoesNotSendCommands() async {
         let client = TranscriptActionFakeCommandClient()
         let viewModel = TranscriptReviewActionsViewModel(

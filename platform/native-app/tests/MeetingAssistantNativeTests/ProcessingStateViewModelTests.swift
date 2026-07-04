@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 @testable import MeetingAssistantNative
@@ -672,6 +673,52 @@ struct ProcessingStateViewModelTests {
     }
 
     @Test
+    func processRunnerWithRealProcessingCLIWritesWorkspaceArtifactsLoadableByTranscriptReview() async throws {
+        let fixture = try RealProcessingCLIWorkspaceFixture()
+        let sessionID = try fixture.importMediaSession()
+        let viewModel = ProcessingStateViewModel(
+            commandClient: fixture.runner,
+            readinessState: readyReadinessState(),
+            defaultSessionID: sessionID
+        )
+
+        await viewModel.start()
+
+        #expect(viewModel.state.phase == .degraded)
+        #expect(viewModel.state.statusText == "Processing completed with transcript-only speaker labels.")
+        #expect(viewModel.state.sessionID == sessionID)
+        #expect(viewModel.state.transcriptID?.isEmpty == false)
+        #expect(viewModel.state.transcriptArtifactID?.isEmpty == false)
+        #expect(viewModel.state.segmentCount == 1)
+        #expect(viewModel.state.labelStatus == "transcript_only")
+        #expect(viewModel.state.degradationReason?.contains("transcript-only fallback") == true)
+        #expect(viewModel.state.errorMessage == nil)
+
+        let artifactTypes = try fixture.artifactTypes(sessionID: sessionID)
+        #expect(artifactTypes == [
+            "mixed_audio",
+            "normalized_audio",
+            "transcript_text",
+            "speaker_labels",
+        ])
+        #expect(try fixture.sourceChecksumUnchanged())
+
+        let input = try TranscriptReviewWorkspaceLoader.load(
+            workspaceURL: fixture.workspaceURL,
+            sessionID: sessionID
+        )
+        let transcript = try #require(input.transcript)
+        #expect(transcript.id == viewModel.state.transcriptID)
+        #expect(transcript.sessionID == sessionID)
+        #expect(transcript.segments.map(\.segmentID) == ["segment-0001"])
+        #expect(transcript.segments.first?.text.contains("Fake transcript generated from local audio.") == true)
+        #expect(input.speakerLabels?.sessionID == sessionID)
+        #expect(input.speakerLabels?.labels.isEmpty == true)
+        #expect(input.speakerLabels?.segmentMapping.isEmpty == true)
+        #expect(input.speakerLabelsDegradationReason?.contains("transcript-only fallback") == true)
+    }
+
+    @Test
     func processRunnerDrivenViewModelShowsFailureAndRetryFromStdoutJSON() async throws {
         let fixture = try ProcessingProcessRunnerFixture(script: .structuredTranscriptFailure)
         let viewModel = ProcessingStateViewModel(
@@ -697,6 +744,226 @@ struct ProcessingStateViewModelTests {
             "generate_transcript --session-id session-process",
             "generate_transcript --session-id session-process",
         ])
+    }
+}
+
+private final class RealProcessingCLIWorkspaceFixture {
+    let rootURL: URL
+    let workspaceURL: URL
+    let mediaURL: URL
+    let runner: ProcessingCommandProcessRunner
+
+    private let cliURL: URL
+    private let mediaChecksum: String
+
+    init() throws {
+        rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meeting-assistant-real-processing-\(UUID().uuidString)", isDirectory: true)
+        workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        mediaURL = rootURL.appendingPathComponent("fixtures/native-processing.wav")
+        cliURL = rootURL.appendingPathComponent("meeting-assistant-cli")
+
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: mediaURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Self.writeFixtureWAV(to: mediaURL)
+        mediaChecksum = try Self.sha256(mediaURL)
+
+        let repoRoot = try Self.repositoryRootURL()
+        let processingSource = repoRoot.appendingPathComponent(
+            "platform/processing-cli/src",
+            isDirectory: true
+        )
+        let script = """
+        #!/bin/sh
+        set -eu
+        export PYTHONPATH="\(processingSource.path)${PYTHONPATH:+:$PYTHONPATH}"
+        exec /usr/bin/env python3 -m meeting_assistant_cli "$@"
+        """
+        try script.write(to: cliURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cliURL.path)
+
+        runner = ProcessingCommandProcessRunner(
+            executablePath: cliURL.path,
+            environment: Self.cliEnvironment(workspaceURL: workspaceURL)
+        )
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: rootURL)
+    }
+
+    func importMediaSession() throws -> String {
+        let payload = try runCLI([
+            "import_media",
+            "--path",
+            mediaURL.path,
+            "--title",
+            "Native processing real CLI fixture",
+        ])
+        return try #require(payload["session_id"] as? String)
+    }
+
+    func artifactTypes(sessionID: String) throws -> [String] {
+        let session = try sessionMetadata(sessionID: sessionID)
+        let artifacts = try #require(session["artifacts"] as? [[String: Any]])
+        return artifacts.compactMap { $0["artifact_type"] as? String }
+    }
+
+    func sourceChecksumUnchanged() throws -> Bool {
+        try Self.sha256(mediaURL) == mediaChecksum
+    }
+
+    private func runCLI(_ arguments: [String]) throws -> [String: Any] {
+        let process = Process()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.executableURL = cliURL
+        process.arguments = arguments
+        process.environment = Self.cliEnvironment(workspaceURL: workspaceURL)
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        try process.run()
+        process.waitUntilExit()
+
+        let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
+        let stdoutText = String(data: stdoutData, encoding: .utf8) ?? ""
+        let stderrText = String(data: stderrData, encoding: .utf8) ?? ""
+        #expect(stdoutText.contains("Traceback") == false)
+        #expect(stderrText.contains("Traceback") == false)
+        #expect(process.terminationStatus == 0)
+        if process.terminationStatus != 0 {
+            throw RealProcessingCLIFixtureError.commandFailed(stdout: stdoutText, stderr: stderrText)
+        }
+
+        let lines = stdoutText.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard lines.count == 1,
+              let data = lines[0].data(using: .utf8),
+              let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            throw RealProcessingCLIFixtureError.invalidJSON(stdout: stdoutText)
+        }
+        #expect(payload["ok"] as? Bool == true)
+        return payload
+    }
+
+    private func sessionMetadata(sessionID: String) throws -> [String: Any] {
+        let sessionURL = workspaceURL
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+            .appendingPathComponent("session.json", isDirectory: false)
+        let data = try Data(contentsOf: sessionURL)
+        guard let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw RealProcessingCLIFixtureError.invalidJSON(stdout: sessionURL.path)
+        }
+        return payload
+    }
+
+    private static func repositoryRootURL(filePath: String = #filePath) throws -> URL {
+        if let configured = ProcessInfo.processInfo.environment["MEETING_ASSISTANT_REPO_ROOT"],
+           !configured.isEmpty {
+            return URL(fileURLWithPath: configured, isDirectory: true)
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+        }
+
+        var candidate = URL(fileURLWithPath: filePath, isDirectory: false)
+            .deletingLastPathComponent()
+            .standardizedFileURL
+        while candidate.path != "/" {
+            let marker = candidate.appendingPathComponent(
+                "platform/processing-cli/src/meeting_assistant_cli/cli.py",
+                isDirectory: false
+            )
+            if FileManager.default.fileExists(atPath: marker.path) {
+                return candidate
+            }
+            candidate.deleteLastPathComponent()
+        }
+        throw RealProcessingCLIFixtureError.repositoryRootNotFound
+    }
+
+    private static func cliEnvironment(workspaceURL: URL) -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        environment["MEETING_ASSISTANT_WORKSPACE"] = workspaceURL.path
+        environment.removeValue(forKey: "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME")
+        environment.removeValue(forKey: "MEETING_ASSISTANT_TRANSCRIPTION_MODEL")
+        environment.removeValue(forKey: "MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO")
+        return environment
+    }
+
+    private static func writeFixtureWAV(to url: URL) throws {
+        var pcm = Data()
+        for index in 0..<1_600 {
+            let sample = Int16(((index % 64) - 32) * 128)
+            pcm.appendLittleEndian(sample)
+        }
+
+        var wav = Data()
+        wav.appendASCII("RIFF")
+        wav.appendLittleEndian(UInt32(36 + pcm.count))
+        wav.appendASCII("WAVE")
+        wav.appendASCII("fmt ")
+        wav.appendLittleEndian(UInt32(16))
+        wav.appendLittleEndian(UInt16(1))
+        wav.appendLittleEndian(UInt16(1))
+        wav.appendLittleEndian(UInt32(8_000))
+        wav.appendLittleEndian(UInt32(8_000 * 2))
+        wav.appendLittleEndian(UInt16(2))
+        wav.appendLittleEndian(UInt16(16))
+        wav.appendASCII("data")
+        wav.appendLittleEndian(UInt32(pcm.count))
+        wav.append(pcm)
+        try wav.write(to: url)
+    }
+
+    private static func sha256(_ url: URL) throws -> String {
+        let digest = SHA256.hash(data: try Data(contentsOf: url))
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "sha256:\(hex)"
+    }
+}
+
+private enum RealProcessingCLIFixtureError: Error, CustomStringConvertible {
+    case commandFailed(stdout: String, stderr: String)
+    case invalidJSON(stdout: String)
+    case repositoryRootNotFound
+
+    var description: String {
+        switch self {
+        case .commandFailed(let stdout, let stderr):
+            return "real processing CLI command failed; stdout=\(stdout), stderr=\(stderr)"
+        case .invalidJSON(let stdout):
+            return "real processing CLI returned invalid JSON: \(stdout)"
+        case .repositoryRootNotFound:
+            return "repository root containing platform/processing-cli/src was not found"
+        }
+    }
+}
+
+private extension Data {
+    mutating func appendASCII(_ value: String) {
+        append(value.data(using: .ascii)!)
+    }
+
+    mutating func appendLittleEndian(_ value: UInt16) {
+        append(UInt8(value & 0xff))
+        append(UInt8((value >> 8) & 0xff))
+    }
+
+    mutating func appendLittleEndian(_ value: UInt32) {
+        append(UInt8(value & 0xff))
+        append(UInt8((value >> 8) & 0xff))
+        append(UInt8((value >> 16) & 0xff))
+        append(UInt8((value >> 24) & 0xff))
+    }
+
+    mutating func appendLittleEndian(_ value: Int16) {
+        appendLittleEndian(UInt16(bitPattern: value))
     }
 }
 

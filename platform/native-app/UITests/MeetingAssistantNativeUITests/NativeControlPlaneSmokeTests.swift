@@ -1167,13 +1167,34 @@ private enum SwiftUIViewSourceContract {
             contains: [
                 "MA_NATIVE_RECORDING_CLIENT",
                 "MA_NATIVE_PROCESSING_CLIENT",
+                "MA_NATIVE_TRANSCRIPT_ACTION_CLIENT",
                 "isRecordingClientTestHookAllowed",
                 "isProcessClientTestHookAllowed",
+                "isTranscriptActionClientTestHookAllowed",
                 "#if DEBUG",
                 "#else",
                 "return false",
                 "#endif",
+                "case .some(\"fake\"):",
+                "case .some(\"process\"):",
+                "return isProcessClientTestHookAllowed(environment) ? .fake : .process",
+                "return isTranscriptActionClientTestHookAllowed(environment) ? .fake : .process",
+                "return isNativeAppXCTestEnvironment(environment) ? .fake : .process",
+                "ProcessingCommandProcessRunner(environment: environment)",
+                "TranscriptActionProcessRunner(environment: environment)",
             ],
+            file: file,
+            line: line
+        )
+        XCTAssertFalse(
+            source.contains("guard rawValue == \"process\", isProcessClientTestHookAllowed(environment)"),
+            "Processing command client must not require a Debug/XCTest-only hook to use the process runner by default.",
+            file: file,
+            line: line
+        )
+        XCTAssertFalse(
+            source.contains("guard rawValue == \"process\", isTranscriptActionClientTestHookAllowed(environment)"),
+            "Transcript action client must not require a Debug/XCTest-only hook to use the process runner by default.",
             file: file,
             line: line
         )

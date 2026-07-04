@@ -108,6 +108,13 @@ flowchart LR
 | `export` | transcript 复制、Markdown/JSON/text 导出 | 自动上传到 GPT 或云服务 |
 | `dependency-check` | 检查本地依赖、模型、权限和版本 | 自动安装所有依赖或自动改系统音频路由 |
 
+## 原生 App Command Client 选择
+
+1. 非 XCTest app runtime 的 processing command client 默认使用本地 process runner，调用 `generate_transcript` 和 `generate_speaker_labels` 公开命令；Debug/XCTest 可通过隔离 fixture 使用 fake client。
+2. 非 XCTest app runtime 的 transcript action command client 默认使用本地 process runner，调用 `export_transcript` 和 `delete_session` 公开命令；copy/export 的 pasteboard 和保存面板仍位于注入 OS client 后。
+3. 显式 fake command client hook 只能在 Debug/XCTest fixture 中生效；非 XCTest runtime 即使设置 fake env 也不得把产品默认行为降级为 fake。
+4. 该策略不改变 native recording client 的真实 capture hook 边界：真实录制仍只能通过既有 opt-in smoke、权限和验证矩阵关闭条件推进，不能因为 processing/action process runner 默认化而外推录制 PV。
+
 ## 依赖策略
 
 | 依赖领域 | 策略 | 说明 |

@@ -408,3 +408,29 @@ ADR 记录决策背景、取舍和历史原因。当前可执行规则必须维�
 - 直接给现有调试 UI 换样式：拒绝，因为会把临时控件结构固化为产品结构，且难以证明主操作触发了正确契约。
 - 等到 `VS-MA-23` release candidate 再做 UI：拒绝，因为 release gate 不应首次承载核心 UI 产品化风险。
 - 另建 Web UI 或营销页：拒绝，因为 Phase 1 事实源已确定本地 native macOS 工具，不以 Web 或营销页面作为 MVP 主入口。
+
+## ADR-20260704-02: 非 XCTest 原生 App 默认使用本地 Process Command Client
+
+状态：Accepted
+
+背景：
+- `VS-MA-19A` 后 designed native shell 已能触发 processing、transcript review、copy/export 和 delete 等主要入口，但早期实现为了 app-bundle fixture 稳定，processing/action command client 默认仍偏向 fake。
+- `PV-MA-006`、`PV-MA-007`、`PV-MA-008`、`PV-MA-010`、`PV-MA-011` 和 `PV-MA-012` 的 release blocker 中，production app 默认 fake 会持续阻断“主按钮触发现有 command/helper/adapter 契约”的证据收敛。
+- Debug/XCTest 仍需要 deterministic fake 以验证 UI 状态、失败、安全文案和 locator，不能把真实 process runner 强加到所有测试启动路径。
+
+决策：
+- 非 XCTest app runtime 的 processing command client 默认使用 `ProcessingCommandProcessRunner`，调用冻结的 `generate_transcript` 和 `generate_speaker_labels` 命令。
+- 非 XCTest app runtime 的 transcript action command client 默认使用 `TranscriptActionProcessRunner`，调用冻结的 `export_transcript` 和 `delete_session` 命令。
+- 显式 fake command client hook 只在 Debug/XCTest fixture 中生效；非 XCTest runtime 即使设置 fake env 也回落到 process runner。
+- XCTest 或 app-bundle fixture 默认仍使用 deterministic fake，且可显式 opt in process runner 以证明 native bridge 行为。
+- Native recording client 的真实 capture hook 不随本 ADR 放宽；真实录制仍按既有 opt-in smoke、TCC 权限和 PV 关闭条件推进。
+
+影响：
+- `04-user-journeys-and-ui.md`、`08-implementation-guidance.md` 和 `12-ui-ux-design.md` 明确 production command client 默认策略。
+- `MeetingAssistantNativeApp` 的 launch-environment 解析必须把 fake 作为 Debug/XCTest fixture hook，而不是产品默认。
+- `06-product-validation-matrix.md` 可以移除“production app 默认 action/processing fake”这一阻塞口径，但 release 仍需要真实 capture、真实 provider/runtime、完整 release bundle 和标准门禁证据。
+
+备选方案：
+- 继续让 Release/default 使用 fake：拒绝，因为会让 designed shell 的主要操作长期停留在 UI/fixture 层，不能证明 command/helper/adapter 契约触发。
+- 所有 XCTest 默认也使用 process runner：拒绝，因为会破坏 deterministic UI、安全错误和 locator 回归测试，并引入本机依赖耦合。
+- 通过 UI 层直接读写 workspace 或直接删除文件绕过 process runner：拒绝，因为会绕开 `06-api-contracts.md` 和 `07-data-and-events.md` 的命令与文件契约边界。

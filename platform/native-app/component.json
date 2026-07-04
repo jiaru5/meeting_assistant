@@ -26,6 +26,7 @@
     "read_only_workspace_transcript_loading",
     "fake_transcript_action_command_client",
     "transcript_action_process_runner",
+    "transcript_action_os_clipboard_and_save_panel",
     "transcript_copy_export_delete_action_view",
     "designed_native_shell"
   ],
@@ -43,8 +44,6 @@
     "external_model_api",
     "automatic_downloads",
     "public_normalize_audio_command",
-    "real_clipboard_mutation",
-    "real_export_destination_picker",
     "direct_file_delete"
   ]
 }
