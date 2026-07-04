@@ -867,6 +867,52 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertIn("must set digest_pinned_base=True", output)
             self.assertIn("must set non_root_user=True", output)
 
+    def test_build_gate_fails_when_production_component_build_report_misstates_identity_or_gate_image(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            for build_dir in fixture.glob("platform/*/build"):
+                shutil.rmtree(build_dir)
+            command = [
+                sys.executable,
+                "-c",
+                (
+                    "import json; "
+                    "from pathlib import Path; "
+                    "component = json.loads(Path('component.json').read_text(encoding='utf-8')); "
+                    "Path('build').mkdir(exist_ok=True); "
+                    "report = {"
+                    "'component': 'unexpected-' + component['id'], "
+                    "'release_gate_image': 'production-runtime', "
+                    "'digest_pinned_base': True, "
+                    "'non_root_user': True, "
+                    "'packages_runtime_or_model': False, "
+                    "'auto_downloads': False, "
+                    "'sbom': 'meeting-assistant-' + component['id']"
+                    "}; "
+                    "Path('build/build-report.json').write_text(json.dumps(report), encoding='utf-8')"
+                ),
+            ]
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["build"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/build.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must set component=", output)
+            self.assertIn("must set release_gate_image='validation-only'", output)
+
     def test_build_gate_fails_when_production_component_build_report_packages_macos_app(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
