@@ -14,6 +14,7 @@
     "apple_screencapturekit_native_capture_adapter",
     "native_capture_combined_recording_spike",
     "opt_in_apple_screencapturekit_native_capture_smoke",
+    "debug_xctest_apple_screencapturekit_app_bundle_smoke",
     "native_recording_command_client",
     "recording_session_store",
     "native_capture_artifact_registration",

@@ -32,6 +32,8 @@ if "native_capture_combined_recording_spike" not in metadata.get("allowed_capabi
     raise SystemExit("native-app test failed: missing combined recording spike capability")
 if "opt_in_apple_screencapturekit_native_capture_smoke" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app test failed: missing opt-in Apple ScreenCaptureKit native capture smoke capability")
+if "debug_xctest_apple_screencapturekit_app_bundle_smoke" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app test failed: missing Debug/XCTest Apple ScreenCaptureKit app-bundle smoke capability")
 if "native_capture_artifact_registration" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app test failed: missing native capture artifact registration capability")
 if "designed_native_shell" not in metadata.get("allowed_capabilities", []):
@@ -45,6 +47,7 @@ required_phrases = (
     "VS-MA-14/VS-MA-15 controlled native capture artifact registration boundary",
     "Apple ScreenCaptureKit native capture adapter exception",
     "opt-in real native capture smoke boundary",
+    "opt-in real native capture app-bundle smoke boundary",
     "VS-MA-16 native processing state consumer boundary",
     "VS-MA-17 read-only transcript review boundary",
     "read-only workspace transcript loading boundary",
@@ -55,10 +58,12 @@ required_phrases = (
     "ma.shell.*",
     "ma.sessionArtifact.*",
     "MA_NATIVE_RECORDING_CLIENT=controlled",
+    "MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit",
     "MA_NATIVE_PROCESSING_CLIENT=process",
     "MA_NATIVE_TRANSCRIPT_ACTION_CLIENT=process",
     "AppleScreenCaptureKitNativeCaptureAdapter.swift",
     "MA_NATIVE_CAPTURE_SMOKE=1",
+    "MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1",
     "Debug/XCTest-only",
     "check_dependencies",
     "session.json",

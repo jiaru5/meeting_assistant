@@ -25,7 +25,7 @@ VS-MA-14/VS-MA-15 controlled native capture artifact registration boundary:
 6. At least one available media artifact may return `ok=true status=recorded`; no available media must return `ok=false code=capture_failed` and persist session `status=failed`.
 7. Repeated stop must return the existing final artifact registry without duplicating entries or re-running the adapter.
 8. It may expose additive recording artifact locators under `ma.recording.artifact.<artifact_type>.status` and `.degradation`, while preserving existing `ma.recording.*` locators and phase/status strings.
-9. The app bundle must default to `FakeRecordingCommandClient`; only the Debug/XCTest-only test hook `MA_NATIVE_RECORDING_CLIENT=controlled` may inject `NativeRecordingCommandClient` with `MA_NATIVE_RECORDING_WORKSPACE` or `MEETING_ASSISTANT_WORKSPACE`; Release builds must ignore this env hook and fall back to fake.
+9. The app bundle must default to `FakeRecordingCommandClient`; only Debug/XCTest-only test hooks may inject `NativeRecordingCommandClient` with `MA_NATIVE_RECORDING_CLIENT=controlled` or `MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit` plus `MA_NATIVE_RECORDING_WORKSPACE` or `MEETING_ASSISTANT_WORKSPACE`; Release builds must ignore these env hooks and fall back to fake.
 10. It must not invoke processing providers, native-to-processing commands, Apple capture frameworks outside `AppleScreenCaptureKitNativeCaptureAdapter.swift`, CoreAudio, OBS, BlackHole, FFmpeg auxiliary capture, external model APIs, network APIs, downloads, real pasteboard, real file pickers or direct delete behavior.
 
 Apple ScreenCaptureKit native capture adapter exception:
@@ -37,7 +37,7 @@ Apple ScreenCaptureKit native capture adapter exception:
 5. If no available combined media file exists at stop, the adapter must fail closed through existing `capture_failed` semantics; it must not invent a successful empty recording.
 6. The adapter may expose only code-level identity and capability summary such as `apple_screencapturekit`, supported screen target, combined-file support and no separate audio artifacts; this is not a command/schema/UI contract.
 7. The adapter must not call OBS, BlackHole, FFmpeg auxiliary capture, helper tools, `processing-cli`, processing commands, external APIs, network APIs, automatic downloads, real pasteboard, real file pickers or direct delete behavior.
-8. The app bundle must not enable this real adapter from a Release env hook. Existing Debug/XCTest-only hooks remain limited to `MA_NATIVE_RECORDING_CLIENT=controlled` and `MA_NATIVE_PROCESSING_CLIENT=process`.
+8. The app bundle must not enable this real adapter from a Release env hook. The only app-bundle real adapter path is the Debug/XCTest-only, explicitly opt-in combination `MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit`, `MA_NATIVE_CAPTURE_SMOKE=1`, `MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1` and a writable recording workspace; otherwise the app bundle must fall back to fake.
 
 opt-in real native capture smoke boundary:
 
@@ -47,6 +47,14 @@ opt-in real native capture smoke boundary:
 4. The smoke must not add or change command fields, error codes, exit codes, artifact types, event schema, UI states or app-bundle env hooks.
 5. Permission denied, unknown permission, missing macOS runtime or missing ScreenCaptureKit output must remain fail-closed evidence and must not be reported as `covered` release readiness.
 6. The smoke must not call OBS, BlackHole, FFmpeg auxiliary capture, helper tools, `processing-cli`, processing commands, external APIs, network APIs, automatic downloads, real pasteboard, real file pickers or direct delete behavior.
+
+opt-in real native capture app-bundle smoke boundary:
+
+1. `AppBundleLocatorSmokeTests` may drive the designed native shell Start/Stop buttons against `AppleScreenCaptureKitNativeCaptureAdapter` only when the test process is explicitly launched with `MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1`.
+2. The app bundle may select `MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit` only in Debug/XCTest and only when `MA_NATIVE_CAPTURE_SMOKE=1` plus `MA_NATIVE_RECORDING_WORKSPACE` or `MEETING_ASSISTANT_WORKSPACE` are present; Release builds and default tests must fall back to `FakeRecordingCommandClient`.
+3. The app-bundle smoke must default to screen-only by setting `MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO=false` and `MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO=false`; it may validate only existing `session.json`, `screen_video`, artifact status and `sha256:` checksum fields.
+4. The app-bundle smoke must not add command fields, error codes, exit codes, artifact types, event schema, UI states, processing invocation, real pasteboard, real file picker, direct delete, network APIs or automatic downloads.
+5. A passing app-bundle real capture smoke remains `partial` evidence and must not be reported as Release readiness or as proof that production defaults use the Apple adapter.
 
 VS-MA-16 native processing state consumer boundary:
 

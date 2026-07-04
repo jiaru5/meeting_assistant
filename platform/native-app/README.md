@@ -39,7 +39,7 @@
 3. 真实 runtime 使用 `SCShareableContent`、`SCContentFilter`、`SCStream` 和 `SCRecordingOutput` 生成一个临时 combined recording file；临时文件只作为 adapter-local 输入，最终 `session.json`、artifact path、checksum 和 fail-closed 路径仍由 `RecordingSessionStore` 负责。
 4. 当前 ScreenCaptureKit spike 只能证明 combined recording file 形态：可用 combined file 登记为既有 `screen_video`；不可证明的 `system_audio`、`microphone_audio` 和 `mixed_audio` 登记为 `degraded` 或 `missing` 并写入 `degradation_reason`。无可用媒体时通过既有 `capture_failed` 语义 fail closed。
 5. Swift Testing 使用 deterministic fake runtime 覆盖 adapter capability、非 screen target fail-closed、combined file 的 partial artifact degradation、无可用媒体的 `capture_failed` session 结果；测试不依赖真实会议数据、真实 TCC 权限或真实系统音频。
-6. 该 adapter 不通过 Release env hook 自动启用；现有 app bundle 仍默认 fake，Debug/XCTest-only hook 仍只启用 controlled recording fixture 或 processing process fixture。
+6. 该 adapter 不通过 Release env hook 自动启用；现有 app bundle 仍默认 fake。Debug/XCTest-only hook 可启用 controlled recording fixture；真实 Apple adapter 只能在额外显式设置 `MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit`、`MA_NATIVE_CAPTURE_SMOKE=1` 和 `MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1` 的 opt-in app-bundle smoke 中使用。
 7. 该 spike 不引入 OBS、BlackHole、FFmpeg 辅助 capture，不调用 helper/processing-cli，不做 processing、transcription、speaker labeling、导出、删除、网络请求、自动下载、真实 pasteboard 或真实文件 picker。
 
 当前已新增 VS-MA-14/VS-MA-15 opt-in 真实 native capture smoke 入口：
@@ -49,6 +49,16 @@
 3. 默认写入忽略目录 `build/native-capture-smoke/workspace-*`；可用 `MA_NATIVE_CAPTURE_SMOKE_WORKSPACE`、`MA_NATIVE_CAPTURE_SMOKE_DURATION_SECONDS`、`MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO` 和 `MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO` 显式覆盖。默认只请求屏幕录制，降低 microphone permission 对 smoke 的影响。
 4. 成功时脚本会验证 `session.json`、`screen_video` 为 `available`、录制文件非空、`sha256:` checksum 存在，并输出 JSON summary。权限 denied/unknown、macOS runtime 不足、显示处于 asleep/no-display 状态、ReplayKit stop failure 或 ScreenCaptureKit 未产出文件时必须 fail closed。
 5. 该 smoke 只能提供真实 ScreenCaptureKit 输出的本地 opt-in partial evidence；不证明独立系统音频或麦克风音频、生产 app 默认启用真实 adapter、native-to-processing invocation、release bundle 或任意 `PV-MA-*` 已 `covered`。
+
+当前已新增 VS-MA-20 opt-in app-bundle 真实 capture UI smoke 入口：
+
+1. `AppBundleLocatorSmokeTests.testOptInAppleScreenCaptureKitRecordsFromDesignedShellWhenExplicitlyEnabled` 默认 `XCTSkip`，只有测试进程显式设置 `MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1` 时运行。
+2. 正确执行入口是 `MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1 ./platform/native-app/scripts/test-app-bundle.sh`。该脚本会先 `build-for-testing`，再把 `MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1` 注入生成的 `.xctestrun`，最后用 `test-without-building -only-testing:MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testOptInAppleScreenCaptureKitRecordsFromDesignedShellWhenExplicitlyEnabled` 跑单用例；不要只依赖 shell env 直接调用 `xcodebuild test`。
+3. 该测试从设计化 shell 点击既有 `ma.recording.startButton` 和 `ma.recording.stopButton`，通过 Debug/XCTest-only `MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit` 选择真实 `AppleScreenCaptureKitNativeCaptureAdapter`，并仍经由 `NativeRecordingCommandClient`、`MacOSNativeCapturePermissionChecker` 和 `RecordingSessionStore`。
+4. 该 smoke 设置 `MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO=false` 和 `MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO=false`，默认只证明 screen-only 真实录制，降低麦克风权限对 UI smoke 的影响。
+5. 成功时验证 UI 状态为 saved、`screen_video` 为 `available`、其他音频 artifact 按未请求策略为 `missing`，并校验 workspace `session.json`、`screen_video` 文件非空和 `sha256:` checksum。
+6. 如果 macOS 没有给测试 app bundle Screen Recording 权限，Start 会 fail closed，UI 暴露 `ma.recording.error`，通常为 `permission_denied`；这类失败是本机 TCC 环境 blocker，不得报告为真实录制通过。
+7. 该 smoke 不属于默认 `scripts/test.sh`、默认 app-bundle XCUITest 或 Release 门禁；通过也仍是 partial evidence，不证明生产 app 默认启用真实 adapter、独立音频产物、native-to-processing invocation 或 release readiness。
 
 当前已实现 VS-MA-16 native processing state consumer 边界：
 
