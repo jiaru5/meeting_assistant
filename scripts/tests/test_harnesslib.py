@@ -779,6 +779,37 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("missing build report for production component", result.stderr + result.stdout)
 
+    def test_build_gate_fails_when_production_component_build_report_is_invalid_json(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            for build_dir in fixture.glob("platform/*/build"):
+                shutil.rmtree(build_dir)
+            command = [
+                sys.executable,
+                "-c",
+                (
+                    "from pathlib import Path; "
+                    "Path('build').mkdir(exist_ok=True); "
+                    "Path('build/build-report.json').write_text('{not-json', encoding='utf-8')"
+                ),
+            ]
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["build"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/build.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("invalid build report JSON for production component", result.stderr + result.stdout)
+
     def test_build_gate_fails_when_production_component_build_report_has_unsafe_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
