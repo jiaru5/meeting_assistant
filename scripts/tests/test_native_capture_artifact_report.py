@@ -1,0 +1,187 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+PROCESSING_SRC = ROOT / "platform/processing-cli/src"
+sys.path.insert(0, str(PROCESSING_SRC))
+
+from meeting_assistant_cli.workspace_contract import sha256_file  # noqa: E402
+
+
+def load_report_module():
+    spec = importlib.util.spec_from_file_location(
+        "native_capture_artifact_report",
+        ROOT / "platform/e2e/native_capture_artifact_report.py",
+    )
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+class NativeCaptureArtifactReportTests(unittest.TestCase):
+    def test_smoke_script_invokes_structured_report_generator(self) -> None:
+        script = (ROOT / "platform/e2e/native-capture-artifact-smoke.sh").read_text(encoding="utf-8")
+
+        self.assertIn("MA_NATIVE_CAPTURE_ARTIFACT_SMOKE_REPORT", script)
+        self.assertIn("MA_NATIVE_CAPTURE_ARTIFACT_REPORT", script)
+        self.assertIn("platform/e2e/native_capture_artifact_report.py", script)
+        self.assertIn("--summary", script)
+        self.assertIn("--report", script)
+
+    def write_fixture(
+        self,
+        directory: str,
+        *,
+        include_audio_degradation_reason: bool = True,
+    ) -> tuple[Path, Path, Path]:
+        base = Path(directory)
+        workspace = base / "workspace"
+        session_id = "session-native-capture-report"
+        session_dir = workspace / "sessions" / session_id
+        artifacts_dir = session_dir / "artifacts"
+        artifacts_dir.mkdir(parents=True)
+        screen_video = artifacts_dir / "screen.mov"
+        screen_video.write_bytes(b"synthetic screen capture bytes\n")
+        checksum = sha256_file(screen_video)
+        now = "2026-07-05T00:00:00Z"
+
+        artifacts: list[dict[str, object]] = [
+            {
+                "id": "artifact-screen",
+                "session_id": session_id,
+                "artifact_type": "screen_video",
+                "path": "artifacts/screen.mov",
+                "format": "mov",
+                "capture_status": "available",
+                "checksum": checksum,
+                "created_at": now,
+            }
+        ]
+        for artifact_type in ("system_audio", "microphone_audio", "mixed_audio"):
+            artifact: dict[str, object] = {
+                "id": f"artifact-{artifact_type}",
+                "session_id": session_id,
+                "artifact_type": artifact_type,
+                "path": f"artifacts/{artifact_type}.wav",
+                "format": "wav",
+                "capture_status": "missing",
+                "created_at": now,
+            }
+            if include_audio_degradation_reason:
+                artifact["degradation_reason"] = f"{artifact_type} unavailable in screen-only capture smoke"
+            artifacts.append(artifact)
+
+        session = {
+            "id": session_id,
+            "source_type": "native_recording",
+            "status": "recorded",
+            "started_at": now,
+            "ended_at": now,
+            "workspace_dir": str(session_dir),
+            "created_at": now,
+            "updated_at": now,
+            "artifacts": artifacts,
+        }
+        (session_dir / "session.json").write_text(
+            json.dumps(session, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+        summary = {
+            "ok": True,
+            "script": "native-capture-smoke",
+            "adapter": "AppleScreenCaptureKitNativeCaptureAdapter",
+            "workspace": str(workspace),
+            "session_id": session_id,
+            "capture_system_audio": False,
+            "capture_microphone_audio": False,
+            "screen_video_path": str(screen_video),
+            "screen_video_bytes": screen_video.stat().st_size,
+            "screen_video_checksum": checksum,
+        }
+        summary_path = base / "summary.json"
+        report_path = base / "report.json"
+        summary_path.write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
+        return summary_path, report_path, session_dir
+
+    def test_build_report_writes_partial_evidence_and_fail_closed_processing_result(self) -> None:
+        module = load_report_module()
+        with tempfile.TemporaryDirectory() as directory:
+            summary_path, report_path, session_dir = self.write_fixture(directory)
+
+            report = module.build_report(summary_path, report_path=report_path, root=ROOT, python=sys.executable)
+
+            self.assertTrue(report_path.is_file())
+            written = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report, written)
+            self.assertEqual(report["release_gate"], "partial-evidence-only")
+            self.assertEqual(report["vs_ma"], ["VS-MA-14", "VS-MA-15"])
+            self.assertEqual(report["pv"], ["PV-MA-002", "PV-MA-003"])
+            self.assertTrue(report["not_release_readiness"])
+            self.assertEqual(report["artifacts"]["screen_video"]["capture_status"], "available")
+            self.assertTrue(report["artifacts"]["screen_video"]["checksum_verified"])
+            self.assertEqual(report["artifacts"]["system_audio"]["capture_status"], "missing")
+            self.assertTrue(report["artifacts"]["system_audio"]["has_degradation_reason"])
+            self.assertEqual(report["processing_contract"]["exit_code"], 3)
+            self.assertEqual(report["processing_contract"]["code"], "artifact_missing")
+            self.assertFalse(report["processing_contract"]["derived_artifact_pollution"])
+            session = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
+            artifact_types = {artifact["artifact_type"] for artifact in session["artifacts"]}
+            self.assertFalse({"normalized_audio", "transcript_text", "speaker_labels"} & artifact_types)
+
+    def test_build_report_rejects_missing_audio_degradation_reason(self) -> None:
+        module = load_report_module()
+        with tempfile.TemporaryDirectory() as directory:
+            summary_path, report_path, _ = self.write_fixture(directory, include_audio_degradation_reason=False)
+
+            with self.assertRaises(module.NativeCaptureArtifactReportError):
+                module.build_report(summary_path, report_path=report_path, root=ROOT, python=sys.executable)
+
+            self.assertFalse(report_path.exists())
+
+    def test_cli_writes_report_and_emits_non_contract_markers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            summary_path, report_path, _ = self.write_fixture(directory)
+            env = os.environ.copy()
+            pythonpath = [str(PROCESSING_SRC)]
+            if env.get("PYTHONPATH"):
+                pythonpath.append(env["PYTHONPATH"])
+            env["PYTHONPATH"] = os.pathsep.join(pythonpath)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "platform/e2e/native_capture_artifact_report.py"),
+                    "--summary",
+                    str(summary_path),
+                    "--report",
+                    str(report_path),
+                ],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("real native capture artifact e2e marker", result.stdout)
+            self.assertIn("real native capture artifact report marker", result.stdout)
+            self.assertIn("partial-evidence-only", result.stdout)
+            self.assertIn(str(report_path), result.stderr)
+            self.assertTrue(report_path.is_file())
+
+
+if __name__ == "__main__":
+    unittest.main()

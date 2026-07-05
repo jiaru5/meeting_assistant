@@ -297,6 +297,14 @@
 |---|---|---|---|
 | 本轮 `develop` VS-MA-14/15 phase-preflight opt-in marker | `PV-MA-002`、`PV-MA-003`; `TDG-MA-004`、`TDG-MA-008` | `scripts/phase-preflight.sh` 在显式 `MA_NATIVE_CAPTURE_SMOKE=1` 时会输出 `VS-MA-14/15 real native capture artifact smoke will run inside full-stack E2E; this remains partial evidence, not release readiness.`，并继续通过 `./scripts/test-e2e-full-stack.sh` 调用 manifest full-stack E2E。`scripts/tests/test_harnesslib.py` 新增静态回归，断言 phase-preflight 仍包含该 opt-in marker、仍调用 full-stack E2E，`full-stack-smoke.sh` 仍将 `MA_NATIVE_CAPTURE_SMOKE=1` 接到 `native-capture-artifact-smoke.sh`，且 `docs/engineering/02-dev-commands.md` 记录 `MA_NATIVE_CAPTURE_SMOKE=1 ./scripts/phase-preflight.sh` 的 partial/not-release 口径。 | 证明阶段收口日志可以明确显示 VS-MA-14/15 真实 capture artifact opt-in stage 被请求，并且该 stage 仍只能作为 partial evidence；不证明默认门禁运行真实 ScreenCaptureKit、不证明 release-scope standard gate、独立系统音频/麦克风音频产物、跨机器 TCC/display 可重复、production/default 录制策略、真实 native-to-processing 成功链路或 VS-MA-23 release readiness。 |
 
+## 2026-07-05 VS-MA-14/15 native capture structured report evidence 回填
+
+本节补充 VS-MA-14/15 真实 native capture artifact smoke 的结构化 evidence report。该回填不新增产品事实，不改变 command、artifact、event、error code、exit code、Release hook、真实 capture 策略或发布范围；所有涉及 `PV-MA-002` / `PV-MA-003` 继续保持 `partial`，不能声明真实 capture、stop artifact registry、release bundle 或 release readiness 已 covered。
+
+| 来源 | 影响矩阵行 | 追加证据 | 状态影响 |
+|---|---|---|---|
+| 本轮 `develop` VS-MA-14/15 native capture artifact report | `PV-MA-002`、`PV-MA-003`; `TDG-MA-005`、`TDG-MA-007`、`TDG-MA-008` | 新增 `platform/e2e/native_capture_artifact_report.py`，`platform/e2e/native-capture-artifact-smoke.sh` 在真实 ScreenCaptureKit native smoke 成功后会调用它生成 JSON evidence report。report 声明 `report_schema=1`、`release_gate=partial-evidence-only`、`not_release_readiness=true`，并记录 `VS-MA-14/15`、`PV-MA-002/003`、workspace/session、adapter、四类原始 artifact 状态、`screen_video` bytes/checksum 校验、三类音频缺失/降级原因、`generate_transcript` 在无可用音频时以 `artifact_missing` / exit 3 fail closed、以及无 `normalized_audio` / `transcript_text` / `speaker_labels` 派生产物污染。新增 `scripts/tests/test_native_capture_artifact_report.py` 使用 synthetic native session 覆盖 report 写入、缺失音频降级原因 fail closed、CLI marker 和 report 路径输出。 | 证明 VS-MA-14/15 opt-in 真实 native capture smoke 的结果可以形成机器可审查 report，降低只靠 stdout marker 的假绿风险；仍不证明默认门禁运行真实 ScreenCaptureKit、不证明 release-scope standard gate、独立系统音频/麦克风音频真实产物、跨机器 TCC/display 可重复、production/default 录制策略、真实 native-to-processing 成功链路、release bundle 或 VS-MA-23 release readiness。 |
+
 ## 标准验证命令目标
 
 ```bash

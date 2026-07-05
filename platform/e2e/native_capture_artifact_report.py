@@ -1,0 +1,336 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+from meeting_assistant_cli.workspace_contract import (
+    ORIGINAL_MEDIA_ARTIFACT_TYPES,
+    ContractError,
+    artifact_file_path,
+    load_session,
+    session_directory,
+    sha256_file,
+    verify_registered_artifacts,
+)
+
+
+TRANSCRIPTION_ENV_NAMES = (
+    "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME",
+    "MEETING_ASSISTANT_TRANSCRIPTION_MODEL",
+    "MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO",
+)
+DERIVED_ARTIFACT_TYPES = {"normalized_audio", "transcript_text", "speaker_labels"}
+RELEASE_BLOCKERS = [
+    "not a default or release-scope ScreenCaptureKit gate",
+    "does not prove independent system_audio or microphone_audio capture artifacts",
+    "does not prove production/default Apple adapter strategy",
+    "does not prove cross-machine TCC/display repeatability",
+    "does not prove real native-to-processing successful transcript chain",
+    "does not prove VS-MA-23 release readiness",
+]
+
+
+class NativeCaptureArtifactReportError(AssertionError):
+    pass
+
+
+def fail(message: str) -> None:
+    raise NativeCaptureArtifactReportError(f"native capture artifact e2e: {message}")
+
+
+def load_single_json(stdout: str, command: str) -> dict[str, Any]:
+    lines = [line for line in stdout.splitlines() if line.strip()]
+    if len(lines) != 1:
+        fail(f"{command} expected one JSON object, got {len(lines)} lines: {stdout!r}")
+    payload = json.loads(lines[0])
+    if not isinstance(payload, dict):
+        fail(f"{command} response must be a JSON object")
+    return payload
+
+
+def require_response(payload: dict[str, Any], command: str, *, ok: bool, code: str | None = None) -> None:
+    for key in ("ok", "request_id", "command", "warnings"):
+        if key not in payload:
+            fail(f"{command} missing response key {key}")
+    if payload["command"] != command:
+        fail(f"{command} response command drifted to {payload['command']!r}")
+    if payload["ok"] is not ok:
+        fail(f"{command} expected ok={ok}, got {payload['ok']!r}")
+    if not isinstance(payload["warnings"], list):
+        fail(f"{command} warnings must be a list")
+    if not ok:
+        for key in ("code", "message", "details"):
+            if key not in payload:
+                fail(f"{command} missing failure key {key}")
+        if code is not None and payload["code"] != code:
+            fail(f"{command} expected code={code}, got {payload['code']!r}")
+
+
+def artifact_by_type(session: dict[str, Any], artifact_type: str) -> dict[str, Any]:
+    matches = [
+        artifact
+        for artifact in session.get("artifacts", [])
+        if isinstance(artifact, dict) and artifact.get("artifact_type") == artifact_type
+    ]
+    if len(matches) != 1:
+        fail(f"expected exactly one {artifact_type} artifact, got {len(matches)}")
+    return matches[0]
+
+
+def assert_managed_relative_path(artifact: dict[str, Any], artifact_type: str) -> str:
+    path_text = str(artifact.get("path", ""))
+    if not path_text:
+        fail(f"{artifact_type} artifact path is empty")
+    path = Path(path_text)
+    if path.is_absolute():
+        fail(f"{artifact_type} artifact path must be relative, got {path_text}")
+    if not path_text.startswith("artifacts/") or ".." in path.parts:
+        fail(f"{artifact_type} artifact path must stay under artifacts/, got {path_text}")
+    return path_text
+
+
+def artifact_report_entry(
+    session_dir: Path,
+    artifact: dict[str, Any],
+    artifact_type: str,
+    *,
+    require_file: bool,
+) -> dict[str, Any]:
+    path_text = assert_managed_relative_path(artifact, artifact_type)
+    status = str(artifact.get("capture_status"))
+    entry: dict[str, Any] = {
+        "artifact_type": artifact_type,
+        "capture_status": status,
+        "path": path_text,
+        "path_managed_relative": True,
+        "has_checksum": bool(artifact.get("checksum")),
+        "has_degradation_reason": bool(artifact.get("degradation_reason")),
+    }
+    if require_file:
+        artifact_path = artifact_file_path(session_dir, artifact)
+        entry["file_exists"] = artifact_path.is_file()
+        entry["file_bytes"] = artifact_path.stat().st_size if artifact_path.is_file() else 0
+        entry["checksum_verified"] = sha256_file(artifact_path) == artifact.get("checksum") if artifact_path.is_file() else False
+    else:
+        entry["file_exists"] = False
+        entry["file_bytes"] = 0
+        entry["checksum_verified"] = None
+    return entry
+
+
+def assert_original_artifact_contract(
+    session_dir: Path,
+    session: dict[str, Any],
+    summary: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    expected_types = set(ORIGINAL_MEDIA_ARTIFACT_TYPES)
+    actual_types = {
+        str(artifact.get("artifact_type"))
+        for artifact in session.get("artifacts", [])
+        if isinstance(artifact, dict) and artifact.get("artifact_type") in expected_types
+    }
+    if actual_types != expected_types:
+        fail(f"original artifact types mismatch: expected {sorted(expected_types)}, got {sorted(actual_types)}")
+
+    verify_registered_artifacts(session_dir, expected_types)
+
+    artifacts: dict[str, dict[str, Any]] = {}
+    screen = artifact_by_type(session, "screen_video")
+    if screen.get("capture_status") != "available":
+        fail(f"screen_video must be available, got {screen.get('capture_status')!r}")
+    screen_path = artifact_file_path(session_dir, screen)
+    if not screen_path.is_file():
+        fail(f"screen_video file is missing at {screen_path}")
+    if screen_path.stat().st_size <= 0:
+        fail("screen_video file must be non-empty")
+    checksum = screen.get("checksum")
+    if not isinstance(checksum, str) or not checksum.startswith("sha256:"):
+        fail("screen_video checksum must be a sha256 value")
+    if sha256_file(screen_path) != checksum:
+        fail("screen_video checksum does not match file bytes")
+    if summary.get("screen_video_checksum") != checksum:
+        fail("ScreenCaptureKit summary checksum differs from processing contract checksum")
+    if summary.get("screen_video_bytes") is not None and summary.get("screen_video_bytes") != screen_path.stat().st_size:
+        fail("ScreenCaptureKit summary screen_video_bytes differs from file size")
+    summary_screen_path = summary.get("screen_video_path")
+    if summary_screen_path and Path(str(summary_screen_path)).resolve(strict=False) != screen_path.resolve(strict=False):
+        fail("ScreenCaptureKit summary screen_video_path differs from registered artifact path")
+    artifacts["screen_video"] = artifact_report_entry(session_dir, screen, "screen_video", require_file=True)
+
+    expected_status = {
+        "system_audio": "degraded" if summary.get("capture_system_audio") else "missing",
+        "microphone_audio": "degraded" if summary.get("capture_microphone_audio") else "missing",
+        "mixed_audio": "degraded"
+        if summary.get("capture_system_audio") or summary.get("capture_microphone_audio")
+        else "missing",
+    }
+    for artifact_type, status in expected_status.items():
+        artifact = artifact_by_type(session, artifact_type)
+        if artifact.get("capture_status") != status:
+            fail(f"{artifact_type} expected {status}, got {artifact.get('capture_status')!r}")
+        if artifact.get("checksum"):
+            fail(f"{artifact_type} {status} artifact must not include checksum")
+        if not artifact.get("degradation_reason"):
+            fail(f"{artifact_type} {status} artifact must include degradation_reason")
+        artifacts[artifact_type] = artifact_report_entry(session_dir, artifact, artifact_type, require_file=False)
+    return artifacts
+
+
+def run_generate_transcript_fail_closed(
+    workspace: Path,
+    session_id: str,
+    *,
+    root: Path,
+    python: str,
+) -> dict[str, Any]:
+    env = os.environ.copy()
+    for env_name in TRANSCRIPTION_ENV_NAMES:
+        env.pop(env_name, None)
+    env["MEETING_ASSISTANT_WORKSPACE"] = str(workspace)
+    pythonpath = [str(root / "platform/processing-cli/src")]
+    if env.get("PYTHONPATH"):
+        pythonpath.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath)
+
+    completed = subprocess.run(
+        [python, "-m", "meeting_assistant_cli", "generate_transcript", "--session-id", session_id],
+        cwd=root,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 3:
+        fail(
+            "generate_transcript should fail closed with artifact_missing when real capture produced no usable audio; "
+            f"exit={completed.returncode} stdout={completed.stdout!r} stderr={completed.stderr!r}"
+        )
+    if "Traceback" in completed.stdout or "Traceback" in completed.stderr:
+        fail("generate_transcript failure must not leak a traceback")
+    payload = load_single_json(completed.stdout, "generate_transcript")
+    require_response(payload, "generate_transcript", ok=False, code="artifact_missing")
+    return {
+        "command": "generate_transcript",
+        "exit_code": completed.returncode,
+        "ok": False,
+        "code": payload["code"],
+        "fail_closed": True,
+    }
+
+
+def assert_no_derived_artifact_pollution(session: dict[str, Any]) -> bool:
+    actual = {
+        str(artifact.get("artifact_type"))
+        for artifact in session.get("artifacts", [])
+        if isinstance(artifact, dict) and artifact.get("artifact_type") in DERIVED_ARTIFACT_TYPES
+    }
+    if actual:
+        fail(f"fail-closed processing path must not register derived artifacts, got {sorted(actual)}")
+    return False
+
+
+def build_report(
+    summary_path: Path,
+    *,
+    report_path: Path | None = None,
+    root: Path | None = None,
+    python: str | None = None,
+) -> dict[str, Any]:
+    root = (root or Path.cwd()).resolve()
+    python = python or sys.executable
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    if not isinstance(summary, dict):
+        fail("native capture summary must be a JSON object")
+    if summary.get("ok") is not True:
+        fail(f"native capture summary did not pass: {summary}")
+
+    workspace = Path(str(summary["workspace"]))
+    session_id = str(summary["session_id"])
+    session_dir = session_directory(workspace, session_id)
+    session = load_session(session_dir)
+
+    if session.get("id") != session_id:
+        fail("session id drifted between native summary and session.json")
+    if session.get("source_type") != "native_recording":
+        fail("session source_type must be native_recording")
+    if session.get("status") != "recorded":
+        fail("session status must be recorded before processing consumption")
+    if not session.get("ended_at"):
+        fail("recorded native session must include ended_at")
+
+    artifacts = assert_original_artifact_contract(session_dir, session, summary)
+    processing = run_generate_transcript_fail_closed(workspace, session_id, root=root, python=python)
+    derived_pollution = assert_no_derived_artifact_pollution(load_session(session_dir))
+
+    report: dict[str, Any] = {
+        "report_schema": 1,
+        "component": "platform/e2e/native-capture-artifact-smoke",
+        "scope": "validation-only",
+        "release_gate": "partial-evidence-only",
+        "vs_ma": ["VS-MA-14", "VS-MA-15"],
+        "pv": ["PV-MA-002", "PV-MA-003"],
+        "summary_path": str(summary_path),
+        "workspace": str(workspace),
+        "session_id": session_id,
+        "source_type": session["source_type"],
+        "session_status": session["status"],
+        "recorded_ended_at": True,
+        "adapter": summary.get("adapter"),
+        "capture_system_audio": bool(summary.get("capture_system_audio")),
+        "capture_microphone_audio": bool(summary.get("capture_microphone_audio")),
+        "artifacts": artifacts,
+        "processing_contract": processing | {
+            "derived_artifact_pollution": derived_pollution,
+        },
+        "not_release_readiness": True,
+        "release_blockers": RELEASE_BLOCKERS,
+        "findings": [],
+    }
+    if report_path is not None:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return report
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--summary", default=os.environ.get("MA_NATIVE_CAPTURE_ARTIFACT_SUMMARY"))
+    parser.add_argument("--report", default=os.environ.get("MA_NATIVE_CAPTURE_ARTIFACT_REPORT"))
+    args = parser.parse_args(argv)
+    if not args.summary:
+        print("native capture artifact report failed: --summary is required", file=sys.stderr)
+        return 2
+
+    try:
+        report = build_report(
+            Path(args.summary),
+            report_path=Path(args.report) if args.report else None,
+            root=Path.cwd(),
+            python=sys.executable,
+        )
+    except (ContractError, NativeCaptureArtifactReportError, OSError, json.JSONDecodeError) as exc:
+        print(f"native capture artifact report failed: {exc}", file=sys.stderr)
+        return 1
+
+    if args.report:
+        print(f"native capture artifact evidence report: {args.report}", file=sys.stderr)
+    print(
+        "VS-MA-14/15 real native capture artifact e2e marker [non-contract]: "
+        "processing workspace contract consumed native session and no-audio transcript path failed closed."
+    )
+    print(
+        "VS-MA-14/15 real native capture artifact report marker [non-contract]: "
+        f"report_schema={report['report_schema']} release_gate={report['release_gate']}."
+    )
+    print("real native capture artifact e2e smoke passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -80,7 +80,7 @@ full-stack E2E 可在 manifest 中声明可选 `pre_start_command`，用于准�
 
 `./scripts/test-e2e-full-stack.sh` 本地默认设置 `MEETING_ASSISTANT_SMOKE_IMAGE=meeting-assistant-smoke:local`，由 `platform/e2e/prepare-smoke-image.sh` 验证或从已缓存允许镜像 tag 出本地 smoke image；脚本仍不得自动 pull。`platform/e2e/docker-compose.smoke.yml` 的默认镜像值必须保持 digest-pinned，以满足 release manifest 静态门禁；本地开发如需使用其他已预加载镜像，只能通过显式环境变量覆盖。
 
-阶段收口如需把 VS-MA-14/15 真实 native capture artifact evidence 纳入同一次运行，可显式执行 `MA_NATIVE_CAPTURE_SMOKE=1 ./scripts/phase-preflight.sh`。该环境变量会传递到 manifest full-stack E2E 的 opt-in stage，并触发 `phase-preflight.sh` 输出 partial evidence 提示；通过后仍不证明 release readiness、production/default 录制策略、独立音频产物或所有 TCC/display 环境可重复。
+阶段收口如需把 VS-MA-14/15 真实 native capture artifact evidence 纳入同一次运行，可显式执行 `MA_NATIVE_CAPTURE_SMOKE=1 ./scripts/phase-preflight.sh`。该环境变量会传递到 manifest full-stack E2E 的 opt-in stage，并触发 `phase-preflight.sh` 输出 partial evidence 提示；通过后还会由 `platform/e2e/native_capture_artifact_report.py` 生成结构化 JSON evidence report，默认位于 `platform/e2e/build/native-capture-artifact-smoke/reports/`，可用 `MA_NATIVE_CAPTURE_ARTIFACT_SMOKE_REPORT` 指定文件路径。该 report 仍只声明 `release_gate=partial-evidence-only`，不证明 release readiness、production/default 录制策略、独立音频产物或所有 TCC/display 环境可重复。
 
 已注册的非业务 skeleton 只能承载未来原生录制控制面、本地 processing、dependency-check、artifact contract、transcription adapter、speaker-label fallback 和 export 命令边界。
 
