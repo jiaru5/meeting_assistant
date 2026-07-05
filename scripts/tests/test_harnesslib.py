@@ -387,6 +387,16 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertTrue((fixture / ".harness/evidence/release/production-readiness.meta").is_file())
             self.assertFalse((fixture / ".harness/evidence/release/docs.meta").exists())
 
+    def test_full_stack_smoke_does_not_emit_premature_vs_ma_23_release_marker(self) -> None:
+        script = (ROOT / "platform/e2e/full-stack-smoke.sh").read_text(encoding="utf-8")
+        readme = (ROOT / "platform/e2e/README.md").read_text(encoding="utf-8")
+
+        self.assertNotIn("VS-MA-23 provider/e2e release readiness", script)
+        self.assertNotIn("VS-MA-23 provider/e2e release-readiness summary", readme)
+        self.assertIn("VS-MA-21 provider/e2e hardening", script)
+        self.assertIn("VS-MA-21/22 provider/e2e blocker reminder", script)
+        self.assertIn("VS-MA-23 is not entered until partial PV rows close", script)
+
     def test_product_validation_current_phase_rejects_missing_status(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)

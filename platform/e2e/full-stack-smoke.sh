@@ -74,9 +74,9 @@ if ((mvp_app_bundle_stage_ran == 1)); then
 else
   echo "VS-MA-20 provider/e2e attribution [non-contract]: real native capture, app-bundle UI launch, and release bundle are not proven by this provider smoke."
 fi
-echo "VS-MA-23 provider/e2e release readiness [non-contract]: processing local command chain passed."
-echo "VS-MA-23 provider/e2e release readiness [non-contract]: capture-style provider artifact and failure-redaction chain passed."
-echo "VS-MA-23 provider/e2e release readiness [non-contract]: native read bridge and designed shell app-root smoke passed."
-echo "VS-MA-23 provider/e2e release readiness [non-contract]: product-validation release blockers remain authoritative until Main PM closes PV partial rows."
+echo "VS-MA-20 provider/e2e attribution [non-contract]: processing local command chain passed; this is not release readiness."
+echo "VS-MA-21 provider/e2e hardening [non-contract]: capture-style provider artifact, failure-redaction, retry, and checksum chain passed."
+echo "VS-MA-20 provider/e2e attribution [non-contract]: native read bridge and designed shell app-root smoke passed; this is not release readiness."
+echo "VS-MA-21/22 provider/e2e blocker reminder [non-contract]: product-validation release blockers remain authoritative; VS-MA-23 is not entered until partial PV rows close."
 
 echo "full-stack e2e smoke passed."
