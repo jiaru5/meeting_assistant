@@ -54,6 +54,14 @@ def provider_failure_marker(stage: str) -> None:
     )
 
 
+def concurrency_retry_marker(stage: str) -> None:
+    print(
+        f"VS-MA-21 provider/e2e marker [non-contract]: "
+        f"capture-style concurrency/retry fixture - {stage}",
+        flush=True,
+    )
+
+
 def write_fixture_wav(path: Path, seed: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     frames = bytearray()
@@ -805,6 +813,27 @@ def exercise_lock_conflict(workspace: Path) -> None:
     assert_capture_checksums_unchanged(session_dir, original_checksums)
     assert_no_temp_leftovers(session_dir)
     evidence_marker("lock rollback boundary verified")
+
+    retry_response = run_cli(
+        workspace,
+        ["generate_transcript", "--session-id", session_id, "--language", "zh"],
+        expected_exit=0,
+        command="generate_transcript",
+    )
+    assert_response_shape(retry_response, "generate_transcript", ok=True)
+    session = assert_session_identity(session_dir, session_id=session_id)
+    normalized_artifact = artifact_by_type(session, "normalized_audio")
+    transcript_artifact = artifact_by_type(session, "transcript_text")
+    assert_artifact_schema(session_dir, normalized_artifact, "normalized_audio")
+    transcript_path = assert_artifact_schema(session_dir, transcript_artifact, "transcript_text")
+    transcript = load_json(transcript_path)
+    if transcript["id"] != retry_response["transcript_id"]:
+        raise AssertionError("lock conflict retry: transcript_id mismatch")
+    if transcript["source_artifact_id"] != normalized_artifact["id"]:
+        raise AssertionError("lock conflict retry: transcript must source normalized_audio")
+    assert_capture_checksums_unchanged(session_dir, original_checksums)
+    assert_no_temp_leftovers(session_dir)
+    concurrency_retry_marker("lock conflict exit 3 then retry success with capture checksums preserved verified")
 
 
 def exercise_temp_hardlink_rollback(workspace: Path, root: Path) -> None:
