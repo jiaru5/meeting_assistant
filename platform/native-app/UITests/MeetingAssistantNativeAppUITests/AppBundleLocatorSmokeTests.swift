@@ -761,6 +761,64 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         XCTAssertFalse(deleteEvent.contains("Fake transcript generated from local audio."))
     }
 
+    func testRealWhisperRuntimeTranscriptReviewFromLaunchedAppBundleWhenExplicitlyEnabled() throws {
+        try XCTSkipUnless(
+            Self.realRuntimeCLISmokeEnabled(),
+            "Set MA_NATIVE_APP_REAL_RUNTIME_SMOKE=1 to run the real whisper.cpp app-bundle smoke."
+        )
+
+        let processingFixture = try AppRealRuntimeProcessingCLIFixture()
+        defer { processingFixture.cleanup() }
+        let processingApp = launchApp(fixture: "ready", realRuntimeProcessingFixture: processingFixture)
+
+        tapProcessingButton("ma.processing.startButton", in: processingApp)
+        XCTAssertTrue(
+            waitForElement(
+                "ma.processing.status",
+                in: processingApp,
+                contains: "Processing completed with transcript-only speaker labels.",
+                timeout: 120
+            ),
+            "Expected real runtime processing to complete from the launched app bundle."
+        )
+
+        assertElement(
+            "ma.processing.status",
+            in: processingApp,
+            contains: "Processing completed with transcript-only speaker labels."
+        )
+        assertElement("ma.processing.transcriptStatus", in: processingApp, contains: "generated with")
+        assertElement("ma.processing.degradation", in: processingApp, contains: "transcript-only fallback")
+        assertDoesNotExist("ma.processing.error", in: processingApp)
+
+        let transcript = try processingFixture.transcriptPayload()
+        let transcriptText = try Self.transcriptText(from: transcript)
+        XCTAssertTrue(
+            transcriptText.range(of: #"\p{Han}"#, options: .regularExpression) != nil,
+            "Expected real runtime transcript to contain Chinese text. Transcript: \(transcriptText)"
+        )
+        for term in ["http", "llm", "clean architecture", "eda"] {
+            XCTAssertTrue(
+                Self.transcriptContains(transcriptText, term: term),
+                "Expected real runtime transcript to contain \(term). Transcript: \(transcriptText)"
+            )
+        }
+
+        let reviewApp = launchApp(
+            workspaceURL: processingFixture.workspaceURL,
+            sessionID: processingFixture.sessionID,
+            realRuntimeProcessingFixture: processingFixture
+        )
+
+        assertElement(
+            "ma.transcript.heading",
+            in: reviewApp,
+            contains: "Real whisper runtime app-bundle fixture"
+        )
+        assertElement("ma.transcript.summary", in: reviewApp, contains: "Transcript has")
+        assertElement("ma.transcript.degradation", in: reviewApp, contains: "transcript-only fallback")
+    }
+
     func testMVPFullStackDesignedShellRecordingProcessingTranscriptActionsWhenExplicitlyEnabled() throws {
         try XCTSkipUnless(
             Self.mvpFullStackCLISmokeEnabled(),
@@ -887,6 +945,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         realCaptureFixture: AppAppleScreenCaptureKitRecordingFixture? = nil,
         processingFixture: AppProcessingProcessFixture? = nil,
         realProcessingFixture: AppRealProcessingCLIFixture? = nil,
+        realRuntimeProcessingFixture: AppRealRuntimeProcessingCLIFixture? = nil,
         transcriptActionFixture: AppTranscriptActionProcessFixture? = nil,
         mvpFullStackFixture: AppMVPFullStackCLIFixture? = nil
     ) -> XCUIApplication {
@@ -921,6 +980,9 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         }
         if let realProcessingFixture {
             realProcessingFixture.applyLaunchEnvironment(to: app)
+        }
+        if let realRuntimeProcessingFixture {
+            realRuntimeProcessingFixture.applyLaunchEnvironment(to: app)
         }
         if let transcriptActionFixture {
             transcriptActionFixture.applyLaunchEnvironment(to: app)
@@ -1447,6 +1509,17 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         }
     }
 
+    private static func realRuntimeCLISmokeEnabled() -> Bool {
+        switch ProcessInfo.processInfo.environment["MA_NATIVE_APP_REAL_RUNTIME_SMOKE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() {
+        case "1", "true", "yes":
+            return true
+        default:
+            return false
+        }
+    }
+
     private static func mvpFullStackCLISmokeEnabled() -> Bool {
         switch ProcessInfo.processInfo.environment["MA_NATIVE_APP_MVP_FULL_STACK_SMOKE"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1635,6 +1708,31 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             to: sessionRoot.appendingPathComponent("session.json")
         )
         return (workspaceURL, sessionID)
+    }
+
+    private static func transcriptText(from payload: [String: Any]) throws -> String {
+        let segments = try XCTUnwrap(payload["segments"] as? [[String: Any]])
+        let text = segments
+            .compactMap { $0["text"] as? String }
+            .joined(separator: " ")
+        XCTAssertFalse(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        return text
+    }
+
+    private static func normalizedTranscriptText(_ value: String) -> String {
+        var normalized = value.lowercased()
+        for punctuation in [".", ",", ":", ";", "!", "?", "(", ")", "[", "]", "{", "}", "\"", "'", "\n", "\t"] {
+            normalized = normalized.replacingOccurrences(of: punctuation, with: " ")
+        }
+        return normalized.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    private static func transcriptContains(_ transcript: String, term: String) -> Bool {
+        let normalizedTranscript = normalizedTranscriptText(transcript)
+        let normalizedTerm = normalizedTranscriptText(term)
+        let compactTranscript = normalizedTranscript.replacingOccurrences(of: " ", with: "")
+        let compactTerm = normalizedTerm.replacingOccurrences(of: " ", with: "")
+        return normalizedTranscript.contains(normalizedTerm) || compactTranscript.contains(compactTerm)
     }
 
     @discardableResult
@@ -2130,6 +2228,158 @@ private final class AppRealProcessingCLIFixture {
     private static func appendLittleEndian<T: FixedWidthInteger>(_ value: T, to data: inout Data) {
         var littleEndian = value.littleEndian
         withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
+    }
+
+    private static func sha256(_ data: Data) -> String {
+        let digest = SHA256.hash(data: data)
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "sha256:\(hex)"
+    }
+}
+
+private final class AppRealRuntimeProcessingCLIFixture {
+    let rootURL: URL
+    let workspaceURL: URL
+    let cliURL: URL
+    let runtimePath: String
+    let modelPath: String
+    let smokeAudioURL: URL
+    let sessionID = "session-app-ui-runtime"
+
+    var sessionRootURL: URL {
+        workspaceURL
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+    }
+
+    init(sourceFile: StaticString = #filePath) throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let runtimePath = environment["MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME"],
+              !runtimePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw XCTSkip("MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME is required for the real runtime app-bundle smoke.")
+        }
+        guard let modelPath = environment["MEETING_ASSISTANT_TRANSCRIPTION_MODEL"],
+              !modelPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw XCTSkip("MEETING_ASSISTANT_TRANSCRIPTION_MODEL is required for the real runtime app-bundle smoke.")
+        }
+
+        let defaultSmokeAudio = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav")
+        let smokeAudioPath = environment["MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        smokeAudioURL = URL(fileURLWithPath: smokeAudioPath?.isEmpty == false ? smokeAudioPath! : defaultSmokeAudio.path)
+        guard FileManager.default.isReadableFile(atPath: smokeAudioURL.path) else {
+            throw XCTSkip("MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO must point to the mixed-language WAV fixture.")
+        }
+
+        self.runtimePath = runtimePath
+        self.modelPath = modelPath
+
+        let nativeAppRootURL = URL(fileURLWithPath: String(describing: sourceFile))
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        cliURL = nativeAppRootURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("e2e", isDirectory: true)
+            .appendingPathComponent("ma-cli-local.sh", isDirectory: false)
+
+        guard FileManager.default.isExecutableFile(atPath: cliURL.path) else {
+            throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: cliURL.path])
+        }
+
+        rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ma-native-real-runtime-app-\(UUID().uuidString)", isDirectory: true)
+        workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: sessionRootURL.appendingPathComponent("artifacts", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: sessionRootURL.appendingPathComponent("logs", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try createNativeRecordingWorkspace()
+    }
+
+    deinit {
+        cleanup()
+    }
+
+    func applyLaunchEnvironment(to app: XCUIApplication) {
+        app.launchEnvironment["MA_NATIVE_PROCESSING_CLIENT"] = "process"
+        app.launchEnvironment["MA_NATIVE_APP_XCTEST"] = "1"
+        app.launchEnvironment["MA_NATIVE_APP_REAL_RUNTIME_SMOKE"] = "1"
+        app.launchEnvironment["MA_NATIVE_PROCESSING_RUNTIME"] = "whisper_cpp"
+        app.launchEnvironment["MA_NATIVE_PROCESSING_LANGUAGE"] = "zh"
+        app.launchEnvironment["MEETING_ASSISTANT_CLI_PATH"] = cliURL.path
+        app.launchEnvironment["MEETING_ASSISTANT_WORKSPACE"] = workspaceURL.path
+        app.launchEnvironment["MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME"] = runtimePath
+        app.launchEnvironment["MEETING_ASSISTANT_TRANSCRIPTION_MODEL"] = modelPath
+        app.launchEnvironment["MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO"] = smokeAudioURL.path
+    }
+
+    func cleanup() {
+        try? FileManager.default.removeItem(at: rootURL)
+    }
+
+    func sessionMetadata() throws -> [String: Any] {
+        let data = try Data(contentsOf: sessionRootURL.appendingPathComponent("session.json"))
+        let payload = try JSONSerialization.jsonObject(with: data)
+        return try XCTUnwrap(payload as? [String: Any])
+    }
+
+    func transcriptPayload() throws -> [String: Any] {
+        let session = try sessionMetadata()
+        let artifacts = try XCTUnwrap(session["artifacts"] as? [[String: Any]])
+        let transcript = try XCTUnwrap(artifacts.first { $0["artifact_type"] as? String == "transcript_text" })
+        let path = try XCTUnwrap(transcript["path"] as? String)
+        let transcriptURL = URL(fileURLWithPath: path, relativeTo: sessionRootURL)
+        let data = try Data(contentsOf: transcriptURL)
+        let payload = try JSONSerialization.jsonObject(with: data)
+        return try XCTUnwrap(payload as? [String: Any])
+    }
+
+    private func createNativeRecordingWorkspace() throws {
+        let artifactsURL = sessionRootURL.appendingPathComponent("artifacts", isDirectory: true)
+        let audioURL = artifactsURL.appendingPathComponent("mixed_audio.wav", isDirectory: false)
+        let audioData = try Data(contentsOf: smokeAudioURL)
+        try audioData.write(to: audioURL)
+        let audioChecksum = Self.sha256(audioData)
+        let now = "2026-07-05T00:00:00Z"
+
+        _ = try writeJSON(
+            [
+                "id": sessionID,
+                "title": "Real whisper runtime app-bundle fixture",
+                "source_type": "native_recording",
+                "status": "recorded",
+                "started_at": now,
+                "workspace_dir": sessionRootURL.path,
+                "created_at": now,
+                "updated_at": now,
+                "artifacts": [
+                    [
+                        "id": "artifact-real-runtime-mixed",
+                        "session_id": sessionID,
+                        "artifact_type": "mixed_audio",
+                        "path": "artifacts/mixed_audio.wav",
+                        "format": "wav",
+                        "capture_status": "available",
+                        "checksum": audioChecksum,
+                        "created_at": now,
+                    ],
+                ],
+            ],
+            to: sessionRootURL.appendingPathComponent("session.json", isDirectory: false)
+        )
+    }
+
+    @discardableResult
+    private func writeJSON(_ payload: Any, to url: URL) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: url)
+        return Self.sha256(data)
     }
 
     private static func sha256(_ data: Data) -> String {

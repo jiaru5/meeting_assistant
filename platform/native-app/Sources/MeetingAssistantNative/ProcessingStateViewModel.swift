@@ -116,15 +116,21 @@ public final class ProcessingStateViewModel: ObservableObject {
     private var readinessState: PermissionDependencyStatusState
     private var lastRunRequest: ProcessingRunRequest?
     private let defaultSessionID: String
+    private let defaultLanguage: String?
+    private let defaultRuntime: ProcessingTranscriptRuntime?
 
     public init(
         commandClient: any ProcessingCommandClient = ProcessingCommandFakeClient(),
         readinessState: PermissionDependencyStatusState = .idle,
-        defaultSessionID: String = "session-processing-fixture"
+        defaultSessionID: String = "session-processing-fixture",
+        defaultLanguage: String? = nil,
+        defaultRuntime: ProcessingTranscriptRuntime? = nil
     ) {
         self.commandClient = commandClient
         self.readinessState = readinessState
         self.defaultSessionID = defaultSessionID
+        self.defaultLanguage = defaultLanguage
+        self.defaultRuntime = defaultRuntime
         state = readinessState.canRunProcessing ? .idle : .blocked
     }
 
@@ -137,7 +143,11 @@ public final class ProcessingStateViewModel: ObservableObject {
     }
 
     public func start() async {
-        await start(sessionID: defaultSessionID)
+        await start(
+            sessionID: defaultSessionID,
+            language: defaultLanguage,
+            runtime: defaultRuntime
+        )
     }
 
     public func start(

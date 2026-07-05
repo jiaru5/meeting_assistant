@@ -121,6 +121,7 @@ grep -R -q "MA_NATIVE_APP_REAL_CAPTURE_SMOKE" UITests/MeetingAssistantNativeAppU
 grep -q "MA_NATIVE_APP_REAL_CAPTURE_SMOKE" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_REAL_PROCESSING_SMOKE" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_REAL_ACTION_SMOKE" scripts/test-app-bundle.sh
+grep -q "MA_NATIVE_APP_REAL_RUNTIME_SMOKE" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_MVP_FULL_STACK_SMOKE" scripts/test-app-bundle.sh
 grep -q "test-without-building" scripts/test-app-bundle.sh
 grep -q "PlistBuddy" scripts/test-app-bundle.sh
@@ -128,15 +129,19 @@ grep -q "permission_denied" scripts/test-app-bundle.sh
 grep -q "real-capture-app-bundle-smoke.log" scripts/test-app-bundle.sh
 grep -q "real-processing-app-bundle-smoke.log" scripts/test-app-bundle.sh
 grep -q "real-action-app-bundle-smoke.log" scripts/test-app-bundle.sh
+grep -q "real-runtime-app-bundle-smoke.log" scripts/test-app-bundle.sh
 grep -q "mvp-full-stack-app-bundle-smoke.log" scripts/test-app-bundle.sh
 grep -R -q "MA_NATIVE_PROCESSING_CLIENT" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "AppRealProcessingCLIFixture" UITests/MeetingAssistantNativeAppUITests
+grep -R -q "AppRealRuntimeProcessingCLIFixture" UITests/MeetingAssistantNativeAppUITests
 test -x ../e2e/ma-cli-local.sh
 grep -q "meeting_assistant_cli" ../e2e/ma-cli-local.sh
 grep -R -q "MA_NATIVE_APP_XCTEST" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "isProcessClientTestHookAllowed" App/MeetingAssistantNativeApp.swift
+grep -R -q "isRealRuntimeProcessingSmokeEnabled" App/MeetingAssistantNativeApp.swift
 grep -R -q "MA_NATIVE_TRANSCRIPT_ACTION_CLIENT" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MA_NATIVE_APP_REAL_ACTION_SMOKE" UITests/MeetingAssistantNativeAppUITests
+grep -R -q "MA_NATIVE_APP_REAL_RUNTIME_SMOKE" UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MA_NATIVE_APP_MVP_FULL_STACK_SMOKE" UITests/MeetingAssistantNativeAppUITests
 grep -R -q "isTranscriptActionClientTestHookAllowed" App/MeetingAssistantNativeApp.swift
 grep -R -q "#if DEBUG" App/MeetingAssistantNativeApp.swift

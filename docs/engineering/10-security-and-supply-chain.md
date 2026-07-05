@@ -55,6 +55,7 @@ Processing CLI release provider smoke 必须对模型 sidecar fail closed：模�
 7. English-only `.en` Whisper 模型不能作为 `PV-MA-007` covered 证据；真实 smoke 必须覆盖中文为主且夹杂英文技术词汇的会议音频，并记录 no-auto-download 证据。
 8. `check_dependencies` 的 transcription hardware preflight 只能输出 CPU 架构、芯片名称和内存等级等非敏感摘要，不得输出序列号、硬件 UUID 或 Provisioning UDID；该 preflight 只用于部署风险判断，不能替代模型 provenance、license/hash 审查或真实 runtime smoke。
 9. 用户级共享资产目录固定为 `~/.local/opt/whisper.cpp/`、`~/.local/bin/whisper-cli`、`~/.local/share/ai-models/whisper.cpp/` 和 `~/.local/share/ai-fixtures/asr/zh-en-tech/`。项目脚本可以检查并提示这些位置，但不得自动下载、自动复制模型、自动创建 runtime symlink 或把大型模型提交到仓库。
+10. Native app-bundle real runtime smoke 只能通过 Debug/XCTest-only `MA_NATIVE_APP_REAL_RUNTIME_SMOKE=1` 显式开启，并且只能把用户已配置的 runtime/model/audio 路径透传给 provider-owned CLI；生产/default app 不能因此自动选择 runtime、自动发现模型、自动下载、自动复制共享资产或把模型/音频 fixture 纳入仓库制品。
 
 ## 制品和来源
 

@@ -53,7 +53,9 @@ private struct NativeControlPlaneRootView: View {
             wrappedValue: ProcessingStateViewModel(
                 commandClient: processingCommandClient,
                 readinessState: readinessState,
-                defaultSessionID: configuration.sessionID
+                defaultSessionID: configuration.sessionID,
+                defaultLanguage: configuration.processingDefaultLanguage,
+                defaultRuntime: configuration.processingDefaultRuntime
             )
         )
         transcriptViewModel = TranscriptReviewViewModel(input: configuration.transcriptInput)
@@ -247,6 +249,8 @@ private struct NativeControlPlaneFixtureConfiguration {
     let workspaceDir: String?
     let captureSystemAudio: Bool
     let captureMicrophoneAudio: Bool
+    let processingDefaultLanguage: String?
+    let processingDefaultRuntime: ProcessingTranscriptRuntime?
 
     init(
         dependencyResponse: DependencyCheckResponse,
@@ -282,6 +286,8 @@ private struct NativeControlPlaneFixtureConfiguration {
             named: "MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO",
             defaultValue: true
         )
+        self.processingDefaultLanguage = Self.processingDefaultLanguage()
+        self.processingDefaultRuntime = Self.processingDefaultRuntime()
     }
 
     var readinessState: PermissionDependencyStatusState {
@@ -713,6 +719,47 @@ private struct NativeControlPlaneFixtureConfiguration {
             return false
         default:
             return defaultValue
+        }
+    }
+
+    private static func processingDefaultLanguage(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
+        guard isRealRuntimeProcessingSmokeEnabled(environment) else {
+            return nil
+        }
+        let value = environment["MA_NATIVE_PROCESSING_LANGUAGE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.isEmpty == false ? value : "zh"
+    }
+
+    private static func processingDefaultRuntime(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> ProcessingTranscriptRuntime? {
+        guard isRealRuntimeProcessingSmokeEnabled(environment) else {
+            return nil
+        }
+        switch environment["MA_NATIVE_PROCESSING_RUNTIME"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() {
+        case "whisper_cpp", "whisper-cpp":
+            return .whisperCpp
+        default:
+            return nil
+        }
+    }
+
+    private static func isRealRuntimeProcessingSmokeEnabled(_ environment: [String: String]) -> Bool {
+        guard isNativeAppXCTestEnvironment(environment) else {
+            return false
+        }
+        switch environment["MA_NATIVE_APP_REAL_RUNTIME_SMOKE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() {
+        case "1", "true", "yes":
+            return true
+        default:
+            return false
         }
     }
 

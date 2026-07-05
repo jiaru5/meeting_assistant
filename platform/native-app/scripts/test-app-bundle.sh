@@ -15,6 +15,9 @@ real_processing_log="$derived_data_path/real-processing-app-bundle-smoke.log"
 real_action_smoke="${MA_NATIVE_APP_REAL_ACTION_SMOKE:-0}"
 real_action_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testRealProcessingCLITranscriptReviewExportAndDeleteFromLaunchedAppBundleWhenExplicitlyEnabled"
 real_action_log="$derived_data_path/real-action-app-bundle-smoke.log"
+real_runtime_smoke="${MA_NATIVE_APP_REAL_RUNTIME_SMOKE:-0}"
+real_runtime_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testRealWhisperRuntimeTranscriptReviewFromLaunchedAppBundleWhenExplicitlyEnabled"
+real_runtime_log="$derived_data_path/real-runtime-app-bundle-smoke.log"
 mvp_full_stack_smoke="${MA_NATIVE_APP_MVP_FULL_STACK_SMOKE:-0}"
 mvp_full_stack_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testMVPFullStackDesignedShellRecordingProcessingTranscriptActionsWhenExplicitlyEnabled"
 mvp_full_stack_log="$derived_data_path/mvp-full-stack-app-bundle-smoke.log"
@@ -144,6 +147,22 @@ is_ui_testing_automation_blocked() {
   grep -Eqi 'LocalAuthentication|System authentication is running|Timed out while enabling automation mode|Failed to initialize for UI testing|Failed to enable Automation Mode' "$log_path"
 }
 
+require_env_for_real_runtime_smoke() {
+  local name
+
+  for name in \
+    MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL \
+    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO
+  do
+    if [[ -z "${!name:-}" ]]; then
+      echo "native-app real runtime app-bundle XCUITest requires $name to be configured." >&2
+      exit 1
+    fi
+    set_xctestrun_env "$xctestrun_path" "$name" "${!name}"
+  done
+}
+
 if [[ "$real_capture_smoke" == "1" || "$real_capture_smoke" == "true" || "$real_capture_smoke" == "yes" ]]; then
   xcodebuild build-for-testing \
     -project "$component_dir/MeetingAssistantNative.xcodeproj" \
@@ -260,6 +279,45 @@ if [[ "$real_action_smoke" == "1" || "$real_action_smoke" == "true" || "$real_ac
   fi
 
   echo "native-app real action app-bundle XCUITest passed."
+  exit 0
+fi
+
+if [[ "$real_runtime_smoke" == "1" || "$real_runtime_smoke" == "true" || "$real_runtime_smoke" == "yes" ]]; then
+  xcodebuild build-for-testing \
+    -project "$component_dir/MeetingAssistantNative.xcodeproj" \
+    -scheme "MeetingAssistantNative" \
+    -destination "$destination" \
+    -derivedDataPath "$derived_data_path" \
+    -parallel-testing-enabled NO
+
+  xctestrun_path="$(find "$derived_data_path/Build/Products" -maxdepth 1 -name "*.xctestrun" -print -quit)"
+  if [[ -z "$xctestrun_path" ]]; then
+    echo "error: build-for-testing did not produce an .xctestrun file under $derived_data_path/Build/Products" >&2
+    exit 1
+  fi
+
+  set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_REAL_RUNTIME_SMOKE" "1"
+  require_env_for_real_runtime_smoke
+
+  set +e
+  xcodebuild test-without-building \
+    -xctestrun "$xctestrun_path" \
+    -destination "$destination" \
+    "-only-testing:$real_runtime_test" 2>&1 | tee "$real_runtime_log"
+  test_status=${PIPESTATUS[0]}
+  set -e
+
+  if [[ "$test_status" -ne 0 ]]; then
+    echo "native-app real runtime app-bundle XCUITest failed. Captured xcodebuild log: $real_runtime_log" >&2
+    if is_ui_testing_automation_blocked "$real_runtime_log"; then
+      print_ui_testing_automation_help "real runtime" "$real_runtime_log"
+      print_ui_testing_automation_process_diagnostics
+      print_ui_testing_automation_log_excerpt
+    fi
+    exit "$test_status"
+  fi
+
+  echo "native-app real runtime app-bundle XCUITest passed."
   exit 0
 fi
 
