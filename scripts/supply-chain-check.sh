@@ -211,9 +211,11 @@ def require_local_sidecar_path(value: Any, label: str) -> None:
         failures.append(f"{label} path must not be under Downloads, Desktop, or Library/Caches")
 
 
-def require_sha256_digest(value: Any, label: str) -> None:
+def require_sha256_digest(value: Any, label: str) -> str | None:
     if not isinstance(value, str) or re.fullmatch(r"sha256:[a-fA-F0-9]{64}", value) is None:
         failures.append(f"{label} must be a sha256:<64 hex> digest")
+        return None
+    return value.lower()
 
 
 def validate_sidecar_artifact(artifact: Any, label: str, *, require_license: bool = False) -> None:
@@ -233,6 +235,65 @@ def validate_sidecar_artifact(artifact: Any, label: str, *, require_license: boo
             failures.append(f"{label} must include provenance_ref")
 
 
+def validate_release_bundle_report(report: dict[str, Any], head: str | None) -> tuple[str | None, set[str]]:
+    bundle_digest: str | None = None
+    bundle_names: set[str] = set()
+    require_equal(report, "report_schema", 1, "release bundle")
+    require_equal(report, "release_gate", "release-bundle", "release bundle")
+    if head is not None:
+        require_equal(report, "subject_commit", head, "release bundle")
+    require_non_empty_string(report, "builder", "release bundle")
+    require_non_empty_string(report, "source_repository", "release bundle")
+
+    bundle = report.get("bundle")
+    if not isinstance(bundle, dict):
+        failures.append("release bundle report must include a bundle object")
+        return bundle_digest, bundle_names
+
+    bundle_name = bundle.get("name")
+    if isinstance(bundle_name, str) and bundle_name:
+        bundle_names.add(bundle_name)
+    else:
+        failures.append("release bundle must include name")
+    app_bundle = bundle.get("app_bundle")
+    if isinstance(app_bundle, str) and app_bundle:
+        bundle_names.add(app_bundle)
+    require_equal(bundle, "artifact_type", "macos-app-archive", "release bundle")
+    require_equal(bundle, "archive_format", "zip", "release bundle")
+    require_equal(bundle, "app_bundle", "MeetingAssistantNative.app", "release bundle")
+    bundle_digest = require_sha256_digest(bundle.get("digest"), "release bundle digest")
+    return bundle_digest, bundle_names
+
+
+def includes_release_bundle_artifact(artifacts: list[Any], digest: str, names: set[str]) -> bool:
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        artifact_digest = artifact.get("digest")
+        if not isinstance(artifact_digest, str) or artifact_digest.lower() != digest:
+            continue
+        artifact_name = artifact.get("name")
+        if names and artifact_name not in names:
+            continue
+        return True
+    return False
+
+
+def require_release_bundle_artifact(artifacts: Any, label: str, digest: str | None, names: set[str]) -> None:
+    if digest is None or not isinstance(artifacts, list) or not artifacts:
+        return
+    if includes_release_bundle_artifact(artifacts, digest, names):
+        return
+    name_hint = ""
+    if names:
+        name_hint = f" with name one of {', '.join(sorted(names))}"
+    failures.append(f"{label} report must include release bundle artifact digest {digest}{name_hint}")
+
+
+bundle_report_path = resolve_evidence_path(
+    "MEETING_ASSISTANT_RELEASE_BUNDLE_REPORT",
+    ".harness/release-inputs/bundle/release-bundle-report.json",
+)
 provenance_path = resolve_evidence_path(
     "MEETING_ASSISTANT_RELEASE_PROVENANCE_REPORT",
     ".harness/release-inputs/supply-chain/release-provenance-report.json",
@@ -247,9 +308,15 @@ sidecar_path = resolve_evidence_path(
 )
 
 head = current_commit()
+bundle_report = load_report(bundle_report_path, "release bundle")
 provenance = load_report(provenance_path, "release provenance")
 signature = load_report(signature_path, "release signature")
 sidecar = load_report(sidecar_path, "release sidecar")
+
+release_bundle_digest: str | None = None
+release_bundle_names: set[str] = set()
+if bundle_report is not None:
+    release_bundle_digest, release_bundle_names = validate_release_bundle_report(bundle_report, head)
 
 if provenance is not None:
     require_equal(provenance, "report_schema", 1, "release provenance")
@@ -273,6 +340,12 @@ if provenance is not None:
             if not isinstance(artifact.get("name"), str) or not artifact.get("name"):
                 failures.append(f"release provenance artifact #{index} must include name")
             require_sha256_digest(artifact.get("digest"), f"release provenance artifact #{index} digest")
+        require_release_bundle_artifact(
+            artifacts,
+            "release provenance",
+            release_bundle_digest,
+            release_bundle_names,
+        )
 
 if signature is not None:
     require_equal(signature, "report_schema", 1, "release signature")
@@ -295,6 +368,12 @@ if signature is not None:
             require_sha256_digest(artifact.get("digest"), f"release signature artifact #{index} digest")
             if not isinstance(artifact.get("signature_type"), str) or not artifact.get("signature_type"):
                 failures.append(f"release signature artifact #{index} must include signature_type")
+        require_release_bundle_artifact(
+            signed_artifacts,
+            "release signature",
+            release_bundle_digest,
+            release_bundle_names,
+        )
 
 if sidecar is not None:
     require_equal(sidecar, "report_schema", 1, "release sidecar")
@@ -331,12 +410,12 @@ if sidecar is not None:
                         failures.append(f"{label} smoke must set {key}=True")
 
 if failures:
-    print("release supply-chain provenance/signing/sidecar evidence failed:", file=sys.stderr)
+    print("release supply-chain bundle/provenance/signing/sidecar evidence failed:", file=sys.stderr)
     for failure in failures:
         print(f" - {failure}", file=sys.stderr)
     raise SystemExit(1)
 
-print("release supply-chain provenance/signing/sidecar evidence passed.")
+print("release supply-chain bundle/provenance/signing/sidecar evidence passed.")
 PY
 fi
 

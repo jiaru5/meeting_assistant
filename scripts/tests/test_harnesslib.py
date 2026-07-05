@@ -164,6 +164,126 @@ class HarnessValidationTests(unittest.TestCase):
             "import json; from pathlib import Path; " + report_code + marker_code,
         ]
 
+    def write_release_supply_chain_reports(
+        self,
+        reports_dir: Path,
+        manifest: dict,
+        head: str,
+        digest: str,
+        *,
+        provenance_digest: str | None = None,
+        signature_digest: str | None = None,
+    ) -> tuple[Path, Path, Path, Path]:
+        reports_dir.mkdir()
+        provenance_digest = provenance_digest or digest
+        signature_digest = signature_digest or digest
+        bundle_path = reports_dir / "bundle.json"
+        provenance_path = reports_dir / "provenance.json"
+        signature_path = reports_dir / "signature.json"
+        sidecar_path = reports_dir / "sidecar.json"
+        bundle_path.write_text(
+            json.dumps(
+                {
+                    "report_schema": 1,
+                    "release_gate": "release-bundle",
+                    "subject_commit": head,
+                    "builder": "github-actions-oidc",
+                    "source_repository": "example/meeting_assistant",
+                    "bundle": {
+                        "name": "MeetingAssistantNative.zip",
+                        "artifact_type": "macos-app-archive",
+                        "archive_format": "zip",
+                        "app_bundle": "MeetingAssistantNative.app",
+                        "digest": digest,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        provenance_path.write_text(
+            json.dumps(
+                {
+                    "report_schema": 1,
+                    "provenance_target": manifest["supply_chain"]["provenance_target"],
+                    "release_provenance_attestation": "produced",
+                    "sbom_format": manifest["supply_chain"]["sbom_format"],
+                    "subject_commit": head,
+                    "builder": "github-actions-oidc",
+                    "source_repository": "example/meeting_assistant",
+                    "artifacts": [{"name": "MeetingAssistantNative.app", "digest": provenance_digest}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        signature_path.write_text(
+            json.dumps(
+                {
+                    "report_schema": 1,
+                    "artifact_signing": manifest["supply_chain"]["artifact_signing"],
+                    "signing_status": "signed",
+                    "subject_commit": head,
+                    "verifier": "cosign",
+                    "signed_artifacts": [
+                        {
+                            "name": "MeetingAssistantNative.app",
+                            "digest": signature_digest,
+                            "signature_type": "keyless-oidc",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        sidecar_path.write_text(
+            json.dumps(
+                {
+                    "report_schema": 1,
+                    "release_gate": "release-sidecar-portability",
+                    "target_scope": "all-target-machines",
+                    "subject_commit": head,
+                    "builder": "github-actions-oidc",
+                    "source_repository": "example/meeting_assistant",
+                    "packages_runtime_or_model": False,
+                    "auto_downloads": False,
+                    "external_network_access": False,
+                    "target_machines": [
+                        {
+                            "target_id": "macos-arm64-ci",
+                            "os": "macos",
+                            "architecture": "arm64",
+                            "runtime": {
+                                "name": "whisper-cli",
+                                "path": "/Users/runner/.local/bin/whisper-cli",
+                                "digest": digest,
+                                "source": "user-prepared-local-runtime",
+                            },
+                            "model": {
+                                "name": "ggml-large-v3-turbo-q5_0.bin",
+                                "path": "/Users/runner/.local/share/ai-models/whisper.cpp/large-v3-turbo/ggml-large-v3-turbo-q5_0.bin",
+                                "digest": digest,
+                                "source": "user-prepared-local-model",
+                                "license": "Apache-2.0",
+                                "provenance_ref": "/Users/runner/.local/share/ai-models/whisper.cpp/large-v3-turbo/provenance.json",
+                            },
+                            "smoke_audio_fixture": {
+                                "name": "mixed-zh-en-tech.wav",
+                                "path": "/Users/runner/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav",
+                                "digest": digest,
+                                "source": "user-prepared-local-fixture",
+                            },
+                            "smoke": {
+                                "check_dependencies_ok": True,
+                                "whisper_cpp_smoke_passed": True,
+                                "no_auto_downloads_observed": True,
+                            },
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return bundle_path, provenance_path, signature_path, sidecar_path
+
     def test_framework_manifest_and_policy_are_valid(self) -> None:
         self.assertEqual([], validate_manifest(ROOT, "current"))
         self.assertEqual([], validate_agent_policy(ROOT))
@@ -972,7 +1092,7 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertIn("must report zero findings", output)
             self.assertNotIn("supply-chain-check passed: phase=current", result.stdout)
 
-    def test_supply_chain_release_fails_without_release_provenance_signature_and_sidecar_reports(self) -> None:
+    def test_supply_chain_release_fails_without_release_bundle_provenance_signature_and_sidecar_reports(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
             command = self.supply_chain_report_command()
@@ -992,7 +1112,8 @@ class HarnessValidationTests(unittest.TestCase):
 
             output = result.stderr + result.stdout
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("release supply-chain provenance/signing/sidecar evidence failed", output)
+            self.assertIn("release supply-chain bundle/provenance/signing/sidecar evidence failed", output)
+            self.assertIn("release bundle report is required", output)
             self.assertIn("release provenance report is required", output)
             self.assertIn("release signature report is required", output)
             self.assertIn("release sidecar report is required", output)
@@ -1011,93 +1132,14 @@ class HarnessValidationTests(unittest.TestCase):
                 component["commands"]["sbom"] = command
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             reports_dir = Path(directory) / "release-reports"
-            reports_dir.mkdir()
-            provenance_path = reports_dir / "provenance.json"
-            signature_path = reports_dir / "signature.json"
-            sidecar_path = reports_dir / "sidecar.json"
-            provenance_path.write_text(
-                json.dumps(
-                    {
-                        "report_schema": 1,
-                        "provenance_target": manifest["supply_chain"]["provenance_target"],
-                        "release_provenance_attestation": "produced",
-                        "sbom_format": manifest["supply_chain"]["sbom_format"],
-                        "subject_commit": head,
-                        "builder": "github-actions-oidc",
-                        "source_repository": "example/meeting_assistant",
-                        "artifacts": [{"name": "MeetingAssistantNative.app", "digest": digest}],
-                    }
-                ),
-                encoding="utf-8",
-            )
-            signature_path.write_text(
-                json.dumps(
-                    {
-                        "report_schema": 1,
-                        "artifact_signing": manifest["supply_chain"]["artifact_signing"],
-                        "signing_status": "signed",
-                        "subject_commit": head,
-                        "verifier": "cosign",
-                        "signed_artifacts": [
-                            {
-                                "name": "MeetingAssistantNative.app",
-                                "digest": digest,
-                                "signature_type": "keyless-oidc",
-                            }
-                        ],
-                    }
-                ),
-                encoding="utf-8",
-            )
-            sidecar_path.write_text(
-                json.dumps(
-                    {
-                        "report_schema": 1,
-                        "release_gate": "release-sidecar-portability",
-                        "target_scope": "all-target-machines",
-                        "subject_commit": head,
-                        "builder": "github-actions-oidc",
-                        "source_repository": "example/meeting_assistant",
-                        "packages_runtime_or_model": False,
-                        "auto_downloads": False,
-                        "external_network_access": False,
-                        "target_machines": [
-                            {
-                                "target_id": "macos-arm64-ci",
-                                "os": "macos",
-                                "architecture": "arm64",
-                                "runtime": {
-                                    "name": "whisper-cli",
-                                    "path": "/Users/runner/.local/bin/whisper-cli",
-                                    "digest": digest,
-                                    "source": "user-prepared-local-runtime",
-                                },
-                                "model": {
-                                    "name": "ggml-large-v3-turbo-q5_0.bin",
-                                    "path": "/Users/runner/.local/share/ai-models/whisper.cpp/large-v3-turbo/ggml-large-v3-turbo-q5_0.bin",
-                                    "digest": digest,
-                                    "source": "user-prepared-local-model",
-                                    "license": "Apache-2.0",
-                                    "provenance_ref": "/Users/runner/.local/share/ai-models/whisper.cpp/large-v3-turbo/provenance.json",
-                                },
-                                "smoke_audio_fixture": {
-                                    "name": "mixed-zh-en-tech.wav",
-                                    "path": "/Users/runner/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav",
-                                    "digest": digest,
-                                    "source": "user-prepared-local-fixture",
-                                },
-                                "smoke": {
-                                    "check_dependencies_ok": True,
-                                    "whisper_cpp_smoke_passed": True,
-                                    "no_auto_downloads_observed": True,
-                                },
-                            }
-                        ],
-                    }
-                ),
-                encoding="utf-8",
+            bundle_path, provenance_path, signature_path, sidecar_path = self.write_release_supply_chain_reports(
+                reports_dir,
+                manifest,
+                head,
+                digest,
             )
             env = os.environ.copy()
+            env["MEETING_ASSISTANT_RELEASE_BUNDLE_REPORT"] = str(bundle_path)
             env["MEETING_ASSISTANT_RELEASE_PROVENANCE_REPORT"] = str(provenance_path)
             env["MEETING_ASSISTANT_RELEASE_SIGNATURE_REPORT"] = str(signature_path)
             env["MEETING_ASSISTANT_RELEASE_SIDECAR_REPORT"] = str(sidecar_path)
@@ -1112,8 +1154,51 @@ class HarnessValidationTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-            self.assertIn("release supply-chain provenance/signing/sidecar evidence passed", result.stdout)
+            self.assertIn("release supply-chain bundle/provenance/signing/sidecar evidence passed", result.stdout)
             self.assertIn("supply-chain-check passed: phase=release", result.stdout)
+
+    def test_supply_chain_release_rejects_provenance_or_signature_for_different_bundle_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=fixture, text=True).strip()
+            bundle_digest = "sha256:" + ("a" * 64)
+            other_digest = "sha256:" + ("b" * 64)
+            command = self.supply_chain_report_command()
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["sbom"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            reports_dir = Path(directory) / "release-reports"
+            bundle_path, provenance_path, signature_path, sidecar_path = self.write_release_supply_chain_reports(
+                reports_dir,
+                manifest,
+                head,
+                bundle_digest,
+                provenance_digest=other_digest,
+                signature_digest=other_digest,
+            )
+            env = os.environ.copy()
+            env["MEETING_ASSISTANT_RELEASE_BUNDLE_REPORT"] = str(bundle_path)
+            env["MEETING_ASSISTANT_RELEASE_PROVENANCE_REPORT"] = str(provenance_path)
+            env["MEETING_ASSISTANT_RELEASE_SIGNATURE_REPORT"] = str(signature_path)
+            env["MEETING_ASSISTANT_RELEASE_SIDECAR_REPORT"] = str(sidecar_path)
+
+            result = subprocess.run(
+                [str(fixture / "scripts/supply-chain-check.sh"), "release"],
+                cwd=fixture,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("release provenance report must include release bundle artifact digest", output)
+            self.assertIn("release signature report must include release bundle artifact digest", output)
+            self.assertNotIn("supply-chain-check passed: phase=release", result.stdout)
 
     def test_release_bundle_check_fails_without_release_bundle_report(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
