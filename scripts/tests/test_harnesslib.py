@@ -872,6 +872,24 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("release-sidecar-target-smoke", security_supply_chain)
         self.assertIn("release-sidecar-target-smoke.sh", production_readiness)
 
+    def test_release_sidecar_portability_report_entrypoint_is_documented(self) -> None:
+        wrapper = (ROOT / "platform/e2e/release-sidecar-portability-report.sh").read_text(encoding="utf-8")
+        report = (ROOT / "platform/e2e/release_sidecar_portability_report.py").read_text(encoding="utf-8")
+        dev_commands = (ROOT / "docs/engineering/02-dev-commands.md").read_text(encoding="utf-8")
+        security_supply_chain = (ROOT / "docs/engineering/10-security-and-supply-chain.md").read_text(encoding="utf-8")
+        production_readiness = (ROOT / "docs/engineering/11-production-readiness.md").read_text(encoding="utf-8")
+        e2e_readme = (ROOT / "platform/e2e/README.md").read_text(encoding="utf-8")
+
+        self.assertIn("release_sidecar_portability_report.py", wrapper)
+        self.assertIn("MA_RELEASE_SIDECAR_TARGET_SMOKE_REPORTS", wrapper)
+        self.assertIn("MA_RELEASE_SIDECAR_EXPECTED_TARGETS", wrapper)
+        self.assertIn("release-sidecar-portability", report)
+        self.assertIn("incomplete-target-set", report)
+        self.assertIn("release-sidecar-portability-report.sh", dev_commands)
+        self.assertIn("release-sidecar-portability", security_supply_chain)
+        self.assertIn("release-sidecar-portability-report.sh", production_readiness)
+        self.assertIn("release-sidecar-portability-report.sh", e2e_readme)
+
     def test_product_validation_current_phase_rejects_missing_status(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)

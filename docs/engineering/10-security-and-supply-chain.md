@@ -54,6 +54,8 @@ Processing CLI release provider smoke 是 `VS-MA-22` 的 provider 安全与供�
 
 `platform/e2e/release-sidecar-target-smoke.sh` 是 `VS-MA-22` 的逐目标机器 sidecar repeatability evidence 入口，不是 all-target sidecar portability report。该 wrapper 必须运行 processing release-provider smoke，并由 `release_sidecar_target_smoke_report.py` 生成 `release_gate=release-sidecar-target-smoke` report。report 必须绑定当前 commit、target id/os/architecture、`.local` runtime/model/mixed-language audio fixture digest、model license/provenance sidecar digest，以及 `check_dependencies`、`whisper.cpp` smoke 和 no-auto-download 通过状态；runtime/model/audio 或 sidecar 不在 `.local` 边界、provider marker 缺失、provider smoke 失败、或任何 smoke 状态非 true 时必须 fail closed。该 report 只能被发布 rehearsal 或 CI 生成的 `.harness/release-inputs/supply-chain/release-sidecar-report.json` 逐 target 引用；单个 target report 不能替代 `target_scope=all-target-machines` 的 release sidecar portability evidence，也不能替代 release bundle、SLSA provenance 或 Sigstore signing。
 
+`platform/e2e/release-sidecar-portability-report.sh` 是 `VS-MA-22` 的 all-target sidecar portability report 生成入口。该 wrapper 必须接收显式 `MA_RELEASE_SIDECAR_TARGET_SMOKE_REPORTS` 和 `MA_RELEASE_SIDECAR_EXPECTED_TARGETS`，由 `release_sidecar_portability_report.py` 解析每个 `release-sidecar-target-smoke` report，校验当前 commit、target id/os/architecture、runtime/model/audio digest、model license/provenance、三项 smoke 状态和 report 文件 digest，再写出 `release_gate=release-sidecar-portability`、`target_scope=all-target-machines` 的 release sidecar report。只要 expected target 列表为空、任一 expected target 缺 report、存在额外 target、target report 未通过或 target report 与当前 commit 不一致，生成器必须写出 `target_scope=incomplete-target-set` 并退出非零；该失败 report 不能作为 release 放行证据。
+
 ## Meeting Assistant MVP 依赖策略
 
 `meeting_assistant` Phase 1 采用允许来源 + 人工安装策略：

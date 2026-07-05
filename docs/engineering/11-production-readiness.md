@@ -37,6 +37,8 @@
 
 每台目标机的 `release-sidecar-target-smoke` report 由 `platform/e2e/release-sidecar-target-smoke.sh` 生成。该 report 只记录单台机器的 runtime/model/audio sidecar repeatability evidence，发布负责人仍必须把所有目标机器 report 汇总到 release sidecar portability report，并确保该 report 的 `target_scope=all-target-machines`、target 列表、digest 和 smoke 状态与每个 target report 一致。单台机器 report 通过不能替代签名/公证 release bundle、DSSE/SLSA provenance、Sigstore signing bundle 或全部目标机器 sidecar portability evidence。
 
+`platform/e2e/release-sidecar-portability-report.sh` 可把这些逐目标机器 report 聚合为 `.harness/release-inputs/supply-chain/release-sidecar-report.json`。发布负责人或 CI 必须显式声明 `MA_RELEASE_SIDECAR_EXPECTED_TARGETS`，并提供同一 commit 下每个 target 的 `MA_RELEASE_SIDECAR_TARGET_SMOKE_REPORTS`；生成器只有在 expected target 全部覆盖且无额外 target 时才写出 `target_scope=all-target-machines`，否则写出 `target_scope=incomplete-target-set` 并失败。该聚合 report 仍只是 release supply-chain 输入之一，不能替代 release bundle、provenance 或 signature report。
+
 ## 数据保护和恢复
 
 1. 为关键数据定义 RPO 和 RTO。
