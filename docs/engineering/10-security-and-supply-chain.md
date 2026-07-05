@@ -52,6 +52,8 @@ Processing CLI release provider smoke 是 `VS-MA-22` 的 provider 安全与供�
 
 `platform/e2e/release-security-supply-chain-smoke.sh` 是 `VS-MA-22` 的 release-scope evidence 聚合入口，不是 `VS-MA-23` release candidate 放行证据。该 wrapper 必须运行仓库级 `security-check`、`supply-chain-check current` 和 processing release-provider smoke，并由 `release_security_supply_chain_report.py` 校验 production component security/supply-chain reports 与 release-provider marker 后输出 `release_gate=release-scope-security-supply-chain` report。该 report 必须继续声明 `not_release_readiness=true`，因为当前仍未生成签名/公证分发包、SLSA/release provenance attestation、release sidecar portability report，也不能证明所有开发机 runtime/model/audio sidecar、真实 ScreenCaptureKit 或发布范围 `PV-MA-*` 全部 covered。
 
+`platform/e2e/release-sidecar-target-smoke.sh` 是 `VS-MA-22` 的逐目标机器 sidecar repeatability evidence 入口，不是 all-target sidecar portability report。该 wrapper 必须运行 processing release-provider smoke，并由 `release_sidecar_target_smoke_report.py` 生成 `release_gate=release-sidecar-target-smoke` report。report 必须绑定当前 commit、target id/os/architecture、`.local` runtime/model/mixed-language audio fixture digest、model license/provenance sidecar digest，以及 `check_dependencies`、`whisper.cpp` smoke 和 no-auto-download 通过状态；runtime/model/audio 或 sidecar 不在 `.local` 边界、provider marker 缺失、provider smoke 失败、或任何 smoke 状态非 true 时必须 fail closed。该 report 只能被发布 rehearsal 或 CI 生成的 `.harness/release-inputs/supply-chain/release-sidecar-report.json` 逐 target 引用；单个 target report 不能替代 `target_scope=all-target-machines` 的 release sidecar portability evidence，也不能替代 release bundle、SLSA provenance 或 Sigstore signing。
+
 ## Meeting Assistant MVP 依赖策略
 
 `meeting_assistant` Phase 1 采用允许来源 + 人工安装策略：

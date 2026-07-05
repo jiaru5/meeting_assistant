@@ -856,6 +856,22 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn(".harness/release-inputs/bundle/release-bundle-report.json", production_readiness)
         self.assertNotIn(".harness/evidence/release/bundle/release-bundle-report.json", production_readiness)
 
+    def test_release_sidecar_target_smoke_entrypoint_is_documented(self) -> None:
+        wrapper = (ROOT / "platform/e2e/release-sidecar-target-smoke.sh").read_text(encoding="utf-8")
+        report = (ROOT / "platform/e2e/release_sidecar_target_smoke_report.py").read_text(encoding="utf-8")
+        dev_commands = (ROOT / "docs/engineering/02-dev-commands.md").read_text(encoding="utf-8")
+        security_supply_chain = (ROOT / "docs/engineering/10-security-and-supply-chain.md").read_text(encoding="utf-8")
+        production_readiness = (ROOT / "docs/engineering/11-production-readiness.md").read_text(encoding="utf-8")
+
+        self.assertIn("./platform/processing-cli/scripts/release-provider-smoke.sh", wrapper)
+        self.assertIn("release_sidecar_target_smoke_report.py", wrapper)
+        self.assertIn("MA_RELEASE_SIDECAR_TARGET_SMOKE_REPORT", wrapper)
+        self.assertIn("release-sidecar-target-smoke", report)
+        self.assertIn("not_release_readiness", report)
+        self.assertIn("release-sidecar-target-smoke.sh", dev_commands)
+        self.assertIn("release-sidecar-target-smoke", security_supply_chain)
+        self.assertIn("release-sidecar-target-smoke.sh", production_readiness)
+
     def test_product_validation_current_phase_rejects_missing_status(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
