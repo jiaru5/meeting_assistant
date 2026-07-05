@@ -59,9 +59,26 @@ workspace_session_root() {
 write_workspace_session() {
   session_root="$(workspace_session_root)"
   artifacts_dir="$session_root/artifacts"
+  mixed_audio_file="$artifacts_dir/mixed_audio.wav"
   transcript_file="$artifacts_dir/transcript.json"
   speaker_file="$artifacts_dir/speaker_labels.json"
   transcript_checksum="$(checksum_file "$transcript_file")"
+  original_artifact_json=""
+
+  if [ -f "$mixed_audio_file" ]; then
+    mixed_audio_checksum="$(checksum_file "$mixed_audio_file")"
+    original_artifact_json="
+    {
+      \"id\": \"artifact-process-mixed\",
+      \"session_id\": \"$session_id\",
+      \"artifact_type\": \"mixed_audio\",
+      \"path\": \"artifacts/mixed_audio.wav\",
+      \"format\": \"wav\",
+      \"capture_status\": \"available\",
+      \"checksum\": \"sha256:$mixed_audio_checksum\",
+      \"created_at\": \"2026-07-03T00:00:00Z\"
+    },"
+  fi
 
   if [ -f "$speaker_file" ]; then
     speaker_checksum="$(checksum_file "$speaker_file")"
@@ -79,6 +96,7 @@ write_workspace_session() {
   "created_at": "2026-07-03T00:00:00Z",
   "updated_at": "2026-07-03T00:00:00Z",
   "artifacts": [
+    $original_artifact_json
     {
       "id": "artifact-process-transcript",
       "session_id": "$session_id",
@@ -117,6 +135,7 @@ JSON
   "created_at": "2026-07-03T00:00:00Z",
   "updated_at": "2026-07-03T00:00:00Z",
   "artifacts": [
+    $original_artifact_json
     {
       "id": "artifact-process-transcript",
       "session_id": "$session_id",
@@ -154,6 +173,7 @@ JSON
   "created_at": "2026-07-03T00:00:00Z",
   "updated_at": "2026-07-03T00:00:00Z",
   "artifacts": [
+    $original_artifact_json
     {
       "id": "artifact-process-transcript",
       "session_id": "$session_id",
@@ -237,6 +257,34 @@ JSON
 
 case "$command" in
   generate_transcript)
+    if [ "$mode" = "path-conflict-then-success" ]; then
+      transcript_attempts="1"
+      if [ -n "${MA_NATIVE_PROCESSING_FIXTURE_INVOCATIONS:-}" ] && [ -f "$MA_NATIVE_PROCESSING_FIXTURE_INVOCATIONS" ]; then
+        transcript_attempts="$(
+          grep -c '^generate_transcript ' "$MA_NATIVE_PROCESSING_FIXTURE_INVOCATIONS" 2>/dev/null || printf '1'
+        )"
+      fi
+      if [ "$transcript_attempts" = "1" ]; then
+        cat <<JSON
+{
+  "ok": false,
+  "request_id": "native-process-fixture-path-conflict",
+  "command": "generate_transcript",
+  "session_id": "$session_id",
+  "code": "path_conflict",
+  "message": "Processing path conflict.",
+  "details": {
+    "stage": "transcription",
+    "retryable": true
+  },
+  "warnings": []
+}
+JSON
+        exit 3
+      fi
+      write_workspace_transcript
+    fi
+
     if [ "$mode" = "non-json-stderr" ]; then
       printf '%s\n' "adapter crashed at /Users/jerry/Movies/MeetingAssistant/session with sk-nativefixturevalue and transcript_text customer roadmap" >&2
       exit 5
@@ -284,6 +332,23 @@ JSON
 JSON
     ;;
   generate_speaker_labels)
+    if [ "$mode" = "path-conflict-then-success" ]; then
+      write_workspace_speaker_labels "available"
+      cat <<JSON
+{
+  "ok": true,
+  "request_id": "native-process-fixture-speakers",
+  "command": "generate_speaker_labels",
+  "session_id": "$session_id",
+  "transcript_id": "$transcript_id",
+  "label_status": "labeled",
+  "speaker_labels_artifact_id": "artifact-process-speakers",
+  "warnings": []
+}
+JSON
+      exit 0
+    fi
+
     if [ "$mode" = "degraded" ] || [ "$mode" = "workspace-degraded" ]; then
       if [ "$mode" = "workspace-degraded" ]; then
         write_workspace_speaker_labels "degraded" "speaker labeling runtime unavailable"

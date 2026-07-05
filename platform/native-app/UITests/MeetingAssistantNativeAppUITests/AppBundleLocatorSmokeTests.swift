@@ -586,6 +586,67 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         )
     }
 
+    func testVSMA21AppBundleProcessingPathConflictRetryPreservesOriginalCaptureArtifactWhenExplicitlyEnabled() throws {
+        try XCTSkipUnless(
+            Self.vsMA21HardeningCLISmokeEnabled(),
+            "Set MA_NATIVE_APP_VSMA21_HARDENING_SMOKE=1 to run the VS-MA-21 app-bundle hardening smoke."
+        )
+
+        let sessionID = "session-app-ui-processing"
+        let processingFixture = try AppProcessingProcessFixture(mode: "path-conflict-then-success")
+        defer { processingFixture.cleanup() }
+        try processingFixture.createNativeRecordingWorkspace(sessionID: sessionID)
+        let originalMixedAudioChecksum = try processingFixture.mixedAudioChecksum(sessionID: sessionID)
+
+        let app = launchApp(fixture: "processing-failure", processingFixture: processingFixture)
+
+        tapProcessingButton(
+            "ma.processing.startButton",
+            in: app,
+            expectingStatus: "Processing failed."
+        )
+
+        assertElement("ma.processing.status", in: app, contains: "Processing failed.")
+        assertElement("ma.processing.error", in: app, contains: "Processing path conflict.")
+        assertElement("ma.processing.error", in: app, contains: "path_conflict")
+        XCTAssertTrue(button("ma.processing.retryButton", in: app).isEnabled)
+        XCTAssertEqual(try processingFixture.mixedAudioChecksum(sessionID: sessionID), originalMixedAudioChecksum)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: processingFixture.artifactURL(sessionID: sessionID, filename: "transcript.json").path
+            )
+        )
+
+        tapProcessingButton(
+            "ma.processing.retryButton",
+            in: app,
+            expectingStatus: "Processing complete."
+        )
+
+        assertElement("ma.processing.status", in: app, contains: "Processing complete.")
+        assertElement("ma.processing.transcriptStatus", in: app, contains: "generated with")
+        assertElement(
+            "ma.processing.success",
+            in: app,
+            contains: "Generated transcript and speaker labels for session \(sessionID)."
+        )
+        assertDoesNotExist("ma.processing.error", in: app)
+        XCTAssertEqual(try processingFixture.mixedAudioChecksum(sessionID: sessionID), originalMixedAudioChecksum)
+        XCTAssertEqual(
+            try processingFixture.invocationLines(),
+            pathConflictRetryProcessingInvocationLines(sessionID: sessionID)
+        )
+
+        let session = try processingFixture.sessionMetadata(sessionID: sessionID)
+        let artifacts = try XCTUnwrap(session["artifacts"] as? [[String: Any]])
+        let artifactTypes = Set(artifacts.compactMap { $0["artifact_type"] as? String })
+        XCTAssertTrue(artifactTypes.isSuperset(of: ["mixed_audio", "transcript_text", "speaker_labels"]))
+        XCTAssertEqual(
+            artifacts.first { $0["artifact_type"] as? String == "mixed_audio" }?["checksum"] as? String,
+            originalMixedAudioChecksum
+        )
+    }
+
     func testProcessingProcessRunnerWorkspaceArtifactsLoadThroughTranscriptReview() throws {
         let processingFixture = try AppProcessingProcessFixture(mode: "workspace-success")
         let processingApp = launchApp(fixture: "processing-success", processingFixture: processingFixture)
@@ -1418,6 +1479,14 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         ]
     }
 
+    private func pathConflictRetryProcessingInvocationLines(sessionID: String) -> [String] {
+        [
+            transcriptInvocationLine(sessionID: sessionID),
+            transcriptInvocationLine(sessionID: sessionID),
+            speakerLabelsInvocationLine(sessionID: sessionID),
+        ]
+    }
+
     private func transcriptInvocationLine(sessionID: String) -> String {
         [
             processingCommandName("generate", "transcript"),
@@ -1524,6 +1593,17 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
 
     private static func realRuntimeCLISmokeEnabled() -> Bool {
         switch ProcessInfo.processInfo.environment["MA_NATIVE_APP_REAL_RUNTIME_SMOKE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() {
+        case "1", "true", "yes":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func vsMA21HardeningCLISmokeEnabled() -> Bool {
+        switch ProcessInfo.processInfo.environment["MA_NATIVE_APP_VSMA21_HARDENING_SMOKE"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased() {
         case "1", "true", "yes":
@@ -2062,6 +2142,59 @@ private final class AppProcessingProcessFixture {
         return content.split(whereSeparator: \.isNewline).map(String.init)
     }
 
+    func createNativeRecordingWorkspace(sessionID: String) throws {
+        let sessionRootURL = workspaceURL
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+        let artifactsURL = sessionRootURL.appendingPathComponent("artifacts", isDirectory: true)
+        try FileManager.default.createDirectory(at: artifactsURL, withIntermediateDirectories: true)
+
+        let audioURL = artifactsURL.appendingPathComponent("mixed_audio.wav", isDirectory: false)
+        let audioData = Self.fixtureWAVData()
+        try audioData.write(to: audioURL)
+        let audioChecksum = Self.sha256(audioData)
+        let now = "2026-07-05T00:00:00Z"
+
+        _ = try writeJSON(
+            [
+                "id": sessionID,
+                "title": "VS-MA-21 app-bundle hardening fixture",
+                "source_type": "native_recording",
+                "status": "recorded",
+                "started_at": now,
+                "workspace_dir": sessionRootURL.path,
+                "created_at": now,
+                "updated_at": now,
+                "artifacts": [
+                    [
+                        "id": "artifact-process-mixed",
+                        "session_id": sessionID,
+                        "artifact_type": "mixed_audio",
+                        "path": "artifacts/mixed_audio.wav",
+                        "format": "wav",
+                        "capture_status": "available",
+                        "checksum": audioChecksum,
+                        "created_at": now,
+                    ],
+                ],
+            ],
+            to: sessionRootURL.appendingPathComponent("session.json", isDirectory: false)
+        )
+    }
+
+    func artifactURL(sessionID: String, filename: String) -> URL {
+        workspaceURL
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+            .appendingPathComponent("artifacts", isDirectory: true)
+            .appendingPathComponent(filename, isDirectory: false)
+    }
+
+    func mixedAudioChecksum(sessionID: String) throws -> String {
+        let data = try Data(contentsOf: artifactURL(sessionID: sessionID, filename: "mixed_audio.wav"))
+        return Self.sha256(data)
+    }
+
     func sessionMetadata(sessionID: String) throws -> [String: Any] {
         let sessionURL = workspaceURL
             .appendingPathComponent("sessions", isDirectory: true)
@@ -2070,6 +2203,49 @@ private final class AppProcessingProcessFixture {
         let data = try Data(contentsOf: sessionURL)
         let payload = try JSONSerialization.jsonObject(with: data)
         return try XCTUnwrap(payload as? [String: Any])
+    }
+
+    @discardableResult
+    private func writeJSON(_ payload: Any, to url: URL) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: url)
+        return Self.sha256(data)
+    }
+
+    private static func fixtureWAVData() -> Data {
+        var samples = Data()
+        for index in 0..<1_600 {
+            let value = Int16((((index + 17) % 80) - 40) * 80)
+            appendLittleEndian(value, to: &samples)
+        }
+
+        var data = Data()
+        data.append(Data("RIFF".utf8))
+        appendLittleEndian(UInt32(36 + samples.count), to: &data)
+        data.append(Data("WAVE".utf8))
+        data.append(Data("fmt ".utf8))
+        appendLittleEndian(UInt32(16), to: &data)
+        appendLittleEndian(UInt16(1), to: &data)
+        appendLittleEndian(UInt16(1), to: &data)
+        appendLittleEndian(UInt32(8_000), to: &data)
+        appendLittleEndian(UInt32(16_000), to: &data)
+        appendLittleEndian(UInt16(2), to: &data)
+        appendLittleEndian(UInt16(16), to: &data)
+        data.append(Data("data".utf8))
+        appendLittleEndian(UInt32(samples.count), to: &data)
+        data.append(samples)
+        return data
+    }
+
+    private static func appendLittleEndian<T: FixedWidthInteger>(_ value: T, to data: inout Data) {
+        var littleEndian = value.littleEndian
+        withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
+    }
+
+    private static func sha256(_ data: Data) -> String {
+        let digest = SHA256.hash(data: data)
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "sha256:\(hex)"
     }
 }
 

@@ -807,6 +807,28 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("real-runtime-diagnostics", script)
         self.assertIn("native_app_bundle_ui_automation_report.py", script)
 
+    def test_vs_ma_21_app_bundle_hardening_smoke_is_documented_and_explicit(self) -> None:
+        script = (ROOT / "platform/native-app/scripts/test-app-bundle.sh").read_text(encoding="utf-8")
+        app_bundle_tests = (
+            ROOT
+            / "platform/native-app/UITests/MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests.swift"
+        ).read_text(encoding="utf-8")
+        dev_commands = (ROOT / "docs/engineering/02-dev-commands.md").read_text(encoding="utf-8")
+
+        self.assertIn("MA_NATIVE_APP_VSMA21_HARDENING_SMOKE", script)
+        self.assertIn(
+            "testVSMA21AppBundleProcessingPathConflictRetryPreservesOriginalCaptureArtifactWhenExplicitlyEnabled",
+            script,
+        )
+        self.assertIn("vs-ma-21-hardening-app-bundle-smoke.log", script)
+        self.assertIn("vs-ma-21-hardening-ui-automation-report.json", script)
+        self.assertIn('write_ui_testing_automation_blocker_report "VS-MA-21 hardening"', script)
+        self.assertIn("path-conflict-then-success", app_bundle_tests)
+        self.assertIn("path_conflict", app_bundle_tests)
+        self.assertIn("mixedAudioChecksum", app_bundle_tests)
+        self.assertIn("MA_NATIVE_APP_VSMA21_HARDENING_SMOKE=1", dev_commands)
+        self.assertIn("VS-MA-21 app-bundle hardening smoke", dev_commands)
+
     def test_release_preflight_registers_release_bundle_gate_before_supply_chain(self) -> None:
         release_preflight = (ROOT / "scripts/release-preflight.sh").read_text(encoding="utf-8")
         dev_commands = (ROOT / "docs/engineering/02-dev-commands.md").read_text(encoding="utf-8")

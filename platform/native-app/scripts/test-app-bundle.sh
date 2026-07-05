@@ -20,6 +20,10 @@ real_runtime_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/t
 real_runtime_log="$derived_data_path/real-runtime-app-bundle-smoke.log"
 real_runtime_ui_automation_report="$derived_data_path/reports/ui-automation/real-runtime-ui-automation-report.json"
 real_runtime_diagnostic_dir="$derived_data_path/reports/real-runtime-diagnostics"
+vs_ma21_hardening_smoke="${MA_NATIVE_APP_VSMA21_HARDENING_SMOKE:-0}"
+vs_ma21_hardening_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testVSMA21AppBundleProcessingPathConflictRetryPreservesOriginalCaptureArtifactWhenExplicitlyEnabled"
+vs_ma21_hardening_log="$derived_data_path/vs-ma-21-hardening-app-bundle-smoke.log"
+vs_ma21_hardening_ui_automation_report="$derived_data_path/reports/ui-automation/vs-ma-21-hardening-ui-automation-report.json"
 mvp_full_stack_smoke="${MA_NATIVE_APP_MVP_FULL_STACK_SMOKE:-0}"
 mvp_full_stack_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testMVPFullStackDesignedShellRecordingProcessingTranscriptActionsWhenExplicitlyEnabled"
 mvp_full_stack_log="$derived_data_path/mvp-full-stack-app-bundle-smoke.log"
@@ -341,6 +345,45 @@ if [[ "$real_runtime_smoke" == "1" || "$real_runtime_smoke" == "true" || "$real_
   fi
 
   echo "native-app real runtime app-bundle XCUITest passed."
+  exit 0
+fi
+
+if [[ "$vs_ma21_hardening_smoke" == "1" || "$vs_ma21_hardening_smoke" == "true" || "$vs_ma21_hardening_smoke" == "yes" ]]; then
+  xcodebuild build-for-testing \
+    -project "$component_dir/MeetingAssistantNative.xcodeproj" \
+    -scheme "MeetingAssistantNative" \
+    -destination "$destination" \
+    -derivedDataPath "$derived_data_path" \
+    -parallel-testing-enabled NO
+
+  xctestrun_path="$(find "$derived_data_path/Build/Products" -maxdepth 1 -name "*.xctestrun" -print -quit)"
+  if [[ -z "$xctestrun_path" ]]; then
+    echo "error: build-for-testing did not produce an .xctestrun file under $derived_data_path/Build/Products" >&2
+    exit 1
+  fi
+
+  set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_VSMA21_HARDENING_SMOKE" "1"
+
+  set +e
+  xcodebuild test-without-building \
+    -xctestrun "$xctestrun_path" \
+    -destination "$destination" \
+    "-only-testing:$vs_ma21_hardening_test" 2>&1 | tee "$vs_ma21_hardening_log"
+  test_status=${PIPESTATUS[0]}
+  set -e
+
+  if [[ "$test_status" -ne 0 ]]; then
+    echo "native-app VS-MA-21 hardening app-bundle XCUITest failed. Captured xcodebuild log: $vs_ma21_hardening_log" >&2
+    write_ui_testing_automation_blocker_report "VS-MA-21 hardening" "$vs_ma21_hardening_log" "$vs_ma21_hardening_ui_automation_report" "$test_status"
+    if is_ui_testing_automation_blocked "$vs_ma21_hardening_log"; then
+      print_ui_testing_automation_help "VS-MA-21 hardening" "$vs_ma21_hardening_log"
+      print_ui_testing_automation_process_diagnostics
+      print_ui_testing_automation_log_excerpt
+    fi
+    exit "$test_status"
+  fi
+
+  echo "native-app VS-MA-21 hardening app-bundle XCUITest passed."
   exit 0
 fi
 
