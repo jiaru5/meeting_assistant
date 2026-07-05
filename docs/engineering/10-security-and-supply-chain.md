@@ -42,7 +42,7 @@ Meeting Assistant 当前 native app 和 processing CLI 的 `Dockerfile` 是 rele
 
 当前 native app 和 processing CLI 组件 `security` gate 必须生成本次运行的 `security/security-report.json`，并由仓库级 `./scripts/security-check.sh` 聚合校验。报告必须绑定 manifest component id，声明 `release_gate=validation-only`、SAST 静态扫描、SCA 依赖审查、secret scan、禁止网络/安装扫描、no-auto-download、未打包 runtime/model、无外部网络访问且 findings 为空；仓库级入口必须先删除旧报告，避免组件脚本只退出 0 或复用 stale report 造成假绿。该报告仍只是 current/check scope 的机器可审查证据，不等同于完整 release-scope SAST/SCA、签名、公证、provenance 或 release readiness。
 
-Processing CLI release provider smoke 必须对模型 sidecar fail closed：模型 sha256 配置或 sidecar 不匹配实际模型时失败，JSON provenance sidecar 不可解析时失败，hash/license/provenance sidecar 解析后不位于 `~/.local/share/ai-models/whisper.cpp/` 模型根目录时失败。该规则只约束当前本机 release-provider evidence，不等同于完整 SCA、签名、公证或所有开发机 provenance 覆盖。
+Processing CLI release provider smoke 是 `VS-MA-22` 的 provider 安全与供应链证据，不是 `VS-MA-23` release candidate 放行证据。该 smoke 必须对模型 sidecar 和本机共享资产边界 fail closed：模型 sha256 配置或 sidecar 不匹配实际模型时失败，JSON provenance sidecar 不可解析时失败，hash/license/provenance sidecar 解析后不位于 `~/.local/share/ai-models/whisper.cpp/` 模型根目录时失败；runtime、模型和 mixed-language audio fixture 不在 `~/.local` 允许根目录或落在仓库、`Downloads`、`Desktop`、`Library/Caches` 等禁止根目录时也必须失败；English-only `.en` 模型不得作为 mixed-language evidence。该规则只约束当前本机 release-provider evidence，不等同于完整 SCA、签名、公证、release bundle 或所有开发机 provenance 覆盖。
 
 ## Meeting Assistant MVP 依赖策略
 

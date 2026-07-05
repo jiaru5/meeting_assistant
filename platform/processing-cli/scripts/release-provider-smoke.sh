@@ -31,6 +31,7 @@ MODEL_SHA256_ENV = "MEETING_ASSISTANT_TRANSCRIPTION_MODEL_SHA256"
 MODEL_SHA256_FILE_ENV = "MEETING_ASSISTANT_TRANSCRIPTION_MODEL_SHA256_FILE"
 MODEL_LICENSE_FILE_ENV = "MEETING_ASSISTANT_TRANSCRIPTION_MODEL_LICENSE_FILE"
 MODEL_PROVENANCE_FILE_ENV = "MEETING_ASSISTANT_TRANSCRIPTION_MODEL_PROVENANCE_FILE"
+EVIDENCE_MARKER = "VS-MA-22 release-provider smoke [non-contract]"
 
 
 def normalize_sha256(value: str) -> str | None:
@@ -140,7 +141,7 @@ def check_model_sha256(env: dict[str, str], model_path: Path, model_root: Path, 
         )
         return
     messages.append(
-        "VS-MA-23 provider release smoke [non-contract]: model sha256 evidence verified "
+        f"{EVIDENCE_MARKER}: model sha256 evidence verified "
         f"from {expected_source}: sha256:{actual_hash}"
     )
 
@@ -178,7 +179,7 @@ def check_model_sidecar(
                 "model provenance blocker: JSON sidecar must identify source, model, commit, tag, sha256, or license"
             )
             return
-    messages.append(f"VS-MA-23 provider release smoke [non-contract]: model {label} sidecar accepted: {sidecar_resolved}")
+    messages.append(f"{EVIDENCE_MARKER}: model {label} sidecar accepted: {sidecar_resolved}")
 
 
 def check_real_dependency_json(env: dict[str, str], blockers: list[str], messages: list[str]) -> None:
@@ -254,7 +255,7 @@ def check_real_dependency_json(env: dict[str, str], blockers: list[str], message
     if not isinstance(warnings, list):
         blockers.append("check_dependencies real env blocker: warnings must be a list")
     messages.append(
-        "VS-MA-23 provider release smoke [non-contract]: real check_dependencies JSON accepted "
+        f"{EVIDENCE_MARKER}: real check_dependencies JSON accepted "
         "for runtime/model/hardware/no-auto-download."
     )
 
@@ -307,7 +308,7 @@ if TRANSCRIPTION_RUNTIME_ENV not in missing_env:
         runtime_resolved = Path(runtime_path).expanduser().resolve(strict=False)
         require_under_any(runtime_resolved, runtime_roots, "runtime path", blockers)
         reject_disallowed_roots(runtime_resolved, disallowed_roots, "runtime path", blockers)
-        messages.append(f"VS-MA-23 provider release smoke [non-contract]: runtime .local path accepted: {runtime_resolved}")
+        messages.append(f"{EVIDENCE_MARKER}: runtime .local path accepted: {runtime_resolved}")
 
 if TRANSCRIPTION_MODEL_ENV not in missing_env:
     model_value = env.get(TRANSCRIPTION_MODEL_ENV, "").strip()
@@ -357,7 +358,7 @@ if TRANSCRIPTION_MODEL_ENV not in missing_env:
             validate_json=True,
         )
         messages.append(
-            f"VS-MA-23 provider release smoke [non-contract]: model .local large-v3 evidence path accepted: {model_resolved}"
+            f"{EVIDENCE_MARKER}: model .local large-v3 evidence path accepted: {model_resolved}"
         )
 
 if TRANSCRIPTION_SMOKE_AUDIO_ENV not in missing_env:
@@ -369,7 +370,7 @@ if TRANSCRIPTION_SMOKE_AUDIO_ENV not in missing_env:
         blockers.append("audio fixture blocker: release smoke fixture must be a .wav file")
     require_under_any(audio_resolved, [audio_root], "audio fixture path", blockers)
     reject_disallowed_roots(audio_resolved, disallowed_roots, "audio fixture path", blockers)
-    messages.append(f"VS-MA-23 provider release smoke [non-contract]: mixed-language fixture .local path accepted: {audio_resolved}")
+    messages.append(f"{EVIDENCE_MARKER}: mixed-language fixture .local path accepted: {audio_resolved}")
 
 if blockers:
     print("release provider smoke failed: provider release blockers:", file=sys.stderr)
@@ -378,7 +379,7 @@ if blockers:
     raise SystemExit(1)
 
 messages.append(
-    "VS-MA-23 provider release smoke [non-contract]: sidecar evidence is local-machine evidence only and does not prove all developer machines."
+    f"{EVIDENCE_MARKER}: sidecar evidence is local-machine evidence only and does not prove all developer machines."
 )
 for message in messages:
     print(message)
@@ -400,6 +401,6 @@ case "$smoke_output" in
     ;;
 esac
 
-echo "VS-MA-23 provider release smoke [non-contract]: required whisper.cpp runtime smoke passed."
-echo "VS-MA-23 provider release smoke [non-contract]: no-auto-download/no-auto-upload boundary remains unchanged."
+echo "VS-MA-22 release-provider smoke [non-contract]: required whisper.cpp runtime smoke passed."
+echo "VS-MA-22 release-provider smoke [non-contract]: no-auto-download/no-auto-upload boundary remains unchanged."
 echo "release provider smoke passed."

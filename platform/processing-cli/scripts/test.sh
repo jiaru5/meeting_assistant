@@ -124,14 +124,16 @@ case "$smoke_output" in
 esac
 
 release_home="$smoke_tmp/release-home"
+release_runtime_path="$release_home/.local/bin/whisper-cli"
+release_audio_path="$release_home/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav"
 mkdir -p \
   "$release_home/.local/bin" \
   "$release_home/.local/share/ai-models/whisper.cpp/large-v3-turbo" \
   "$release_home/.local/share/ai-fixtures/asr/zh-en-tech"
-printf '#!/usr/bin/env sh\nexit 0\n' > "$release_home/.local/bin/whisper-cli"
-chmod +x "$release_home/.local/bin/whisper-cli"
+printf '#!/usr/bin/env sh\nexit 0\n' > "$release_runtime_path"
+chmod +x "$release_runtime_path"
 printf 'fake model' > "$release_home/.local/share/ai-models/whisper.cpp/large-v3-turbo/ggml-large-v3-turbo-q5_0.bin"
-printf 'fake wav' > "$release_home/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav"
+printf 'fake wav' > "$release_audio_path"
 release_model_path="$release_home/.local/share/ai-models/whisper.cpp/large-v3-turbo/ggml-large-v3-turbo-q5_0.bin"
 release_license_file="$release_model_path.license.txt"
 release_provenance_file="$release_model_path.provenance.json"
@@ -149,9 +151,9 @@ PY
 set +e
 release_smoke_output="$(
   HOME="$release_home" \
-    MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$release_home/.local/bin/whisper-cli" \
+    MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$release_runtime_path" \
     MEETING_ASSISTANT_TRANSCRIPTION_MODEL="$release_model_path" \
-    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$release_home/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav" \
+    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$release_audio_path" \
     ./scripts/release-provider-smoke.sh 2>&1
 )"
 release_smoke_status="$?"
@@ -192,9 +194,9 @@ printf '{"source":"local release smoke fixture","model":"large-v3-turbo","sha256
 set +e
 release_hash_mismatch_output="$(
   HOME="$release_home" \
-    MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$release_home/.local/bin/whisper-cli" \
+    MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$release_runtime_path" \
     MEETING_ASSISTANT_TRANSCRIPTION_MODEL="$release_model_path" \
-    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$release_home/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav" \
+    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$release_audio_path" \
     MEETING_ASSISTANT_TRANSCRIPTION_MODEL_SHA256="sha256:0000000000000000000000000000000000000000000000000000000000000000" \
     MEETING_ASSISTANT_TRANSCRIPTION_MODEL_LICENSE_FILE="$release_license_file" \
     MEETING_ASSISTANT_TRANSCRIPTION_MODEL_PROVENANCE_FILE="$release_provenance_file" \
@@ -215,14 +217,149 @@ case "$release_hash_mismatch_output" in
     ;;
 esac
 
+release_outside_runtime_path="$smoke_tmp/outside-whisper-cli"
+printf '#!/usr/bin/env sh\nexit 0\n' > "$release_outside_runtime_path"
+chmod +x "$release_outside_runtime_path"
+set +e
+release_outside_runtime_output="$(
+  HOME="$release_home" \
+    MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$release_outside_runtime_path" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL="$release_model_path" \
+    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$release_audio_path" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_SHA256="sha256:$release_model_hash" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_LICENSE_FILE="$release_license_file" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_PROVENANCE_FILE="$release_provenance_file" \
+    ./scripts/release-provider-smoke.sh 2>&1
+)"
+release_outside_runtime_status="$?"
+set -e
+if [ "$release_outside_runtime_status" -eq 0 ]; then
+  echo "processing-cli test failed: release provider smoke accepted a runtime outside the allowed .local roots" >&2
+  exit 1
+fi
+case "$release_outside_runtime_output" in
+  *"runtime path blocker"* ) ;;
+  *)
+    echo "processing-cli test failed: release provider smoke did not report the runtime root blocker" >&2
+    echo "$release_outside_runtime_output" >&2
+    exit 1
+    ;;
+esac
+
+release_outside_model_path="$smoke_tmp/ggml-large-v3-turbo-q5_0.bin"
+printf 'fake model outside allowed root' > "$release_outside_model_path"
+release_outside_model_hash="$(
+  python3 - "$release_outside_model_path" <<'PY'
+import hashlib
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+digest = hashlib.sha256(path.read_bytes()).hexdigest()
+print(digest)
+PY
+)"
+set +e
+release_outside_model_output="$(
+  HOME="$release_home" \
+    MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$release_runtime_path" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL="$release_outside_model_path" \
+    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$release_audio_path" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_SHA256="sha256:$release_outside_model_hash" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_LICENSE_FILE="$release_license_file" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_PROVENANCE_FILE="$release_provenance_file" \
+    ./scripts/release-provider-smoke.sh 2>&1
+)"
+release_outside_model_status="$?"
+set -e
+if [ "$release_outside_model_status" -eq 0 ]; then
+  echo "processing-cli test failed: release provider smoke accepted a model outside the allowed .local root" >&2
+  exit 1
+fi
+case "$release_outside_model_output" in
+  *"model path blocker"* ) ;;
+  *)
+    echo "processing-cli test failed: release provider smoke did not report the model root blocker" >&2
+    echo "$release_outside_model_output" >&2
+    exit 1
+    ;;
+esac
+
+release_english_only_model_path="$release_home/.local/share/ai-models/whisper.cpp/large-v3-turbo/ggml-large-v3-turbo.en.bin"
+printf 'fake english only model' > "$release_english_only_model_path"
+release_english_only_model_hash="$(
+  python3 - "$release_english_only_model_path" <<'PY'
+import hashlib
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+digest = hashlib.sha256(path.read_bytes()).hexdigest()
+print(digest)
+PY
+)"
+set +e
+release_english_only_model_output="$(
+  HOME="$release_home" \
+    MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$release_runtime_path" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL="$release_english_only_model_path" \
+    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$release_audio_path" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_SHA256="sha256:$release_english_only_model_hash" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_LICENSE_FILE="$release_license_file" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_PROVENANCE_FILE="$release_provenance_file" \
+    ./scripts/release-provider-smoke.sh 2>&1
+)"
+release_english_only_model_status="$?"
+set -e
+if [ "$release_english_only_model_status" -eq 0 ]; then
+  echo "processing-cli test failed: release provider smoke accepted an English-only model" >&2
+  exit 1
+fi
+case "$release_english_only_model_output" in
+  *"English-only .en model"* ) ;;
+  *)
+    echo "processing-cli test failed: release provider smoke did not report the English-only model blocker" >&2
+    echo "$release_english_only_model_output" >&2
+    exit 1
+    ;;
+esac
+
+release_outside_audio_path="$smoke_tmp/mixed-zh-en-tech.wav"
+printf 'fake wav outside allowed root' > "$release_outside_audio_path"
+set +e
+release_outside_audio_output="$(
+  HOME="$release_home" \
+    MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$release_runtime_path" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL="$release_model_path" \
+    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$release_outside_audio_path" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_SHA256="sha256:$release_model_hash" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_LICENSE_FILE="$release_license_file" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_PROVENANCE_FILE="$release_provenance_file" \
+    ./scripts/release-provider-smoke.sh 2>&1
+)"
+release_outside_audio_status="$?"
+set -e
+if [ "$release_outside_audio_status" -eq 0 ]; then
+  echo "processing-cli test failed: release provider smoke accepted an audio fixture outside the allowed .local root" >&2
+  exit 1
+fi
+case "$release_outside_audio_output" in
+  *"audio fixture path blocker"* ) ;;
+  *)
+    echo "processing-cli test failed: release provider smoke did not report the audio root blocker" >&2
+    echo "$release_outside_audio_output" >&2
+    exit 1
+    ;;
+esac
+
 release_invalid_provenance_file="$release_model_path.invalid-provenance.json"
 printf '{not-json\n' > "$release_invalid_provenance_file"
 set +e
 release_invalid_provenance_output="$(
   HOME="$release_home" \
-    MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$release_home/.local/bin/whisper-cli" \
+    MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$release_runtime_path" \
     MEETING_ASSISTANT_TRANSCRIPTION_MODEL="$release_model_path" \
-    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$release_home/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav" \
+    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$release_audio_path" \
     MEETING_ASSISTANT_TRANSCRIPTION_MODEL_SHA256="sha256:$release_model_hash" \
     MEETING_ASSISTANT_TRANSCRIPTION_MODEL_LICENSE_FILE="$release_license_file" \
     MEETING_ASSISTANT_TRANSCRIPTION_MODEL_PROVENANCE_FILE="$release_invalid_provenance_file" \
@@ -248,9 +385,9 @@ printf '{"source":"outside fixture","model":"large-v3-turbo"}\n' > "$release_out
 set +e
 release_outside_provenance_output="$(
   HOME="$release_home" \
-    MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$release_home/.local/bin/whisper-cli" \
+    MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$release_runtime_path" \
     MEETING_ASSISTANT_TRANSCRIPTION_MODEL="$release_model_path" \
-    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$release_home/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav" \
+    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$release_audio_path" \
     MEETING_ASSISTANT_TRANSCRIPTION_MODEL_SHA256="sha256:$release_model_hash" \
     MEETING_ASSISTANT_TRANSCRIPTION_MODEL_LICENSE_FILE="$release_license_file" \
     MEETING_ASSISTANT_TRANSCRIPTION_MODEL_PROVENANCE_FILE="$release_outside_provenance_file" \
