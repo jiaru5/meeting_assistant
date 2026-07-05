@@ -305,6 +305,14 @@
 |---|---|---|---|
 | 本轮 `develop` VS-MA-14/15 native capture artifact report | `PV-MA-002`、`PV-MA-003`; `TDG-MA-005`、`TDG-MA-007`、`TDG-MA-008` | 新增 `platform/e2e/native_capture_artifact_report.py`，`platform/e2e/native-capture-artifact-smoke.sh` 在真实 ScreenCaptureKit native smoke 成功后会调用它生成 JSON evidence report。report 声明 `report_schema=1`、`release_gate=partial-evidence-only`、`not_release_readiness=true`，并记录 `VS-MA-14/15`、`PV-MA-002/003`、workspace/session、adapter、四类原始 artifact 状态、`screen_video` bytes/checksum 校验、三类音频缺失/降级原因、`generate_transcript` 在无可用音频时以 `artifact_missing` / exit 3 fail closed、以及无 `normalized_audio` / `transcript_text` / `speaker_labels` 派生产物污染。新增 `scripts/tests/test_native_capture_artifact_report.py` 使用 synthetic native session 覆盖 report 写入、缺失音频降级原因 fail closed、CLI marker 和 report 路径输出。 | 证明 VS-MA-14/15 opt-in 真实 native capture smoke 的结果可以形成机器可审查 report，降低只靠 stdout marker 的假绿风险；仍不证明默认门禁运行真实 ScreenCaptureKit、不证明 release-scope standard gate、独立系统音频/麦克风音频真实产物、跨机器 TCC/display 可重复、production/default 录制策略、真实 native-to-processing 成功链路、release bundle 或 VS-MA-23 release readiness。 |
 
+## 2026-07-05 VS-MA-14 native capture failure diagnostics report 回填
+
+本节补充 VS-MA-14 真实 native capture 失败路径的结构化诊断 report。该回填不新增产品事实，不改变 command、artifact、event、error code、exit code、Release hook、真实 capture 策略或发布范围；所有涉及 `PV-MA-002` / `PV-MA-003` 继续保持 `partial`，失败 report 不能作为通过证据。
+
+| 来源 | 影响矩阵行 | 追加证据 | 状态影响 |
+|---|---|---|---|
+| 本轮 `develop` VS-MA-14 native capture failure diagnostics report | `PV-MA-002`、`PV-MA-003`; `TDG-MA-005`、`TDG-MA-007`、`TDG-MA-008` | `platform/e2e/native-capture-artifact-smoke.sh` 在真实 ScreenCaptureKit native smoke 失败时，会复制最后一次 native summary，并调用 `platform/e2e/native_capture_artifact_report.py --failure-report` 生成结构化 failure report；report 记录 `failure_stage`、native exit code、attempt count、display wake guard、start/stop response、validation errors、notes、TCC/display/runtime/timeout/artifact validation 诊断布尔值和 remediation hints，然后脚本仍保留 native smoke 原始失败退出码。新增 `scripts/tests/test_native_capture_artifact_report.py` 覆盖 permission/TCC 类失败 summary 的 report 写入、CLI marker 和 shell 失败分支静态接线。 | 证明失败的真实 native capture 运行能留下可比较的跨机器诊断证据，而不是只靠 stderr；仍不证明真实 capture 已通过、默认门禁运行 ScreenCaptureKit、release-scope standard gate、跨机器 TCC/display 可重复已关闭、独立音频产物、production/default 录制策略、真实 native-to-processing 成功链路或 release readiness。 |
+
 ## 标准验证命令目标
 
 ```bash

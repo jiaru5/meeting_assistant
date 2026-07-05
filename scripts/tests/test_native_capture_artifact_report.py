@@ -38,6 +38,8 @@ class NativeCaptureArtifactReportTests(unittest.TestCase):
         self.assertIn("platform/e2e/native_capture_artifact_report.py", script)
         self.assertIn("--summary", script)
         self.assertIn("--report", script)
+        self.assertIn("--failure-report", script)
+        self.assertIn("preserving native exit code", script)
 
     def write_fixture(
         self,
@@ -115,6 +117,39 @@ class NativeCaptureArtifactReportTests(unittest.TestCase):
         summary_path.write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
         return summary_path, report_path, session_dir
 
+    def write_failure_summary(self, directory: str) -> tuple[Path, Path]:
+        base = Path(directory)
+        summary = {
+            "ok": False,
+            "script": "native-capture-smoke",
+            "adapter": "AppleScreenCaptureKitNativeCaptureAdapter",
+            "workspace": str(base / "workspace"),
+            "session_id": "session-native-capture-report",
+            "duration_seconds": 2,
+            "capture_system_audio": False,
+            "capture_microphone_audio": False,
+            "failure_stage": "start",
+            "message": "Screen Recording permission is denied.",
+            "start_response": {
+                "ok": False,
+                "request_id": "native-capture-smoke-start_native_recording",
+                "command": "start_native_recording",
+                "session_id": None,
+                "status": None,
+                "capture_target": None,
+                "code": "permission_denied",
+                "message": "Screen Recording permission is denied.",
+                "details": ["Screen Recording permission is denied."],
+                "artifacts": [],
+            },
+            "validation_errors": [],
+            "notes": ["This script is an opt-in local smoke and is not part of the default native-app gate."],
+        }
+        summary_path = base / "failure-summary.json"
+        report_path = base / "failure-report.json"
+        summary_path.write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
+        return summary_path, report_path
+
     def test_build_report_writes_partial_evidence_and_fail_closed_processing_result(self) -> None:
         module = load_report_module()
         with tempfile.TemporaryDirectory() as directory:
@@ -150,6 +185,32 @@ class NativeCaptureArtifactReportTests(unittest.TestCase):
 
             self.assertFalse(report_path.exists())
 
+    def test_build_failure_report_writes_tcc_diagnostics_without_promoting_release(self) -> None:
+        module = load_report_module()
+        with tempfile.TemporaryDirectory() as directory:
+            summary_path, report_path = self.write_failure_summary(directory)
+
+            report = module.build_failure_report(
+                summary_path,
+                report_path=report_path,
+                native_exit_code=1,
+                attempts=2,
+                display_wake_seconds=120,
+                display_wake_settle_seconds=3,
+            )
+
+            self.assertTrue(report_path.is_file())
+            self.assertEqual(report["release_gate"], "partial-evidence-only")
+            self.assertTrue(report["not_release_readiness"])
+            self.assertEqual(report["failure_stage"], "start")
+            self.assertEqual(report["native_exit_code"], 1)
+            self.assertEqual(report["native_attempts"], 2)
+            self.assertTrue(report["diagnostics"]["permission_or_tcc_likely"])
+            self.assertFalse(report["diagnostics"]["timeout_likely"])
+            self.assertEqual(report["start_response"]["code"], "permission_denied")
+            self.assertIn("Screen Recording", " ".join(report["remediation_hints"]))
+            self.assertIn("native capture smoke did not pass", report["findings"][0])
+
     def test_cli_writes_report_and_emits_non_contract_markers(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             summary_path, report_path, _ = self.write_fixture(directory)
@@ -179,6 +240,46 @@ class NativeCaptureArtifactReportTests(unittest.TestCase):
             self.assertIn("real native capture artifact e2e marker", result.stdout)
             self.assertIn("real native capture artifact report marker", result.stdout)
             self.assertIn("partial-evidence-only", result.stdout)
+            self.assertIn(str(report_path), result.stderr)
+            self.assertTrue(report_path.is_file())
+
+    def test_cli_writes_failure_report_and_emits_failure_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            summary_path, report_path = self.write_failure_summary(directory)
+            env = os.environ.copy()
+            pythonpath = [str(PROCESSING_SRC)]
+            if env.get("PYTHONPATH"):
+                pythonpath.append(env["PYTHONPATH"])
+            env["PYTHONPATH"] = os.pathsep.join(pythonpath)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "platform/e2e/native_capture_artifact_report.py"),
+                    "--failure-report",
+                    "--summary",
+                    str(summary_path),
+                    "--report",
+                    str(report_path),
+                    "--native-exit-code",
+                    "1",
+                    "--attempts",
+                    "2",
+                    "--display-wake-seconds",
+                    "120",
+                    "--display-wake-settle-seconds",
+                    "3",
+                ],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("failure report marker", result.stdout)
+            self.assertIn("failure_stage=start", result.stdout)
             self.assertIn(str(report_path), result.stderr)
             self.assertTrue(report_path.is_file())
 

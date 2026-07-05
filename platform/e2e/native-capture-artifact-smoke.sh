@@ -98,6 +98,26 @@ if ((native_exit != 0)); then
   if [[ -n "$last_attempt_summary" && -s "$last_attempt_summary" ]]; then
     cp "$last_attempt_summary" "$summary_path"
   fi
+  if [[ -s "$summary_path" ]]; then
+    set +e
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="$ROOT_DIR/platform/processing-cli/src${PYTHONPATH:+:$PYTHONPATH}" \
+    MA_NATIVE_CAPTURE_ARTIFACT_SUMMARY="$summary_path" \
+    MA_NATIVE_CAPTURE_ARTIFACT_REPORT="$report_path" \
+    python3 "$ROOT_DIR/platform/e2e/native_capture_artifact_report.py" \
+      --failure-report \
+      --summary "$summary_path" \
+      --report "$report_path" \
+      --native-exit-code "$native_exit" \
+      --attempts "$attempts" \
+      --display-wake-seconds "$display_wake_seconds" \
+      --display-wake-settle-seconds "$display_wake_settle_seconds" >&2
+    report_exit=$?
+    set -e
+    if ((report_exit != 0)); then
+      echo "native capture artifact e2e diagnostic: failed to write native failure report; preserving native exit code $native_exit." >&2
+    fi
+  fi
   exit "$native_exit"
 fi
 

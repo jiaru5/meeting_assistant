@@ -34,6 +34,11 @@ RELEASE_BLOCKERS = [
     "does not prove real native-to-processing successful transcript chain",
     "does not prove VS-MA-23 release readiness",
 ]
+GENERIC_FAILURE_HINTS = [
+    "Confirm the Mac is awake, unlocked, and has an active display before rerunning the smoke.",
+    "Grant Screen Recording or Screen & System Audio Recording permission to the test runner app, terminal, and Xcode as applicable.",
+    "Rerun the opt-in smoke without changing release readiness status; failed native capture evidence remains partial.",
+]
 
 
 class NativeCaptureArtifactReportError(AssertionError):
@@ -298,28 +303,160 @@ def build_report(
     return report
 
 
+def _response_summary(response: Any) -> dict[str, Any] | None:
+    if not isinstance(response, dict):
+        return None
+    return {
+        "ok": response.get("ok"),
+        "command": response.get("command"),
+        "code": response.get("code"),
+        "message": response.get("message"),
+        "session_id": response.get("session_id"),
+        "status": response.get("status"),
+    }
+
+
+def failure_diagnostics(summary: dict[str, Any]) -> tuple[dict[str, bool], list[str]]:
+    failure_stage = str(summary.get("failure_stage") or "unknown")
+    message = str(summary.get("message") or "")
+    start_response = summary.get("start_response") if isinstance(summary.get("start_response"), dict) else {}
+    stop_response = summary.get("stop_response") if isinstance(summary.get("stop_response"), dict) else {}
+    start_code = str(start_response.get("code") or "")
+    stop_code = str(stop_response.get("code") or "")
+    validation_errors = summary.get("validation_errors") if isinstance(summary.get("validation_errors"), list) else []
+    validation_text = " ".join(str(item) for item in validation_errors)
+    haystack = " ".join([failure_stage, message, start_code, stop_code, validation_text]).lower()
+
+    diagnostics = {
+        "permission_or_tcc_likely": any(
+            token in haystack
+            for token in (
+                "permission_denied",
+                "permission",
+                "screen recording",
+                "screen & system audio",
+                "microphone",
+                "tcc",
+            )
+        ),
+        "display_or_target_likely": any(
+            token in haystack
+            for token in ("display", "screen_video", "no display", "window", "target", "shareable content")
+        ),
+        "runtime_or_os_likely": failure_stage == "runtime" or "macos" in haystack or "screencapturekit" in haystack,
+        "timeout_likely": failure_stage == "timeout" or "timed out" in haystack,
+        "artifact_validation_likely": failure_stage == "validation" or bool(validation_errors),
+    }
+
+    hints = list(GENERIC_FAILURE_HINTS)
+    if diagnostics["runtime_or_os_likely"]:
+        hints.append("Verify the host macOS version supports ScreenCaptureKit recording output.")
+    if diagnostics["timeout_likely"]:
+        hints.append("Increase MA_NATIVE_CAPTURE_SMOKE_TIMEOUT_SECONDS only after confirming the runner is not blocked by a system permission prompt.")
+    if diagnostics["display_or_target_likely"]:
+        hints.append("Confirm a capturable display or target is available; display sleep or remote/headless sessions can produce missing screen_video evidence.")
+    if diagnostics["artifact_validation_likely"]:
+        hints.append("Inspect the copied native capture summary and workspace session.json before rerunning; validation failures are not release-ready evidence.")
+    return diagnostics, hints
+
+
+def build_failure_report(
+    summary_path: Path,
+    *,
+    report_path: Path | None = None,
+    native_exit_code: int | None = None,
+    attempts: int | None = None,
+    display_wake_seconds: int | None = None,
+    display_wake_settle_seconds: int | None = None,
+) -> dict[str, Any]:
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    if not isinstance(summary, dict):
+        fail("native capture failure summary must be a JSON object")
+    if summary.get("ok") is True:
+        fail("native capture failure report requires a failed summary")
+
+    diagnostics, remediation_hints = failure_diagnostics(summary)
+    report: dict[str, Any] = {
+        "report_schema": 1,
+        "component": "platform/e2e/native-capture-artifact-smoke",
+        "scope": "validation-only",
+        "release_gate": "partial-evidence-only",
+        "vs_ma": ["VS-MA-14", "VS-MA-15"],
+        "pv": ["PV-MA-002", "PV-MA-003"],
+        "summary_path": str(summary_path),
+        "native_smoke_ok": False,
+        "native_exit_code": native_exit_code,
+        "native_attempts": attempts,
+        "workspace": summary.get("workspace"),
+        "session_id": summary.get("session_id"),
+        "adapter": summary.get("adapter"),
+        "failure_stage": summary.get("failure_stage") or "unknown",
+        "message": summary.get("message"),
+        "capture_system_audio": bool(summary.get("capture_system_audio")),
+        "capture_microphone_audio": bool(summary.get("capture_microphone_audio")),
+        "start_response": _response_summary(summary.get("start_response")),
+        "stop_response": _response_summary(summary.get("stop_response")),
+        "validation_errors": summary.get("validation_errors") if isinstance(summary.get("validation_errors"), list) else [],
+        "notes": summary.get("notes") if isinstance(summary.get("notes"), list) else [],
+        "display_wake_guard": {
+            "seconds": display_wake_seconds,
+            "settle_seconds": display_wake_settle_seconds,
+        },
+        "diagnostics": diagnostics,
+        "remediation_hints": remediation_hints,
+        "not_release_readiness": True,
+        "release_blockers": RELEASE_BLOCKERS,
+        "findings": ["native capture smoke did not pass; evidence remains partial"],
+    }
+    if report_path is not None:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--summary", default=os.environ.get("MA_NATIVE_CAPTURE_ARTIFACT_SUMMARY"))
     parser.add_argument("--report", default=os.environ.get("MA_NATIVE_CAPTURE_ARTIFACT_REPORT"))
+    parser.add_argument("--failure-report", action="store_true")
+    parser.add_argument("--native-exit-code", type=int)
+    parser.add_argument("--attempts", type=int)
+    parser.add_argument("--display-wake-seconds", type=int)
+    parser.add_argument("--display-wake-settle-seconds", type=int)
     args = parser.parse_args(argv)
     if not args.summary:
         print("native capture artifact report failed: --summary is required", file=sys.stderr)
         return 2
 
     try:
-        report = build_report(
-            Path(args.summary),
-            report_path=Path(args.report) if args.report else None,
-            root=Path.cwd(),
-            python=sys.executable,
-        )
+        if args.failure_report:
+            report = build_failure_report(
+                Path(args.summary),
+                report_path=Path(args.report) if args.report else None,
+                native_exit_code=args.native_exit_code,
+                attempts=args.attempts,
+                display_wake_seconds=args.display_wake_seconds,
+                display_wake_settle_seconds=args.display_wake_settle_seconds,
+            )
+        else:
+            report = build_report(
+                Path(args.summary),
+                report_path=Path(args.report) if args.report else None,
+                root=Path.cwd(),
+                python=sys.executable,
+            )
     except (ContractError, NativeCaptureArtifactReportError, OSError, json.JSONDecodeError) as exc:
         print(f"native capture artifact report failed: {exc}", file=sys.stderr)
         return 1
 
     if args.report:
         print(f"native capture artifact evidence report: {args.report}", file=sys.stderr)
+    if args.failure_report:
+        print(
+            "VS-MA-14/15 real native capture artifact failure report marker [non-contract]: "
+            f"failure_stage={report['failure_stage']} release_gate={report['release_gate']}."
+        )
+        return 0
     print(
         "VS-MA-14/15 real native capture artifact e2e marker [non-contract]: "
         "processing workspace contract consumed native session and no-audio transcript path failed closed."
