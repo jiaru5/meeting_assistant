@@ -134,6 +134,8 @@ Phase 2 以后按“大阶段管理、纵切交付、契约验收”的方式推
 | `VS-MA-24` | MVP 外 | 团队分发、签名公证、自动更新和商业化分发不属于当前 MVP | 用户重新纳入范围时先走 spec-change 和 ADR |
 | `VS-MA-25` | MVP 外 | 自动纪要或模型集成受 `OD-MA-009` watch 约束 | 用户确认自动 GPT/Qwen 后再新增 `CAP/AC/PV` |
 
+2026-07-05 VS-MA-22 补充：`supply-chain-check.sh release` 的 sidecar repeatability gate 现在要求每个 target machine 引用 digest-matched `release-sidecar-target-smoke` report，并解析 commit、target id/os/architecture、runtime/model/audio digest 和 smoke 结果；缺少该逐目标机器 report、文件 digest 不匹配或 report 内语义与 sidecar target machine 不一致时必须 fail closed。该补充只强化 release 输入证据门禁，仍不产出真实 release sidecar repeatability report，不提升任何 `PV-MA-*` 到 `covered`。
+
 当前顺序：`VS-MA-14/15`、`VS-MA-16`、`VS-MA-17/18/19` 和 `VS-MA-20` 已按阶段退出口径收口；当前继续推进 `VS-MA-21/22` 的 release blocker，最后才进入 `VS-MA-23` 发布候选。
 
 | 顺序 | 纵切 | 能力和验收 | 主要实现表面 | 最小测试和证据 | 退出口径 |

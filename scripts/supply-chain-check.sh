@@ -361,14 +361,14 @@ def validate_slsa_attestation(
         failures.append(f"{label} predicate runDetails must include builder.id")
 
 
-def validate_sidecar_artifact(artifact: Any, label: str, *, require_license: bool = False) -> None:
+def validate_sidecar_artifact(artifact: Any, label: str, *, require_license: bool = False) -> str | None:
     if not isinstance(artifact, dict):
         failures.append(f"{label} must be an object")
-        return
+        return None
     if not isinstance(artifact.get("name"), str) or not artifact.get("name"):
         failures.append(f"{label} must include name")
     require_local_sidecar_path(artifact.get("path"), label)
-    require_sha256_digest(artifact.get("digest"), f"{label} digest")
+    artifact_digest = require_sha256_digest(artifact.get("digest"), f"{label} digest")
     if not isinstance(artifact.get("source"), str) or not artifact.get("source"):
         failures.append(f"{label} must include source")
     if require_license:
@@ -376,6 +376,64 @@ def validate_sidecar_artifact(artifact: Any, label: str, *, require_license: boo
             failures.append(f"{label} must include license")
         if not isinstance(artifact.get("provenance_ref"), str) or not artifact.get("provenance_ref"):
             failures.append(f"{label} must include provenance_ref")
+    return artifact_digest
+
+
+def validate_sidecar_target_smoke_report(
+    target: dict[str, Any],
+    artifact_digests: dict[str, str | None],
+    label: str,
+    head: str | None,
+) -> None:
+    smoke_report_path = validate_report_artifact_reference(target.get("smoke_report"), f"{label} smoke_report")
+    if smoke_report_path is None:
+        return
+    report = load_json_file(smoke_report_path, f"{label} smoke_report file")
+    if report is None:
+        return
+
+    require_equal(report, "report_schema", 1, f"{label} smoke_report")
+    require_equal(report, "release_gate", "release-sidecar-target-smoke", f"{label} smoke_report")
+    if head is not None:
+        require_equal(report, "subject_commit", head, f"{label} smoke_report")
+    require_equal(report, "packages_runtime_or_model", False, f"{label} smoke_report")
+    require_equal(report, "auto_downloads", False, f"{label} smoke_report")
+    require_equal(report, "external_network_access", False, f"{label} smoke_report")
+    for key in ("target_id", "os", "architecture"):
+        expected = target.get(key)
+        if isinstance(expected, str) and expected:
+            require_equal(report, key, expected, f"{label} smoke_report")
+
+    artifacts = report.get("artifacts")
+    if not isinstance(artifacts, dict):
+        failures.append(f"{label} smoke_report artifacts must be an object")
+    else:
+        for artifact_key in ("runtime", "model", "smoke_audio_fixture"):
+            artifact = artifacts.get(artifact_key)
+            if not isinstance(artifact, dict):
+                failures.append(f"{label} smoke_report artifacts.{artifact_key} must be an object")
+                continue
+            target_artifact = target.get(artifact_key)
+            expected_name = target_artifact.get("name") if isinstance(target_artifact, dict) else None
+            if isinstance(expected_name, str) and expected_name:
+                require_equal(artifact, "name", expected_name, f"{label} smoke_report {artifact_key}")
+            actual_digest = require_sha256_digest(
+                artifact.get("digest"),
+                f"{label} smoke_report {artifact_key} digest",
+            )
+            expected_digest = artifact_digests.get(artifact_key)
+            if expected_digest is not None and actual_digest is not None and actual_digest != expected_digest:
+                failures.append(
+                    f"{label} smoke_report {artifact_key} digest must match target machine {artifact_key} digest"
+                )
+
+    smoke = report.get("smoke")
+    if not isinstance(smoke, dict):
+        failures.append(f"{label} smoke_report smoke must be an object")
+    else:
+        for key in ("check_dependencies_ok", "whisper_cpp_smoke_passed", "no_auto_downloads_observed"):
+            if smoke.get(key) is not True:
+                failures.append(f"{label} smoke_report smoke must set {key}=True")
 
 
 def validate_release_bundle_report(report: dict[str, Any], head: str | None) -> tuple[str | None, set[str]]:
@@ -582,9 +640,14 @@ if sidecar is not None:
             for key in ("target_id", "os", "architecture"):
                 if not isinstance(target.get(key), str) or not target.get(key):
                     failures.append(f"{label} must include {key}")
-            validate_sidecar_artifact(target.get("runtime"), f"{label} runtime")
-            validate_sidecar_artifact(target.get("model"), f"{label} model", require_license=True)
-            validate_sidecar_artifact(target.get("smoke_audio_fixture"), f"{label} smoke_audio_fixture")
+            artifact_digests = {
+                "runtime": validate_sidecar_artifact(target.get("runtime"), f"{label} runtime"),
+                "model": validate_sidecar_artifact(target.get("model"), f"{label} model", require_license=True),
+                "smoke_audio_fixture": validate_sidecar_artifact(
+                    target.get("smoke_audio_fixture"),
+                    f"{label} smoke_audio_fixture",
+                ),
+            }
             smoke = target.get("smoke")
             if not isinstance(smoke, dict):
                 failures.append(f"{label} smoke must be an object")
@@ -592,6 +655,7 @@ if sidecar is not None:
                 for key in ("check_dependencies_ok", "whisper_cpp_smoke_passed", "no_auto_downloads_observed"):
                     if smoke.get(key) is not True:
                         failures.append(f"{label} smoke must set {key}=True")
+            validate_sidecar_target_smoke_report(target, artifact_digests, label, head)
 
 if failures:
     print("release supply-chain bundle/provenance/signing/sidecar evidence failed:", file=sys.stderr)

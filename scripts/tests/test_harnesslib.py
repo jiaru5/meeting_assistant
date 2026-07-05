@@ -182,6 +182,7 @@ class HarnessValidationTests(unittest.TestCase):
         provenance_path = reports_dir / "provenance.json"
         signature_path = reports_dir / "signature.json"
         sidecar_path = reports_dir / "sidecar.json"
+        sidecar_target_smoke_path = reports_dir / "sidecar-target-smoke.json"
         attestation_path = reports_dir / "release-provenance.intoto.dsse.json"
         signature_bundle_path = reports_dir / "release-signature.sigstore-bundle.json"
         attestation_statement = {
@@ -291,6 +292,57 @@ class HarnessValidationTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        runtime_artifact = {
+            "name": "whisper-cli",
+            "path": "/Users/runner/.local/bin/whisper-cli",
+            "digest": digest,
+            "source": "user-prepared-local-runtime",
+        }
+        model_artifact = {
+            "name": "ggml-large-v3-turbo-q5_0.bin",
+            "path": "/Users/runner/.local/share/ai-models/whisper.cpp/large-v3-turbo/ggml-large-v3-turbo-q5_0.bin",
+            "digest": digest,
+            "source": "user-prepared-local-model",
+            "license": "Apache-2.0",
+            "provenance_ref": "/Users/runner/.local/share/ai-models/whisper.cpp/large-v3-turbo/provenance.json",
+        }
+        smoke_audio_fixture = {
+            "name": "mixed-zh-en-tech.wav",
+            "path": "/Users/runner/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav",
+            "digest": digest,
+            "source": "user-prepared-local-fixture",
+        }
+        target_smoke = {
+            "check_dependencies_ok": True,
+            "whisper_cpp_smoke_passed": True,
+            "no_auto_downloads_observed": True,
+        }
+        sidecar_target_smoke_path.write_text(
+            json.dumps(
+                {
+                    "report_schema": 1,
+                    "release_gate": "release-sidecar-target-smoke",
+                    "subject_commit": head,
+                    "target_id": "macos-arm64-ci",
+                    "os": "macos",
+                    "architecture": "arm64",
+                    "packages_runtime_or_model": False,
+                    "auto_downloads": False,
+                    "external_network_access": False,
+                    "artifacts": {
+                        "runtime": {"name": runtime_artifact["name"], "digest": runtime_artifact["digest"]},
+                        "model": {"name": model_artifact["name"], "digest": model_artifact["digest"]},
+                        "smoke_audio_fixture": {
+                            "name": smoke_audio_fixture["name"],
+                            "digest": smoke_audio_fixture["digest"],
+                        },
+                    },
+                    "smoke": target_smoke,
+                }
+            ),
+            encoding="utf-8",
+        )
+        sidecar_target_smoke_digest = "sha256:" + hashlib.sha256(sidecar_target_smoke_path.read_bytes()).hexdigest()
         sidecar_path.write_text(
             json.dumps(
                 {
@@ -308,30 +360,13 @@ class HarnessValidationTests(unittest.TestCase):
                             "target_id": "macos-arm64-ci",
                             "os": "macos",
                             "architecture": "arm64",
-                            "runtime": {
-                                "name": "whisper-cli",
-                                "path": "/Users/runner/.local/bin/whisper-cli",
-                                "digest": digest,
-                                "source": "user-prepared-local-runtime",
-                            },
-                            "model": {
-                                "name": "ggml-large-v3-turbo-q5_0.bin",
-                                "path": "/Users/runner/.local/share/ai-models/whisper.cpp/large-v3-turbo/ggml-large-v3-turbo-q5_0.bin",
-                                "digest": digest,
-                                "source": "user-prepared-local-model",
-                                "license": "Apache-2.0",
-                                "provenance_ref": "/Users/runner/.local/share/ai-models/whisper.cpp/large-v3-turbo/provenance.json",
-                            },
-                            "smoke_audio_fixture": {
-                                "name": "mixed-zh-en-tech.wav",
-                                "path": "/Users/runner/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav",
-                                "digest": digest,
-                                "source": "user-prepared-local-fixture",
-                            },
-                            "smoke": {
-                                "check_dependencies_ok": True,
-                                "whisper_cpp_smoke_passed": True,
-                                "no_auto_downloads_observed": True,
+                            "runtime": runtime_artifact,
+                            "model": model_artifact,
+                            "smoke_audio_fixture": smoke_audio_fixture,
+                            "smoke": target_smoke,
+                            "smoke_report": {
+                                "path": str(sidecar_target_smoke_path),
+                                "digest": sidecar_target_smoke_digest,
                             },
                         }
                     ],
@@ -1339,6 +1374,150 @@ class HarnessValidationTests(unittest.TestCase):
             output = result.stderr + result.stdout
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("release signature artifact signature_bundle must be an object", output)
+            self.assertNotIn("supply-chain-check passed: phase=release", result.stdout)
+
+    def test_supply_chain_release_rejects_sidecar_without_target_smoke_report(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=fixture, text=True).strip()
+            digest = "sha256:" + ("a" * 64)
+            command = self.supply_chain_report_command()
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["sbom"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            reports_dir = Path(directory) / "release-reports"
+            bundle_path, provenance_path, signature_path, sidecar_path = self.write_release_supply_chain_reports(
+                reports_dir,
+                manifest,
+                head,
+                digest,
+            )
+            sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            sidecar["target_machines"][0].pop("smoke_report")
+            sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
+            env = os.environ.copy()
+            env["MEETING_ASSISTANT_RELEASE_BUNDLE_REPORT"] = str(bundle_path)
+            env["MEETING_ASSISTANT_RELEASE_PROVENANCE_REPORT"] = str(provenance_path)
+            env["MEETING_ASSISTANT_RELEASE_SIGNATURE_REPORT"] = str(signature_path)
+            env["MEETING_ASSISTANT_RELEASE_SIDECAR_REPORT"] = str(sidecar_path)
+
+            result = subprocess.run(
+                [str(fixture / "scripts/supply-chain-check.sh"), "release"],
+                cwd=fixture,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("release sidecar target_machine #0 smoke_report must be an object", output)
+            self.assertNotIn("supply-chain-check passed: phase=release", result.stdout)
+
+    def test_supply_chain_release_rejects_sidecar_smoke_report_digest_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=fixture, text=True).strip()
+            digest = "sha256:" + ("a" * 64)
+            command = self.supply_chain_report_command()
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["sbom"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            reports_dir = Path(directory) / "release-reports"
+            bundle_path, provenance_path, signature_path, sidecar_path = self.write_release_supply_chain_reports(
+                reports_dir,
+                manifest,
+                head,
+                digest,
+            )
+            sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            smoke_report_path = Path(sidecar["target_machines"][0]["smoke_report"]["path"])
+            smoke_report = json.loads(smoke_report_path.read_text(encoding="utf-8"))
+            smoke_report["artifacts"]["model"]["digest"] = "sha256:" + ("c" * 64)
+            smoke_report_path.write_text(json.dumps(smoke_report), encoding="utf-8")
+            sidecar["target_machines"][0]["smoke_report"]["digest"] = (
+                "sha256:" + hashlib.sha256(smoke_report_path.read_bytes()).hexdigest()
+            )
+            sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
+            env = os.environ.copy()
+            env["MEETING_ASSISTANT_RELEASE_BUNDLE_REPORT"] = str(bundle_path)
+            env["MEETING_ASSISTANT_RELEASE_PROVENANCE_REPORT"] = str(provenance_path)
+            env["MEETING_ASSISTANT_RELEASE_SIGNATURE_REPORT"] = str(signature_path)
+            env["MEETING_ASSISTANT_RELEASE_SIDECAR_REPORT"] = str(sidecar_path)
+
+            result = subprocess.run(
+                [str(fixture / "scripts/supply-chain-check.sh"), "release"],
+                cwd=fixture,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "release sidecar target_machine #0 smoke_report model digest must match target machine model digest",
+                output,
+            )
+            self.assertNotIn("supply-chain-check passed: phase=release", result.stdout)
+
+    def test_supply_chain_release_rejects_sidecar_smoke_report_failed_smoke(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=fixture, text=True).strip()
+            digest = "sha256:" + ("a" * 64)
+            command = self.supply_chain_report_command()
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["sbom"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            reports_dir = Path(directory) / "release-reports"
+            bundle_path, provenance_path, signature_path, sidecar_path = self.write_release_supply_chain_reports(
+                reports_dir,
+                manifest,
+                head,
+                digest,
+            )
+            sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            smoke_report_path = Path(sidecar["target_machines"][0]["smoke_report"]["path"])
+            smoke_report = json.loads(smoke_report_path.read_text(encoding="utf-8"))
+            smoke_report["smoke"]["no_auto_downloads_observed"] = False
+            smoke_report_path.write_text(json.dumps(smoke_report), encoding="utf-8")
+            sidecar["target_machines"][0]["smoke_report"]["digest"] = (
+                "sha256:" + hashlib.sha256(smoke_report_path.read_bytes()).hexdigest()
+            )
+            sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
+            env = os.environ.copy()
+            env["MEETING_ASSISTANT_RELEASE_BUNDLE_REPORT"] = str(bundle_path)
+            env["MEETING_ASSISTANT_RELEASE_PROVENANCE_REPORT"] = str(provenance_path)
+            env["MEETING_ASSISTANT_RELEASE_SIGNATURE_REPORT"] = str(signature_path)
+            env["MEETING_ASSISTANT_RELEASE_SIDECAR_REPORT"] = str(sidecar_path)
+
+            result = subprocess.run(
+                [str(fixture / "scripts/supply-chain-check.sh"), "release"],
+                cwd=fixture,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "release sidecar target_machine #0 smoke_report smoke must set no_auto_downloads_observed=True",
+                output,
+            )
             self.assertNotIn("supply-chain-check passed: phase=release", result.stdout)
 
     def test_release_bundle_check_fails_without_release_bundle_report(self) -> None:
