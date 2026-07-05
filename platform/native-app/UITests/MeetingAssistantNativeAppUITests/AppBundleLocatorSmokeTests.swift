@@ -689,6 +689,78 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         XCTAssertEqual(segments.first?["text"] as? String, "Fake transcript generated from local audio.")
     }
 
+    func testRealProcessingCLITranscriptReviewExportAndDeleteFromLaunchedAppBundleWhenExplicitlyEnabled() throws {
+        try XCTSkipUnless(
+            Self.realActionCLISmokeEnabled(),
+            "Set MA_NATIVE_APP_REAL_ACTION_SMOKE=1 to run the real processing-cli transcript action app-bundle smoke."
+        )
+
+        let processingFixture = try AppRealProcessingCLIFixture()
+        defer { processingFixture.cleanup() }
+        let processingApp = launchApp(fixture: "ready", realProcessingFixture: processingFixture)
+
+        tapProcessingButton(
+            "ma.processing.startButton",
+            in: processingApp,
+            expectingStatus: "Processing completed with transcript-only speaker labels."
+        )
+
+        let reviewApp = launchApp(
+            workspaceURL: processingFixture.workspaceURL,
+            sessionID: processingFixture.sessionID,
+            realProcessingFixture: processingFixture
+        )
+
+        assertElement(
+            "ma.transcript.heading",
+            in: reviewApp,
+            contains: "Real processing CLI app-bundle fixture"
+        )
+        assertElement("ma.transcript.summary", in: reviewApp, contains: "Transcript has 1 segment for review.")
+        assertElement(
+            "ma.transcript.text.segment-0001",
+            in: reviewApp,
+            contains: "Fake transcript generated from local audio."
+        )
+        assertElement("ma.transcript.degradation", in: reviewApp, contains: "transcript-only fallback")
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Transcript actions are ready.")
+
+        tapTranscriptActionButton("ma.transcriptAction.copyButton", in: reviewApp)
+
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Copy complete.")
+        assertElement(
+            "ma.transcriptAction.success",
+            in: reviewApp,
+            contains: "Copied plain text transcript for session \(processingFixture.sessionID)."
+        )
+
+        tapTranscriptActionButton("ma.transcriptAction.exportButton", in: reviewApp)
+
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Export complete.")
+        assertElement("ma.transcriptAction.success", in: reviewApp, contains: processingFixture.exportURL.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: processingFixture.exportURL.path))
+        XCTAssertTrue(try processingFixture.exportContent().contains("Fake transcript generated from local audio."))
+
+        tapTranscriptActionButton("ma.transcriptAction.deleteButton", in: reviewApp)
+        assertElement("ma.transcriptAction.deletePromptText", in: reviewApp, contains: processingFixture.sessionID)
+        assertElement("ma.transcriptAction.deletePromptText", in: reviewApp, contains: "External exports are retained.")
+        tapTranscriptActionButton("ma.transcriptAction.deleteConfirmButton", in: reviewApp)
+
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Delete complete.")
+        assertElement(
+            "ma.transcriptAction.success",
+            in: reviewApp,
+            contains: "Deleted session \(processingFixture.sessionID)."
+        )
+        assertElement("ma.transcriptAction.success", in: reviewApp, contains: "Retained 1 external export.")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: processingFixture.sessionRootURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: processingFixture.exportURL.path))
+        let deleteEvent = try processingFixture.deleteEventContent()
+        XCTAssertTrue(deleteEvent.contains("meeting_session.deleted.v1"))
+        XCTAssertTrue(deleteEvent.contains(processingFixture.sessionID))
+        XCTAssertFalse(deleteEvent.contains("Fake transcript generated from local audio."))
+    }
+
     private func launchApp(
         fixture: String? = nil,
         workspaceURL: URL? = nil,
@@ -1242,6 +1314,17 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         }
     }
 
+    private static func realActionCLISmokeEnabled() -> Bool {
+        switch ProcessInfo.processInfo.environment["MA_NATIVE_APP_REAL_ACTION_SMOKE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() {
+        case "1", "true", "yes":
+            return true
+        default:
+            return false
+        }
+    }
+
     private func bringAppToForeground(
         _ app: XCUIApplication,
         beforeTapping identifier: String,
@@ -1758,6 +1841,18 @@ private final class AppRealProcessingCLIFixture {
             .appendingPathComponent(sessionID, isDirectory: true)
     }
 
+    var exportURL: URL {
+        workspaceURL
+            .appendingPathComponent("exports", isDirectory: true)
+            .appendingPathComponent("\(sessionID).md", isDirectory: false)
+    }
+
+    var deleteEventURL: URL {
+        workspaceURL
+            .appendingPathComponent("events", isDirectory: true)
+            .appendingPathComponent("meeting_session.deleted.v1.jsonl", isDirectory: false)
+    }
+
     init(sourceFile: StaticString = #filePath) throws {
         let nativeAppRootURL = URL(fileURLWithPath: String(describing: sourceFile))
             .deletingLastPathComponent()
@@ -1784,6 +1879,10 @@ private final class AppRealProcessingCLIFixture {
             at: sessionRootURL.appendingPathComponent("logs", isDirectory: true),
             withIntermediateDirectories: true
         )
+        try FileManager.default.createDirectory(
+            at: exportURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         try createNativeRecordingWorkspace()
     }
 
@@ -1793,6 +1892,7 @@ private final class AppRealProcessingCLIFixture {
 
     func applyLaunchEnvironment(to app: XCUIApplication) {
         app.launchEnvironment["MA_NATIVE_PROCESSING_CLIENT"] = "process"
+        app.launchEnvironment["MA_NATIVE_TRANSCRIPT_ACTION_CLIENT"] = "process"
         app.launchEnvironment["MA_NATIVE_APP_XCTEST"] = "1"
         app.launchEnvironment["MEETING_ASSISTANT_CLI_PATH"] = cliURL.path
         app.launchEnvironment["MEETING_ASSISTANT_WORKSPACE"] = workspaceURL.path
@@ -1817,6 +1917,14 @@ private final class AppRealProcessingCLIFixture {
         let data = try Data(contentsOf: transcriptURL)
         let payload = try JSONSerialization.jsonObject(with: data)
         return try XCTUnwrap(payload as? [String: Any])
+    }
+
+    func exportContent() throws -> String {
+        try String(contentsOf: exportURL, encoding: .utf8)
+    }
+
+    func deleteEventContent() throws -> String {
+        try String(contentsOf: deleteEventURL, encoding: .utf8)
     }
 
     private func createNativeRecordingWorkspace() throws {

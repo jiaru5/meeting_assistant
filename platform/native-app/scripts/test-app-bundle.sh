@@ -12,6 +12,9 @@ real_capture_log="$derived_data_path/real-capture-app-bundle-smoke.log"
 real_processing_smoke="${MA_NATIVE_APP_REAL_PROCESSING_SMOKE:-0}"
 real_processing_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testRealProcessingCLIProcessesNativeRecordingFromLaunchedAppBundleWhenExplicitlyEnabled"
 real_processing_log="$derived_data_path/real-processing-app-bundle-smoke.log"
+real_action_smoke="${MA_NATIVE_APP_REAL_ACTION_SMOKE:-0}"
+real_action_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testRealProcessingCLITranscriptReviewExportAndDeleteFromLaunchedAppBundleWhenExplicitlyEnabled"
+real_action_log="$derived_data_path/real-action-app-bundle-smoke.log"
 
 mkdir -p "$derived_data_path"
 
@@ -178,6 +181,43 @@ if [[ "$real_processing_smoke" == "1" || "$real_processing_smoke" == "true" || "
   fi
 
   echo "native-app real processing app-bundle XCUITest passed."
+  exit 0
+fi
+
+if [[ "$real_action_smoke" == "1" || "$real_action_smoke" == "true" || "$real_action_smoke" == "yes" ]]; then
+  xcodebuild build-for-testing \
+    -project "$component_dir/MeetingAssistantNative.xcodeproj" \
+    -scheme "MeetingAssistantNative" \
+    -destination "$destination" \
+    -derivedDataPath "$derived_data_path" \
+    -parallel-testing-enabled NO
+
+  xctestrun_path="$(find "$derived_data_path/Build/Products" -maxdepth 1 -name "*.xctestrun" -print -quit)"
+  if [[ -z "$xctestrun_path" ]]; then
+    echo "error: build-for-testing did not produce an .xctestrun file under $derived_data_path/Build/Products" >&2
+    exit 1
+  fi
+
+  set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_REAL_ACTION_SMOKE" "1"
+
+  set +e
+  xcodebuild test-without-building \
+    -xctestrun "$xctestrun_path" \
+    -destination "$destination" \
+    "-only-testing:$real_action_test" 2>&1 | tee "$real_action_log"
+  test_status=${PIPESTATUS[0]}
+  set -e
+
+  if [[ "$test_status" -ne 0 ]]; then
+    echo "native-app real action app-bundle XCUITest failed. Captured xcodebuild log: $real_action_log" >&2
+    if is_ui_testing_automation_blocked "$real_action_log"; then
+      print_ui_testing_automation_help "real action" "$real_action_log"
+      print_ui_testing_automation_log_excerpt
+    fi
+    exit "$test_status"
+  fi
+
+  echo "native-app real action app-bundle XCUITest passed."
   exit 0
 fi
 
