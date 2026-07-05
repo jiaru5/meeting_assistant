@@ -769,18 +769,31 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
 
         let processingFixture = try AppRealRuntimeProcessingCLIFixture()
         defer { processingFixture.cleanup() }
-        let processingApp = launchApp(fixture: "ready", realRuntimeProcessingFixture: processingFixture)
+        let processingApp = launchApp(
+            fixture: "ready",
+            workspaceURL: processingFixture.workspaceURL,
+            sessionID: processingFixture.sessionID,
+            realRuntimeProcessingFixture: processingFixture
+        )
 
         tapProcessingButton("ma.processing.startButton", in: processingApp)
-        XCTAssertTrue(
-            waitForElement(
-                "ma.processing.status",
-                in: processingApp,
-                contains: "Processing completed with transcript-only speaker labels.",
-                timeout: 120
-            ),
-            "Expected real runtime processing to complete from the launched app bundle."
+        let completed = waitForElement(
+            "ma.processing.status",
+            in: processingApp,
+            contains: "Processing completed with transcript-only speaker labels.",
+            timeout: 120
         )
+        if !completed {
+            let reportPath = processingFixture.writeTimeoutDiagnostics(
+                statusDescription: elementDescription("ma.processing.status", in: processingApp),
+                errorDescription: elementDescription("ma.processing.error", in: processingApp)
+            )
+            XCTFail(
+                "Expected real runtime processing to complete from the launched app bundle. "
+                    + "Diagnostics: \(reportPath)."
+            )
+            return
+        }
 
         assertElement(
             "ma.processing.status",
@@ -2245,6 +2258,7 @@ private final class AppRealRuntimeProcessingCLIFixture {
     let modelPath: String
     let smokeAudioURL: URL
     let sessionID = "session-app-ui-runtime"
+    private let diagnosticDirectoryURL: URL?
 
     var sessionRootURL: URL {
         workspaceURL
@@ -2274,6 +2288,11 @@ private final class AppRealRuntimeProcessingCLIFixture {
 
         self.runtimePath = runtimePath
         self.modelPath = modelPath
+        let diagnosticPath = environment["MA_NATIVE_REAL_RUNTIME_DIAGNOSTIC_DIR"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        diagnosticDirectoryURL = diagnosticPath?.isEmpty == false
+            ? URL(fileURLWithPath: diagnosticPath!, isDirectory: true)
+            : nil
 
         let nativeAppRootURL = URL(fileURLWithPath: String(describing: sourceFile))
             .deletingLastPathComponent()
@@ -2320,7 +2339,98 @@ private final class AppRealRuntimeProcessingCLIFixture {
     }
 
     func cleanup() {
-        try? FileManager.default.removeItem(at: rootURL)
+        guard FileManager.default.fileExists(atPath: rootURL.path) else {
+            return
+        }
+        do {
+            try FileManager.default.removeItem(at: rootURL)
+        } catch {
+            // Cleanup is best-effort; it must not mask the real smoke failure.
+        }
+    }
+
+    func writeTimeoutDiagnostics(
+        statusDescription: String,
+        errorDescription: String
+    ) -> String {
+        var candidateDirectories: [URL] = []
+        if let diagnosticDirectoryURL {
+            candidateDirectories.append(diagnosticDirectoryURL)
+        }
+        candidateDirectories.append(
+            FileManager.default.temporaryDirectory
+                .appendingPathComponent("meeting-assistant-real-runtime-diagnostics", isDirectory: true)
+        )
+
+        for diagnosticDirectoryURL in candidateDirectories {
+            if let result = writeTimeoutDiagnostics(
+                statusDescription: statusDescription,
+                errorDescription: errorDescription,
+                to: diagnosticDirectoryURL
+            ) {
+                return result
+            }
+        }
+        return "<write failed>"
+    }
+
+    private func writeTimeoutDiagnostics(
+        statusDescription: String,
+        errorDescription: String,
+        to diagnosticDirectoryURL: URL
+    ) -> String? {
+        do {
+            try FileManager.default.createDirectory(
+                at: diagnosticDirectoryURL,
+                withIntermediateDirectories: true
+            )
+            let reportURL = diagnosticDirectoryURL
+                .appendingPathComponent("real-runtime-timeout-\(sessionID).json", isDirectory: false)
+            let session = (try? sessionMetadata()) ?? [:]
+            let artifacts = session["artifacts"] as? [[String: Any]] ?? []
+            let artifactSummaries = artifacts.map(Self.artifactSummary)
+            let payload: [String: Any] = [
+                "report_schema": 1,
+                "component": "native-app",
+                "release_gate": "opt-in-native-app-bundle-ui-automation",
+                "smoke": "real-runtime-app-bundle",
+                "blocker_type": "real_runtime_processing_timeout",
+                "not_release_readiness": true,
+                "session_id": sessionID,
+                "ui": [
+                    "processing_status": statusDescription,
+                    "processing_error": errorDescription,
+                ],
+                "provider": [
+                    "cli": Self.fileSummary(path: cliURL.path, executable: true),
+                    "runtime": Self.fileSummary(path: runtimePath, executable: true),
+                    "model": Self.fileSummary(path: modelPath, executable: false),
+                    "audio": Self.fileSummary(path: smokeAudioURL.path, executable: false),
+                    "requested_runtime": "whisper_cpp",
+                    "requested_language": "zh",
+                ],
+                "workspace": [
+                    "root_exists": FileManager.default.fileExists(atPath: workspaceURL.path),
+                    "session_exists": FileManager.default.fileExists(atPath: sessionRootURL.path),
+                    "session_metadata_exists": FileManager.default.fileExists(
+                        atPath: sessionRootURL.appendingPathComponent("session.json").path
+                    ),
+                    "artifact_count": artifactSummaries.count,
+                    "artifact_summaries": artifactSummaries,
+                    "processing_log": Self.processingLogSummary(
+                        at: sessionRootURL.appendingPathComponent("logs/processing.log", isDirectory: false)
+                    ),
+                ],
+                "residual_risks": [
+                    "does not prove real runtime processing completed from the launched app bundle",
+                    "does not include transcript text, audio content, model content, or full local paths",
+                ],
+            ]
+            try writeJSON(payload, to: reportURL)
+            return reportURL.path
+        } catch {
+            return nil
+        }
     }
 
     func sessionMetadata() throws -> [String: Any] {
@@ -2380,6 +2490,96 @@ private final class AppRealRuntimeProcessingCLIFixture {
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: url)
         return Self.sha256(data)
+    }
+
+    private static func artifactSummary(_ artifact: [String: Any]) -> [String: Any] {
+        let relativePath = artifact["path"] as? String ?? ""
+        return [
+            "artifact_type": artifact["artifact_type"] as? String ?? "<missing>",
+            "capture_status": artifact["capture_status"] as? String ?? "<missing>",
+            "format": artifact["format"] as? String ?? "<missing>",
+            "path_basename": URL(fileURLWithPath: relativePath).lastPathComponent,
+            "has_checksum": artifact["checksum"] != nil,
+        ]
+    }
+
+    private static func fileSummary(path: String, executable: Bool) -> [String: Any] {
+        let url = URL(fileURLWithPath: path)
+        var payload: [String: Any] = [
+            "basename": url.lastPathComponent,
+            "exists": FileManager.default.fileExists(atPath: path),
+            "allowed_root": allowedRootKind(for: url),
+        ]
+        if executable {
+            payload["is_executable"] = FileManager.default.isExecutableFile(atPath: path)
+        } else {
+            payload["is_readable"] = FileManager.default.isReadableFile(atPath: path)
+        }
+        if let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+           let size = attributes[.size] as? NSNumber {
+            payload["size_bytes"] = size.int64Value
+        }
+        return payload
+    }
+
+    private static func allowedRootKind(for url: URL) -> String {
+        let path = url.standardizedFileURL.path
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .standardizedFileURL
+            .path
+        if path.hasPrefix("\(home)/.local/bin/") {
+            return "user_local_bin"
+        }
+        if path.hasPrefix("\(home)/.local/opt/whisper.cpp/") {
+            return "user_local_whisper_runtime"
+        }
+        if path.hasPrefix("\(home)/.local/share/ai-models/whisper.cpp/") {
+            return "user_local_whisper_model"
+        }
+        if path.hasPrefix("\(home)/.local/share/ai-fixtures/asr/zh-en-tech/") {
+            return "user_local_asr_fixture"
+        }
+        if path.hasPrefix("\(root)/e2e/") {
+            return "repo_platform_e2e"
+        }
+        return "other"
+    }
+
+    private static func processingLogSummary(at url: URL) -> [String: Any] {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            return [
+                "exists": false,
+                "line_count": 0,
+                "events": [],
+            ]
+        }
+        let lines = text
+            .split(separator: "\n")
+            .map(String.init)
+        let events = lines.suffix(8).map { line in
+            [
+                "command": token(named: "command", in: line) ?? "<missing>",
+                "code": token(named: "code", in: line) ?? "<missing>",
+            ]
+        }
+        return [
+            "exists": true,
+            "line_count": lines.count,
+            "events": events,
+        ]
+    }
+
+    private static func token(named name: String, in line: String) -> String? {
+        let prefix = "\(name)="
+        return line
+            .split(separator: " ")
+            .first { $0.hasPrefix(prefix) }
+            .map { String($0.dropFirst(prefix.count)) }
     }
 
     private static func sha256(_ data: Data) -> String {

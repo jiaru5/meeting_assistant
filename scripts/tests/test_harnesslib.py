@@ -803,6 +803,8 @@ class HarnessValidationTests(unittest.TestCase):
             failure_block.index("if is_ui_testing_automation_blocked"),
         )
         self.assertIn("real-runtime-ui-automation-report.json", script)
+        self.assertIn("MA_NATIVE_REAL_RUNTIME_DIAGNOSTIC_DIR", script)
+        self.assertIn("real-runtime-diagnostics", script)
         self.assertIn("native_app_bundle_ui_automation_report.py", script)
 
     def test_release_preflight_registers_release_bundle_gate_before_supply_chain(self) -> None:

@@ -83,7 +83,8 @@ class NativeAppBundleUIAutomationReportTests(unittest.TestCase):
                 "Checking `Expect predicate `label CONTAINS "
                 '"Processing completed with transcript-only speaker labels." '
                 'OR value CONTAINS "Processing completed with transcript-only speaker labels."`\n'
-                "XCTAssertTrue failed - Expected real runtime processing to complete from the launched app bundle.\n",
+                "failed - Expected real runtime processing to complete from the launched app bundle. "
+                "Diagnostics: /tmp/meeting-assistant-real-runtime-diagnostics/real-runtime-timeout-session-app-ui-runtime.json.\n",
                 encoding="utf-8",
             )
 
@@ -103,6 +104,10 @@ class NativeAppBundleUIAutomationReportTests(unittest.TestCase):
             self.assertTrue(report["test_body_started"])
             self.assertTrue(report["processing_start_clicked"])
             self.assertFalse(report["processing_completed"])
+            self.assertEqual(
+                report["diagnostic_report"],
+                "/tmp/meeting-assistant-real-runtime-diagnostics/real-runtime-timeout-session-app-ui-runtime.json",
+            )
             self.assertFalse(report["proves_ui_or_provider_behavior"])
             self.assertIn("does not prove real runtime processing completed", " ".join(report["residual_risks"]))
 

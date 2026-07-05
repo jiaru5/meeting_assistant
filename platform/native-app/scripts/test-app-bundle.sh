@@ -19,6 +19,7 @@ real_runtime_smoke="${MA_NATIVE_APP_REAL_RUNTIME_SMOKE:-0}"
 real_runtime_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testRealWhisperRuntimeTranscriptReviewFromLaunchedAppBundleWhenExplicitlyEnabled"
 real_runtime_log="$derived_data_path/real-runtime-app-bundle-smoke.log"
 real_runtime_ui_automation_report="$derived_data_path/reports/ui-automation/real-runtime-ui-automation-report.json"
+real_runtime_diagnostic_dir="$derived_data_path/reports/real-runtime-diagnostics"
 mvp_full_stack_smoke="${MA_NATIVE_APP_MVP_FULL_STACK_SMOKE:-0}"
 mvp_full_stack_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testMVPFullStackDesignedShellRecordingProcessingTranscriptActionsWhenExplicitlyEnabled"
 mvp_full_stack_log="$derived_data_path/mvp-full-stack-app-bundle-smoke.log"
@@ -314,6 +315,9 @@ if [[ "$real_runtime_smoke" == "1" || "$real_runtime_smoke" == "true" || "$real_
   fi
 
   set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_REAL_RUNTIME_SMOKE" "1"
+  rm -rf "$real_runtime_diagnostic_dir"
+  mkdir -p "$real_runtime_diagnostic_dir"
+  set_xctestrun_env "$xctestrun_path" "MA_NATIVE_REAL_RUNTIME_DIAGNOSTIC_DIR" "$real_runtime_diagnostic_dir"
   require_env_for_real_runtime_smoke
 
   set +e
@@ -326,6 +330,7 @@ if [[ "$real_runtime_smoke" == "1" || "$real_runtime_smoke" == "true" || "$real_
 
   if [[ "$test_status" -ne 0 ]]; then
     echo "native-app real runtime app-bundle XCUITest failed. Captured xcodebuild log: $real_runtime_log" >&2
+    echo "native-app real runtime diagnostics directory: $real_runtime_diagnostic_dir" >&2
     write_ui_testing_automation_blocker_report "real runtime" "$real_runtime_log" "$real_runtime_ui_automation_report" "$test_status"
     if is_ui_testing_automation_blocked "$real_runtime_log"; then
       print_ui_testing_automation_help "real runtime" "$real_runtime_log"

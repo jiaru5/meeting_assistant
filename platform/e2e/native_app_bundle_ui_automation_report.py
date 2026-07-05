@@ -110,6 +110,8 @@ def build_report(
         processing_completed = bool(
             re.search(r"Processing completed with transcript-only speaker labels\.", log_text)
         )
+    diagnostic_report_match = re.search(r"Diagnostics: ([^\n]+?\.json)(?:\.|\s|$)", log_text)
+    diagnostic_report = diagnostic_report_match.group(1) if diagnostic_report_match else None
     remediation = list(REMEDIATION)
     residual_risks = list(RESIDUAL_RISKS)
     if blocker_type == "real_runtime_processing_timeout":
@@ -132,6 +134,7 @@ def build_report(
         "test_body_started": "Test Case" in log_text,
         "processing_start_clicked": processing_start_clicked,
         "processing_completed": processing_completed,
+        "diagnostic_report": diagnostic_report,
         "proves_ui_or_provider_behavior": False,
         "not_release_readiness": True,
         "remediation": remediation,
