@@ -18,6 +18,7 @@ real_action_log="$derived_data_path/real-action-app-bundle-smoke.log"
 real_runtime_smoke="${MA_NATIVE_APP_REAL_RUNTIME_SMOKE:-0}"
 real_runtime_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testRealWhisperRuntimeTranscriptReviewFromLaunchedAppBundleWhenExplicitlyEnabled"
 real_runtime_log="$derived_data_path/real-runtime-app-bundle-smoke.log"
+real_runtime_ui_automation_report="$derived_data_path/reports/ui-automation/real-runtime-ui-automation-report.json"
 mvp_full_stack_smoke="${MA_NATIVE_APP_MVP_FULL_STACK_SMOKE:-0}"
 mvp_full_stack_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testMVPFullStackDesignedShellRecordingProcessingTranscriptActionsWhenExplicitlyEnabled"
 mvp_full_stack_log="$derived_data_path/mvp-full-stack-app-bundle-smoke.log"
@@ -145,6 +146,22 @@ is_ui_testing_automation_blocked() {
   local log_path="$1"
 
   grep -Eqi 'LocalAuthentication|System authentication is running|Timed out while enabling automation mode|Failed to initialize for UI testing|Failed to enable Automation Mode' "$log_path"
+}
+
+write_ui_testing_automation_blocker_report() {
+  local smoke_name="$1"
+  local log_path="$2"
+  local report_path="$3"
+  local exit_code="$4"
+  local root_dir
+
+  root_dir="$(cd "$component_dir/../.." && pwd)"
+  python3 "$root_dir/platform/e2e/native_app_bundle_ui_automation_report.py" \
+    --smoke-name "$smoke_name" \
+    --log "$log_path" \
+    --report "$report_path" \
+    --exit-code "$exit_code" \
+    --destination "$destination" >&2 || true
 }
 
 require_env_for_real_runtime_smoke() {
@@ -310,6 +327,7 @@ if [[ "$real_runtime_smoke" == "1" || "$real_runtime_smoke" == "true" || "$real_
   if [[ "$test_status" -ne 0 ]]; then
     echo "native-app real runtime app-bundle XCUITest failed. Captured xcodebuild log: $real_runtime_log" >&2
     if is_ui_testing_automation_blocked "$real_runtime_log"; then
+      write_ui_testing_automation_blocker_report "real runtime" "$real_runtime_log" "$real_runtime_ui_automation_report" "$test_status"
       print_ui_testing_automation_help "real runtime" "$real_runtime_log"
       print_ui_testing_automation_process_diagnostics
       print_ui_testing_automation_log_excerpt
