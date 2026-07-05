@@ -85,6 +85,42 @@ class HarnessValidationTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def security_report_command(
+        self,
+        marker: Path | None = None,
+        overrides: dict[str, object] | None = None,
+        write_report: bool = True,
+    ) -> list[str]:
+        marker_code = ""
+        if marker is not None:
+            marker_code = f"Path({str(marker)!r}).open('a').write('security\\n'); "
+        report_code = ""
+        if write_report:
+            report_code = (
+                "component = json.loads(Path('component.json').read_text(encoding='utf-8')); "
+                "Path('security').mkdir(exist_ok=True); "
+                "report = {"
+                "'component': component['id'], "
+                "'report_schema': 1, "
+                "'release_gate': 'validation-only', "
+                "'sast_static_analysis': True, "
+                "'sca_dependency_review': True, "
+                "'secret_scan': True, "
+                "'forbidden_network_or_install_scan': True, "
+                "'no_auto_downloads': True, "
+                "'external_network_access': False, "
+                "'packages_runtime_or_model': False, "
+                "'findings': []"
+                "}; "
+                f"report.update({repr(overrides or {})}); "
+                "Path('security/security-report.json').write_text(json.dumps(report), encoding='utf-8'); "
+            )
+        return [
+            sys.executable,
+            "-c",
+            "import json; from pathlib import Path; " + report_code + marker_code,
+        ]
+
     def test_framework_manifest_and_policy_are_valid(self) -> None:
         self.assertEqual([], validate_manifest(ROOT, "current"))
         self.assertEqual([], validate_agent_policy(ROOT))
@@ -718,11 +754,7 @@ class HarnessValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
             marker = fixture / "security-current.log"
-            command = [
-                sys.executable,
-                "-c",
-                f"from pathlib import Path; Path({str(marker)!r}).open('a').write('security\\n')",
-            ]
+            command = self.security_report_command(marker)
             manifest_path = fixture / "harness/project-manifest.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             for component in manifest["components"]:
@@ -740,6 +772,66 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
             self.assertEqual(marker.read_text(encoding="utf-8"), "security\nsecurity\n")
             self.assertIn("security-check passed.", result.stdout)
+
+    def test_security_check_fails_when_production_component_security_report_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            marker = fixture / "security-current-no-report.log"
+            command = self.security_report_command(marker, write_report=False)
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["security"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/security-check.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "security\nsecurity\n")
+            self.assertIn("missing security report for production component", output)
+            self.assertNotIn("security-check passed.", result.stdout)
+
+    def test_security_check_fails_when_production_component_security_report_has_unsafe_values(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            command = self.security_report_command(
+                overrides={
+                    "sast_static_analysis": False,
+                    "sca_dependency_review": False,
+                    "external_network_access": True,
+                    "packages_runtime_or_model": True,
+                    "findings": ["unreviewed issue"],
+                }
+            )
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["security"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/security-check.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must set sast_static_analysis=True", output)
+            self.assertIn("must set sca_dependency_review=True", output)
+            self.assertIn("must set external_network_access=False", output)
+            self.assertIn("must set packages_runtime_or_model=False", output)
+            self.assertIn("must report zero findings", output)
+            self.assertNotIn("security-check passed.", result.stdout)
 
     def test_supply_chain_current_fails_when_registered_sbom_gate_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

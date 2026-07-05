@@ -12,4 +12,5 @@ __pycache__/
 !.env.prod.example
 
 platform/*/build/
+platform/*/security/
 *.log
