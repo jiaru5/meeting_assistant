@@ -16,6 +16,7 @@ is_truthy() {
 }
 
 real_runtime_bridge_smoke="${MA_NATIVE_REAL_RUNTIME_BRIDGE_SMOKE:-0}"
+vs_ma21_hardening_bridge_smoke="${MA_NATIVE_VSMA21_HARDENING_BRIDGE_SMOKE:-0}"
 if is_truthy "$real_runtime_bridge_smoke"; then
   for name in \
     MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME \
@@ -76,6 +77,7 @@ required_phrases = (
     "opt-in real native capture smoke boundary",
     "opt-in real native capture app-bundle smoke boundary",
     "VS-MA-16 native processing state consumer boundary",
+    "VS-MA-21 opt-in native hardening bridge smoke boundary",
     "VS-MA-17 read-only transcript review boundary",
     "read-only workspace transcript loading boundary",
     "VS-MA-18/VS-MA-19 deterministic transcript action consumer boundary",
@@ -93,6 +95,7 @@ required_phrases = (
     "MA_NATIVE_PROCESSING_CLIENT=process",
     "MA_NATIVE_TRANSCRIPT_ACTION_CLIENT=process",
     "MA_NATIVE_REAL_RUNTIME_BRIDGE_SMOKE=1",
+    "MA_NATIVE_VSMA21_HARDENING_BRIDGE_SMOKE=1",
     "AppleScreenCaptureKitNativeCaptureAdapter.swift",
     "MA_NATIVE_CAPTURE_SMOKE=1",
     "MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1",
@@ -200,6 +203,10 @@ SWIFT
 
 if is_truthy "$real_runtime_bridge_smoke"; then
   echo "native-app real runtime bridge smoke passed."
+fi
+
+if is_truthy "$vs_ma21_hardening_bridge_smoke"; then
+  echo "native-app VS-MA-21 hardening bridge smoke passed."
 fi
 
 case "${MA_NATIVE_APP_RUN_XCUITEST:-0}" in

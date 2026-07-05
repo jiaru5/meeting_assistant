@@ -797,6 +797,59 @@ struct ProcessingStateViewModelTests {
     }
 
     @Test
+    func processRunnerWithVSMA21HardeningFixtureRetriesPathConflictPreservingCaptureArtifactWhenEnabled() async throws {
+        guard Self.vsMA21HardeningBridgeSmokeEnabled() else {
+            return
+        }
+
+        let fixture = try VSMA21ProcessingHardeningBridgeFixture()
+        let sessionID = try fixture.createNativeRecordingSession()
+        let originalMixedAudioChecksum = try fixture.mixedAudioChecksum(sessionID: sessionID)
+        let viewModel = ProcessingStateViewModel(
+            commandClient: fixture.runner,
+            readinessState: readyReadinessState(),
+            defaultSessionID: sessionID
+        )
+
+        await viewModel.start(sessionID: sessionID)
+
+        #expect(viewModel.state.phase == .failed)
+        #expect(viewModel.state.statusText == "Processing failed.")
+        #expect(viewModel.state.errorCode?.rawValue == "path_conflict")
+        #expect(viewModel.state.errorMessage == "Processing path conflict.")
+        #expect(viewModel.canRetry)
+        #expect(try fixture.mixedAudioChecksum(sessionID: sessionID) == originalMixedAudioChecksum)
+        #expect(try fixture.transcriptExists(sessionID: sessionID) == false)
+
+        await viewModel.retry()
+
+        #expect(viewModel.state.phase == .completed)
+        #expect(viewModel.state.statusText == "Processing complete.")
+        #expect(viewModel.state.sessionID == sessionID)
+        #expect(viewModel.state.transcriptID == "transcript-process-fixture")
+        #expect(viewModel.state.transcriptArtifactID == "artifact-process-transcript")
+        #expect(viewModel.state.segmentCount == 2)
+        #expect(viewModel.state.labelStatus == "labeled")
+        #expect(viewModel.state.errorMessage == nil)
+        #expect(try fixture.mixedAudioChecksum(sessionID: sessionID) == originalMixedAudioChecksum)
+        #expect(try fixture.artifactTypes(sessionID: sessionID) == [
+            "mixed_audio",
+            "transcript_text",
+            "speaker_labels",
+        ])
+        #expect(try fixture.recordedInvocationLines() == [
+            "generate_transcript --session-id \(sessionID)",
+            "generate_transcript --session-id \(sessionID)",
+            "generate_speaker_labels --session-id \(sessionID) --transcript-id transcript-process-fixture --allow-transcript-only-fallback true",
+        ])
+
+        print(
+            "VS-MA-21 native-app hardening bridge marker [non-contract]: "
+                + "ProcessingCommandProcessRunner path_conflict retry preserved original mixed_audio checksum"
+        )
+    }
+
+    @Test
     func processRunnerDrivenViewModelShowsFailureAndRetryFromStdoutJSON() async throws {
         let fixture = try ProcessingProcessRunnerFixture(script: .structuredTranscriptFailure)
         let viewModel = ProcessingStateViewModel(
@@ -826,6 +879,17 @@ struct ProcessingStateViewModelTests {
 
     private static func realRuntimeBridgeSmokeEnabled() -> Bool {
         switch ProcessInfo.processInfo.environment["MA_NATIVE_REAL_RUNTIME_BRIDGE_SMOKE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() {
+        case "1", "true", "yes":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func vsMA21HardeningBridgeSmokeEnabled() -> Bool {
+        switch ProcessInfo.processInfo.environment["MA_NATIVE_VSMA21_HARDENING_BRIDGE_SMOKE"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased() {
         case "1", "true", "yes":
@@ -1187,6 +1251,187 @@ private final class RealProcessingCLIWorkspaceFixture {
         let runtimePath: String
         let modelPath: String
         let smokeAudioURL: URL
+    }
+}
+
+private final class VSMA21ProcessingHardeningBridgeFixture {
+    let rootURL: URL
+    let workspaceURL: URL
+    let runner: ProcessingCommandProcessRunner
+
+    private let invocationsURL: URL
+
+    init() throws {
+        rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meeting-assistant-vsma21-bridge-\(UUID().uuidString)", isDirectory: true)
+        workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        invocationsURL = rootURL.appendingPathComponent("invocations.txt")
+
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+        let scriptURL = try Self.repositoryRootURL()
+            .appendingPathComponent("platform/native-app/test-fixtures/processing-command-fixture.sh")
+        guard FileManager.default.isExecutableFile(atPath: scriptURL.path) else {
+            throw VSMA21ProcessingHardeningBridgeFixtureError.fixtureScriptMissing(scriptURL.path)
+        }
+
+        runner = ProcessingCommandProcessRunner(
+            executablePath: scriptURL.path,
+            environment: [
+                "MEETING_ASSISTANT_WORKSPACE": workspaceURL.path,
+                "MA_NATIVE_PROCESSING_FIXTURE_MODE": "path-conflict-then-success",
+                "MA_NATIVE_PROCESSING_FIXTURE_INVOCATIONS": invocationsURL.path,
+            ]
+        )
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: rootURL)
+    }
+
+    func createNativeRecordingSession() throws -> String {
+        let sessionID = "session-vs-ma-21-hardening-bridge"
+        let sessionRootURL = self.sessionRootURL(sessionID: sessionID)
+        let artifactsURL = sessionRootURL.appendingPathComponent("artifacts", isDirectory: true)
+        try FileManager.default.createDirectory(at: artifactsURL, withIntermediateDirectories: true)
+
+        let mixedAudioURL = artifactsURL.appendingPathComponent("mixed_audio.wav")
+        try Self.writeFixtureWAV(to: mixedAudioURL)
+        let checksum = try Self.sha256(mixedAudioURL)
+        let now = "2026-07-06T00:00:00Z"
+        try writeJSON(
+            [
+                "id": sessionID,
+                "title": "VS-MA-21 native hardening bridge fixture",
+                "source_type": "native_recording",
+                "status": "recorded",
+                "started_at": now,
+                "workspace_dir": sessionRootURL.path,
+                "created_at": now,
+                "updated_at": now,
+                "artifacts": [
+                    [
+                        "id": "artifact-vsma21-hardening-mixed",
+                        "session_id": sessionID,
+                        "artifact_type": "mixed_audio",
+                        "path": "artifacts/mixed_audio.wav",
+                        "format": "wav",
+                        "capture_status": "available",
+                        "checksum": checksum,
+                        "created_at": now,
+                    ],
+                ],
+            ],
+            to: sessionRootURL.appendingPathComponent("session.json")
+        )
+        return sessionID
+    }
+
+    func mixedAudioChecksum(sessionID: String) throws -> String {
+        try Self.sha256(
+            sessionRootURL(sessionID: sessionID)
+                .appendingPathComponent("artifacts/mixed_audio.wav")
+        )
+    }
+
+    func transcriptExists(sessionID: String) throws -> Bool {
+        FileManager.default.fileExists(
+            atPath: sessionRootURL(sessionID: sessionID)
+                .appendingPathComponent("artifacts/transcript.json")
+                .path
+        )
+    }
+
+    func artifactTypes(sessionID: String) throws -> [String] {
+        let data = try Data(contentsOf: sessionRootURL(sessionID: sessionID).appendingPathComponent("session.json"))
+        let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let artifacts = try #require(payload?["artifacts"] as? [[String: Any]])
+        return artifacts.compactMap { $0["artifact_type"] as? String }
+    }
+
+    func recordedInvocationLines() throws -> [String] {
+        try String(contentsOf: invocationsURL, encoding: .utf8)
+            .split(separator: "\n")
+            .map(String.init)
+    }
+
+    private func sessionRootURL(sessionID: String) -> URL {
+        workspaceURL
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+    }
+
+    private func writeJSON(_ payload: Any, to url: URL) throws {
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: url)
+    }
+
+    private static func repositoryRootURL(filePath: String = #filePath) throws -> URL {
+        if let configured = ProcessInfo.processInfo.environment["MEETING_ASSISTANT_REPO_ROOT"],
+           !configured.isEmpty {
+            return URL(fileURLWithPath: configured, isDirectory: true)
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+        }
+
+        var candidate = URL(fileURLWithPath: filePath, isDirectory: false)
+            .deletingLastPathComponent()
+            .standardizedFileURL
+        while candidate.path != "/" {
+            let marker = candidate.appendingPathComponent(
+                "platform/native-app/test-fixtures/processing-command-fixture.sh",
+                isDirectory: false
+            )
+            if FileManager.default.fileExists(atPath: marker.path) {
+                return candidate
+            }
+            candidate.deleteLastPathComponent()
+        }
+        throw VSMA21ProcessingHardeningBridgeFixtureError.repositoryRootNotFound
+    }
+
+    private static func writeFixtureWAV(to url: URL) throws {
+        var pcm = Data()
+        for index in 0..<1_600 {
+            let sample = Int16(((index % 64) - 32) * 128)
+            pcm.appendLittleEndian(sample)
+        }
+
+        var wav = Data()
+        wav.appendASCII("RIFF")
+        wav.appendLittleEndian(UInt32(36 + pcm.count))
+        wav.appendASCII("WAVE")
+        wav.appendASCII("fmt ")
+        wav.appendLittleEndian(UInt32(16))
+        wav.appendLittleEndian(UInt16(1))
+        wav.appendLittleEndian(UInt16(1))
+        wav.appendLittleEndian(UInt32(8_000))
+        wav.appendLittleEndian(UInt32(8_000 * 2))
+        wav.appendLittleEndian(UInt16(2))
+        wav.appendLittleEndian(UInt16(16))
+        wav.appendASCII("data")
+        wav.appendLittleEndian(UInt32(pcm.count))
+        wav.append(pcm)
+        try wav.write(to: url)
+    }
+
+    private static func sha256(_ url: URL) throws -> String {
+        let digest = SHA256.hash(data: try Data(contentsOf: url))
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "sha256:\(hex)"
+    }
+}
+
+private enum VSMA21ProcessingHardeningBridgeFixtureError: Error, CustomStringConvertible {
+    case fixtureScriptMissing(String)
+    case repositoryRootNotFound
+
+    var description: String {
+        switch self {
+        case .fixtureScriptMissing(let path):
+            return "VS-MA-21 hardening fixture script is missing or not executable: \(path)"
+        case .repositoryRootNotFound:
+            return "repository root containing platform/native-app/test-fixtures was not found"
+        }
     }
 }
 

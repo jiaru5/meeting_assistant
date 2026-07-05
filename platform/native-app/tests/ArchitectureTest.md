@@ -67,6 +67,12 @@ VS-MA-16 native processing state consumer boundary:
 6. The app-bundle process-runner smoke may use the native-owned `test-fixtures/processing-command-fixture.sh` for controlled success, transcript-only degradation and structured failure cases. A separate explicit real-processing smoke may point `MEETING_ASSISTANT_CLI_PATH` at the provider-owned `platform/e2e/ma-cli-local.sh` wrapper; it must not replace provider behavior with native-owned JSON fixtures.
 7. It must not read `processing-cli` provider internals, add command fields, add `--format`, mutate artifacts directly, implement real capture, call external GPT/Qwen/API, automatically download dependencies, use real pasteboard, show a real file picker or delete files directly.
 
+VS-MA-21 opt-in native hardening bridge smoke boundary:
+
+1. `MA_NATIVE_VSMA21_HARDENING_BRIDGE_SMOKE=1` may run a Swift Testing-only bridge smoke against the native-owned `test-fixtures/processing-command-fixture.sh` in `path-conflict-then-success` mode.
+2. The smoke may verify `ProcessingStateViewModel` retry behavior, `ProcessingCommandProcessRunner` stdout JSON consumption, `path_conflict` display, generated transcript/speaker-label artifact registration and original `mixed_audio` checksum preservation.
+3. This smoke is not app-bundle UI evidence, not real ScreenCaptureKit concurrency evidence, not a release bundle proof and not release readiness. The app-bundle XCUITest remains the evidence path for launched `.app` UI behavior when macOS Automation Mode is available.
+
 VS-MA-17 read-only transcript review boundary:
 
 1. This component may implement a read-only transcript review consumer for deterministic UI/state verification.

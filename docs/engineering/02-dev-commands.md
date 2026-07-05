@@ -118,6 +118,8 @@ VS-MA-22 的 all-target sidecar portability 输入由 `platform/e2e/release-side
 
 显式设置 `MA_NATIVE_REAL_RUNTIME_BRIDGE_SMOKE=1 ./platform/native-app/scripts/test.sh` 时，快速组件测试会追加 VS-MA-22 native real runtime bridge smoke：`ProcessingStateViewModel` 通过 `ProcessingCommandProcessRunner` 调用 provider-owned CLI 和用户显式配置的 `whisper.cpp` runtime/model/audio，并用 `TranscriptReviewWorkspaceLoader` 读回真实 transcript artifact。该 smoke 不启动 `.app`，不能替代 app-bundle UI、真实 ScreenCaptureKit、真实 Save Panel、release bundle 或 release readiness 证据；脚本必须先检查 `MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME`、`MEETING_ASSISTANT_TRANSCRIPTION_MODEL` 和 `MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO`，且不得自动下载、复制或打包 runtime/model/audio。
 
+显式设置 `MA_NATIVE_VSMA21_HARDENING_BRIDGE_SMOKE=1 ./platform/native-app/scripts/test.sh` 时，快速组件测试会追加 VS-MA-21 native hardening bridge smoke：`ProcessingStateViewModel` 通过 `ProcessingCommandProcessRunner` 调用 native-owned `processing-command-fixture.sh` 的 `path-conflict-then-success` 模式，验证首次 `path_conflict` 后保留 retry、retry 成功生成 transcript/speaker-label 派生产物、且原始 `mixed_audio` checksum 不变。该 smoke 不启动 `.app`，不能替代 VS-MA-21 app-bundle UI hardening smoke、真实 ScreenCaptureKit/native UI release-scope 并发、真实 capture -> transcript/export/delete 同链路、release bundle 或 release readiness 证据。
+
 未来 dependency-check 命令必须只检查允许来源、人工安装状态、模型/runtime 路径、workspace 可写性和 macOS 权限状态，不得自动下载模型、二进制或驱动。
 
 ## 本机 Whisper Runtime Smoke 环境

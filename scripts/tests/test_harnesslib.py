@@ -809,9 +809,14 @@ class HarnessValidationTests(unittest.TestCase):
 
     def test_vs_ma_21_app_bundle_hardening_smoke_is_documented_and_explicit(self) -> None:
         script = (ROOT / "platform/native-app/scripts/test-app-bundle.sh").read_text(encoding="utf-8")
+        fast_gate_script = (ROOT / "platform/native-app/scripts/test.sh").read_text(encoding="utf-8")
         app_bundle_tests = (
             ROOT
             / "platform/native-app/UITests/MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests.swift"
+        ).read_text(encoding="utf-8")
+        native_tests = (
+            ROOT
+            / "platform/native-app/tests/MeetingAssistantNativeTests/ProcessingStateViewModelTests.swift"
         ).read_text(encoding="utf-8")
         dev_commands = (ROOT / "docs/engineering/02-dev-commands.md").read_text(encoding="utf-8")
 
@@ -828,6 +833,14 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("mixedAudioChecksum", app_bundle_tests)
         self.assertIn("MA_NATIVE_APP_VSMA21_HARDENING_SMOKE=1", dev_commands)
         self.assertIn("VS-MA-21 app-bundle hardening smoke", dev_commands)
+        self.assertIn("MA_NATIVE_VSMA21_HARDENING_BRIDGE_SMOKE", fast_gate_script)
+        self.assertIn("native-app VS-MA-21 hardening bridge smoke passed.", fast_gate_script)
+        self.assertIn(
+            "processRunnerWithVSMA21HardeningFixtureRetriesPathConflictPreservingCaptureArtifactWhenEnabled",
+            native_tests,
+        )
+        self.assertIn("VS-MA-21 native-app hardening bridge marker", native_tests)
+        self.assertIn("MA_NATIVE_VSMA21_HARDENING_BRIDGE_SMOKE=1", dev_commands)
 
     def test_release_preflight_registers_release_bundle_gate_before_supply_chain(self) -> None:
         release_preflight = (ROOT / "scripts/release-preflight.sh").read_text(encoding="utf-8")
