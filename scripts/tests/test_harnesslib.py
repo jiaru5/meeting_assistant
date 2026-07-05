@@ -450,6 +450,32 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("release-scope-provider-hardening", e2e_readme)
         self.assertIn("not_release_readiness=true", e2e_readme)
 
+    def test_release_preflight_registers_release_scope_security_supply_chain_gate(self) -> None:
+        release_preflight = (ROOT / "scripts/release-preflight.sh").read_text(encoding="utf-8")
+        wrapper = (ROOT / "platform/e2e/release-security-supply-chain-smoke.sh").read_text(encoding="utf-8")
+        dev_commands = (ROOT / "docs/engineering/02-dev-commands.md").read_text(encoding="utf-8")
+        e2e_readme = (ROOT / "platform/e2e/README.md").read_text(encoding="utf-8")
+
+        self.assertIn("./platform/e2e/release-capture-processing-hardening-smoke.sh", release_preflight)
+        self.assertIn("./platform/e2e/release-security-supply-chain-smoke.sh", release_preflight)
+        self.assertIn("./scripts/test-e2e-full-stack.sh", release_preflight)
+        self.assertLess(
+            release_preflight.index("./platform/e2e/release-capture-processing-hardening-smoke.sh"),
+            release_preflight.index("./platform/e2e/release-security-supply-chain-smoke.sh"),
+        )
+        self.assertLess(
+            release_preflight.index("./platform/e2e/release-security-supply-chain-smoke.sh"),
+            release_preflight.index("./scripts/test-e2e-full-stack.sh"),
+        )
+        self.assertIn("platform/e2e/release_security_supply_chain_report.py", wrapper)
+        self.assertIn("./scripts/security-check.sh", wrapper)
+        self.assertIn("./scripts/supply-chain-check.sh current", wrapper)
+        self.assertIn("./platform/processing-cli/scripts/release-provider-smoke.sh", wrapper)
+        self.assertIn("preserving release-provider-smoke exit code", wrapper)
+        self.assertIn("release-scope-security-supply-chain", dev_commands)
+        self.assertIn("release-scope-security-supply-chain", e2e_readme)
+        self.assertIn("not_release_readiness=true", e2e_readme)
+
     def test_product_validation_current_phase_rejects_missing_status(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)

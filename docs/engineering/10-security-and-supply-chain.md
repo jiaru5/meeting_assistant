@@ -46,6 +46,8 @@ Meeting Assistant 当前 native app 和 processing CLI 的 `Dockerfile` 是 rele
 
 Processing CLI release provider smoke 是 `VS-MA-22` 的 provider 安全与供应链证据，不是 `VS-MA-23` release candidate 放行证据。该 smoke 必须对模型 sidecar 和本机共享资产边界 fail closed：模型 sha256 配置或 sidecar 不匹配实际模型时失败，JSON provenance sidecar 不可解析时失败，hash/license/provenance sidecar 解析后不位于 `~/.local/share/ai-models/whisper.cpp/` 模型根目录时失败；runtime、模型和 mixed-language audio fixture 不在 `~/.local` 允许根目录或落在仓库、`Downloads`、`Desktop`、`Library/Caches` 等禁止根目录时也必须失败；English-only `.en` 模型不得作为 mixed-language evidence。该规则只约束当前本机 release-provider evidence，不等同于完整 SCA、签名、公证、release bundle 或所有开发机 provenance 覆盖。
 
+`platform/e2e/release-security-supply-chain-smoke.sh` 是 `VS-MA-22` 的 release-scope evidence 聚合入口，不是 `VS-MA-23` release candidate 放行证据。该 wrapper 必须运行仓库级 `security-check`、`supply-chain-check current` 和 processing release-provider smoke，并由 `release_security_supply_chain_report.py` 校验 production component security/supply-chain reports 与 release-provider marker 后输出 `release_gate=release-scope-security-supply-chain` report。该 report 必须继续声明 `not_release_readiness=true`，因为当前仍未生成签名/公证分发包、SLSA/release provenance attestation，也不能证明所有开发机 runtime/model/audio sidecar、真实 ScreenCaptureKit 或发布范围 `PV-MA-*` 全部 covered。
+
 ## Meeting Assistant MVP 依赖策略
 
 `meeting_assistant` Phase 1 采用允许来源 + 人工安装策略：

@@ -9,6 +9,7 @@
 - `./scripts/product-validation-check.py release`: fail，剩余原因是 `PV-MA-002`、`PV-MA-003`、`PV-MA-006` 到 `PV-MA-012` 仍非 `covered`
 - 2026-07-05 已补 `platform/e2e/release-native-capture-artifact-smoke.sh`，本机 `MA_NATIVE_CAPTURE_ARTIFACT_SMOKE_ATTEMPTS=1 MA_NATIVE_CAPTURE_SMOKE_DURATION_SECONDS=2 ./platform/e2e/release-native-capture-artifact-smoke.sh` 通过并生成 `release_gate=release-scope-native-capture` report；这让 `VS-MA-14/15` 可按阶段退出口径收口，但 `PV-MA-002/003` 仍保持 `partial`
 - 2026-07-05 已补 `platform/e2e/release-capture-processing-hardening-smoke.sh`，本机通过并生成 `release_gate=release-scope-provider-hardening` / `not_release_readiness=true` report；这让 `VS-MA-21` provider-side 异常、重试、并发、脱敏和 checksum preservation 有了结构化 release-scope gate，但 `PV-MA-009` 仍保持 `partial`
+- 2026-07-05 已补 `platform/e2e/release-security-supply-chain-smoke.sh`，本机通过并生成 `release_gate=release-scope-security-supply-chain` / `not_release_readiness=true` report；这让 `VS-MA-22` security/supply-chain/provider sidecar evidence 有了结构化 release-scope gate，但不改变 `PV-MA-*` release blocker 状态
 - Spec Sync 分类：本计划文档为 `no-product-impact`；每个实现项默认按既有事实源 `spec-covered` 执行，只有改变产品、API、artifact、UI 或 release 范围时才升级为 `spec-change`
 
 ## 执行顺序

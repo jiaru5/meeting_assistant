@@ -86,6 +86,8 @@ full-stack E2E 可在 manifest 中声明可选 `pre_start_command`，用于准�
 
 发布候选路径还使用 `platform/e2e/release-capture-processing-hardening-smoke.sh` 作为 VS-MA-21 provider hardening gate。该 wrapper 运行既有 `capture-processing-smoke.sh`，再由 `platform/e2e/capture_processing_hardening_report.py` 生成结构化 report，声明 `release_gate=release-scope-provider-hardening`，并校验 no-auto-download、path/lock/temp/checksum rollback、provider failure redaction、retry success 和 capture checksum preservation marker 都存在。它同样排在 `product-validation-check.py release` 之后；当前 PV 仍为 `partial` 时不会作为发布放行证据。即使该步骤通过，它也仍保持 `not_release_readiness=true`，不证明真实 ScreenCaptureKit 并发、native UI release-scope 并发、真实 release bundle 或 VS-MA-23 release readiness。
 
+发布候选路径还使用 `platform/e2e/release-security-supply-chain-smoke.sh` 作为 VS-MA-22 security/supply-chain evidence gate。该 wrapper 运行 `./scripts/security-check.sh`、`./scripts/supply-chain-check.sh current` 和 `platform/processing-cli/scripts/release-provider-smoke.sh`，再由 `platform/e2e/release_security_supply_chain_report.py --release-scope` 聚合 component security report、supply-chain report 和 release-provider marker，声明 `release_gate=release-scope-security-supply-chain`。它同样排在 `product-validation-check.py release` 之后；当前 PV 仍为 `partial` 时不会作为发布放行证据。即使该步骤通过，它也仍保持 `not_release_readiness=true`，不证明签名/公证分发包、SLSA/release provenance attestation、所有机器 runtime/model sidecar、真实 ScreenCaptureKit 或 VS-MA-23 release readiness。
+
 已注册的非业务 skeleton 只能承载未来原生录制控制面、本地 processing、dependency-check、artifact contract、transcription adapter、speaker-label fallback 和 export 命令边界。
 
 注册组件必须提供 argv 形式的标准命令：
