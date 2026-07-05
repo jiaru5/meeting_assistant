@@ -43,7 +43,7 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
 
         assertPermissionDependencyLocators()
         SwiftUIViewSourceContract.assertPermissionDependencyViewUsesAccessibleStates()
-        SwiftUIViewSourceContract.assertAppBundleReleaseHooksRemainDisabled()
+        SwiftUIViewSourceContract.assertAppBundleProductionDefaultsUseCommandClients()
     }
 
     func testRecordingReadinessBlockedIsHostedAndDoesNotStart() async {
@@ -1157,7 +1157,7 @@ private enum SwiftUIViewSourceContract {
         )
     }
 
-    static func assertAppBundleReleaseHooksRemainDisabled(
+    static func assertAppBundleProductionDefaultsUseCommandClients(
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
@@ -1175,6 +1175,16 @@ private enum SwiftUIViewSourceContract {
                 "#else",
                 "return false",
                 "#endif",
+                "case \"fake\":",
+                "return isRecordingClientTestHookAllowed(environment) ? .fake : defaultRecordingClientMode(environment)",
+                "case \"controlled\":",
+                "workspaceURL != nil",
+                "return defaultRecordingClientMode(environment)",
+                "return .apple" + "Screen" + "Capture" + "Kit",
+                "isNativeAppXCTestEnvironment(environment) ? .fake : .apple" + "Screen" + "Capture" + "Kit",
+                "case .apple" + "Screen" + "Capture" + "Kit:",
+                "MacOSNativeCapturePermissionChecker()",
+                "Apple" + "Screen" + "Capture" + "Kit" + "NativeCaptureAdapter()",
                 "case .some(\"fake\"):",
                 "case .some(\"process\"):",
                 "return isProcessClientTestHookAllowed(environment) ? .fake : .process",
@@ -1187,6 +1197,12 @@ private enum SwiftUIViewSourceContract {
             line: line
         )
         XCTAssertFalse(
+            source.contains("guard let rawValue,\n              workspaceURL != nil,\n              isRecordingClientTestHookAllowed(environment) else {\n            return .fake"),
+            "Production recording client must not fall back to fake only because the Debug/XCTest recording hook is absent.",
+            file: file,
+            line: line
+        )
+        XCTAssertFalse(
             source.contains("guard rawValue == \"process\", isProcessClientTestHookAllowed(environment)"),
             "Processing command client must not require a Debug/XCTest-only hook to use the process runner by default.",
             file: file,
@@ -1195,12 +1211,6 @@ private enum SwiftUIViewSourceContract {
         XCTAssertFalse(
             source.contains("guard rawValue == \"process\", isTranscriptActionClientTestHookAllowed(environment)"),
             "Transcript action client must not require a Debug/XCTest-only hook to use the process runner by default.",
-            file: file,
-            line: line
-        )
-        XCTAssertFalse(
-            source.contains("MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit"),
-            "Release or env-driven real recording hook must not be introduced.",
             file: file,
             line: line
         )

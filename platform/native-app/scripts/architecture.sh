@@ -289,10 +289,20 @@ if grep -R --include '*.swift' -n -E 'AppleScreenCaptureKitNativeCaptureAdapter|
 fi
 
 if ! grep -q 'case "apple_screencapturekit", "apple-screencapturekit"' App/MeetingAssistantNativeApp.swift ||
+   ! grep -q 'case "fake":' App/MeetingAssistantNativeApp.swift ||
    ! grep -q 'isRealNativeCaptureSmokeEnabled(environment)' App/MeetingAssistantNativeApp.swift ||
+   ! grep -q 'defaultRecordingClientMode(environment)' App/MeetingAssistantNativeApp.swift ||
+   ! grep -q 'isNativeAppXCTestEnvironment(environment) ? .fake : .appleScreenCaptureKit' App/MeetingAssistantNativeApp.swift ||
+   ! grep -q 'return isRecordingClientTestHookAllowed(environment) ? .fake : defaultRecordingClientMode(environment)' App/MeetingAssistantNativeApp.swift ||
    ! grep -q 'AppleScreenCaptureKitNativeCaptureAdapter()' App/MeetingAssistantNativeApp.swift ||
    ! grep -q 'MacOSNativeCapturePermissionChecker()' App/MeetingAssistantNativeApp.swift; then
-  echo "native-app architecture check failed: Apple ScreenCaptureKit app-bundle hook must stay explicit, permission-checked, and smoke-gated." >&2
+  echo "native-app architecture check failed: production recording default must use the Apple adapter while XCTest hooks stay explicit, permission-checked, and smoke-gated." >&2
+  exit 1
+fi
+
+if grep -q 'guard let rawValue,' App/MeetingAssistantNativeApp.swift &&
+   grep -q 'isRecordingClientTestHookAllowed(environment) else' App/MeetingAssistantNativeApp.swift; then
+  echo "native-app architecture check failed: production recording default must not fall back to fake only because the Debug/XCTest recording hook is absent." >&2
   exit 1
 fi
 

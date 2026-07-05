@@ -25,7 +25,7 @@ VS-MA-14/VS-MA-15 controlled native capture artifact registration boundary:
 6. At least one available media artifact may return `ok=true status=recorded`; no available media must return `ok=false code=capture_failed` and persist session `status=failed`.
 7. Repeated stop must return the existing final artifact registry without duplicating entries or re-running the adapter.
 8. It may expose additive recording artifact locators under `ma.recording.artifact.<artifact_type>.status` and `.degradation`, while preserving existing `ma.recording.*` locators and phase/status strings.
-9. The app bundle must default to `FakeRecordingCommandClient`; only Debug/XCTest-only test hooks may inject `NativeRecordingCommandClient` with `MA_NATIVE_RECORDING_CLIENT=controlled` or `MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit` plus `MA_NATIVE_RECORDING_WORKSPACE` or `MEETING_ASSISTANT_WORKSPACE`; Release builds must ignore these env hooks and fall back to fake.
+9. Non-XCTest app runtime must default to `NativeRecordingCommandClient` with `MacOSNativeCapturePermissionChecker` and `AppleScreenCaptureKitNativeCaptureAdapter`; Debug/XCTest may default to `FakeRecordingCommandClient`, and only Debug/XCTest-only test hooks may inject controlled recording with `MA_NATIVE_RECORDING_CLIENT=controlled` plus `MA_NATIVE_RECORDING_WORKSPACE` or `MEETING_ASSISTANT_WORKSPACE`. A Debug/XCTest `MA_NATIVE_RECORDING_CLIENT=fake` or controlled hook must not downgrade non-XCTest runtime to fake.
 10. It must not invoke processing providers, native-to-processing commands, Apple capture frameworks outside `AppleScreenCaptureKitNativeCaptureAdapter.swift`, CoreAudio, OBS, BlackHole, FFmpeg auxiliary capture, external model APIs, network APIs, downloads, real pasteboard, real file pickers or direct delete behavior.
 
 Apple ScreenCaptureKit native capture adapter exception:
@@ -37,7 +37,7 @@ Apple ScreenCaptureKit native capture adapter exception:
 5. If no available combined media file exists at stop, the adapter must fail closed through existing `capture_failed` semantics; it must not invent a successful empty recording.
 6. The adapter may expose only code-level identity and capability summary such as `apple_screencapturekit`, supported screen target, combined-file support and no separate audio artifacts; this is not a command/schema/UI contract.
 7. The adapter must not call OBS, BlackHole, FFmpeg auxiliary capture, helper tools, `processing-cli`, processing commands, external APIs, network APIs, automatic downloads, real pasteboard, real file pickers or direct delete behavior.
-8. The app bundle must not enable this real adapter from a Release env hook. The only app-bundle real adapter path is the Debug/XCTest-only, explicitly opt-in combination `MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit`, `MA_NATIVE_CAPTURE_SMOKE=1`, `MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1` and a writable recording workspace; otherwise the app bundle must fall back to fake.
+8. Non-XCTest app runtime may use this adapter as the default recording client. The Debug/XCTest app-bundle real adapter path remains the explicitly opt-in combination `MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit`, `MA_NATIVE_CAPTURE_SMOKE=1`, `MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1` and a writable recording workspace; otherwise XCTest fixtures must fall back to fake.
 
 opt-in real native capture smoke boundary:
 
@@ -51,10 +51,10 @@ opt-in real native capture smoke boundary:
 opt-in real native capture app-bundle smoke boundary:
 
 1. `AppBundleLocatorSmokeTests` may drive the designed native shell Start/Stop buttons against `AppleScreenCaptureKitNativeCaptureAdapter` only when the test process is explicitly launched with `MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1`.
-2. The app bundle may select `MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit` only in Debug/XCTest and only when `MA_NATIVE_CAPTURE_SMOKE=1` plus `MA_NATIVE_RECORDING_WORKSPACE` or `MEETING_ASSISTANT_WORKSPACE` are present; Release builds and default tests must fall back to `FakeRecordingCommandClient`.
+2. The app-bundle smoke may select `MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit` only in Debug/XCTest and only when `MA_NATIVE_CAPTURE_SMOKE=1` plus `MA_NATIVE_RECORDING_WORKSPACE` or `MEETING_ASSISTANT_WORKSPACE` are present; default XCTest fixtures must fall back to `FakeRecordingCommandClient`, while non-XCTest app runtime defaults to the Apple adapter through the production recording client path.
 3. The app-bundle smoke must default to screen-only by setting `MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO=false` and `MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO=false`; it may validate only existing `session.json`, `screen_video`, artifact status and `sha256:` checksum fields.
 4. The app-bundle smoke must not add command fields, error codes, exit codes, artifact types, event schema, UI states, processing invocation, real pasteboard, real file picker, direct delete, network APIs or automatic downloads.
-5. A passing app-bundle real capture smoke remains `partial` evidence and must not be reported as Release readiness or as proof that production defaults use the Apple adapter.
+5. A passing app-bundle real capture smoke remains `partial` evidence and must not be reported as Release readiness, cross-machine TCC/display proof or independent audio proof. Production default Apple adapter selection must be guarded separately by app-root source-contract and architecture checks.
 6. When the opt-in smoke fails with `permission_denied`, the runner may print TCC Screen Recording / Screen & System Audio Recording remediation details, but it must preserve the failing exit status and must not convert the run into a skip or pass.
 
 VS-MA-16 native processing state consumer boundary:
@@ -97,7 +97,7 @@ VS-MA-19A designed native shell boundary:
 2. `DesignedNativeShellViewModel` may project navigation state, status summaries, required artifact rows and processing step labels from existing view model states; it must not add command fields, artifact types, event schema, error codes, exit codes or business states.
 3. `DesignedNativeShellView` may expose stable `ma.shell.*` and `ma.sessionArtifact.*` accessibility identifiers, a navigation model and visual state hierarchy while preserving existing `ma.permissionDependency.*`, `ma.recording.*`, `ma.processing.*`, `ma.transcript.*` and `ma.transcriptAction.*` locators.
 4. The shell must keep primary controls wired to the existing command/helper/adapter clients: `check_dependencies`, `start_native_recording`, `stop_recording`, processing command bridge, `export_transcript` and `delete_session`; it must not create UI-only mock success.
-5. Debug/XCTest fixtures and process-runner hooks remain isolated behind existing `MA_NATIVE_*` test hooks; Release defaults must continue to use the safe default fake command clients unless later product/spec changes approve otherwise. Production copy/export OS clients may be injected through `TranscriptActionOSClients.swift`.
+5. Debug/XCTest fixtures and fake hooks remain isolated behind existing `MA_NATIVE_*` test hooks. Non-XCTest defaults must use the approved production command clients for recording, processing and transcript actions unless later product/spec changes approve otherwise. Production copy/export OS clients may be injected through `TranscriptActionOSClients.swift`.
 6. The shell must not implement uncontrolled capture, processing provider internals, transcription, speaker labeling, network APIs, automatic downloads or direct delete behavior.
 
 VS-MA-20 opt-in native app-bundle MVP full-stack smoke boundary:

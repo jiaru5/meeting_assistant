@@ -859,22 +859,31 @@ private enum NativeRecordingClientMode {
         let rawValue = environment["MA_NATIVE_RECORDING_CLIENT"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        guard let rawValue,
-              workspaceURL != nil,
-              isRecordingClientTestHookAllowed(environment) else {
-            return .fake
+        guard let rawValue else {
+            return defaultRecordingClientMode(environment)
         }
         switch rawValue {
+        case "fake":
+            return isRecordingClientTestHookAllowed(environment) ? .fake : defaultRecordingClientMode(environment)
         case "controlled":
+            guard workspaceURL != nil,
+                  isRecordingClientTestHookAllowed(environment) else {
+                return defaultRecordingClientMode(environment)
+            }
             return .controlled
         case "apple_screencapturekit", "apple-screencapturekit":
-            guard isRealNativeCaptureSmokeEnabled(environment) else {
+            if isNativeAppXCTestEnvironment(environment),
+               (workspaceURL == nil || !isRealNativeCaptureSmokeEnabled(environment)) {
                 return .fake
             }
             return .appleScreenCaptureKit
         default:
-            return .fake
+            return defaultRecordingClientMode(environment)
         }
+    }
+
+    private static func defaultRecordingClientMode(_ environment: [String: String]) -> NativeRecordingClientMode {
+        isNativeAppXCTestEnvironment(environment) ? .fake : .appleScreenCaptureKit
     }
 
     private static func isRecordingClientTestHookAllowed(_ environment: [String: String]) -> Bool {

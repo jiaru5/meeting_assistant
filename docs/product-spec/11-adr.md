@@ -434,3 +434,30 @@ ADR 记录决策背景、取舍和历史原因。当前可执行规则必须维�
 - 继续让 Release/default 使用 fake：拒绝，因为会让 designed shell 的主要操作长期停留在 UI/fixture 层，不能证明 command/helper/adapter 契约触发。
 - 所有 XCTest 默认也使用 process runner：拒绝，因为会破坏 deterministic UI、安全错误和 locator 回归测试，并引入本机依赖耦合。
 - 通过 UI 层直接读写 workspace 或直接删除文件绕过 process runner：拒绝，因为会绕开 `06-api-contracts.md` 和 `07-data-and-events.md` 的命令与文件契约边界。
+
+## ADR-20260705-01: 非 XCTest 原生 App 默认使用 Apple ScreenCaptureKit 录制客户端
+
+状态：Accepted
+
+背景：
+- `PV-MA-002` 和 `PV-MA-003` 的 release blocker 中，production/default 录制策略仍未证明使用 Apple 原生 adapter，会让 VS-MA-14/15 长期停留在 opt-in 或 Debug/XCTest evidence。
+- `VS-MA-14/15` 已建立 `NativeRecordingCommandClient`、`MacOSNativeCapturePermissionChecker`、`AppleScreenCaptureKitNativeCaptureAdapter` 和 artifact registry 的受控证据，但旧 app-root 默认仍把 recording client 回落到 fake。
+- Debug/XCTest 仍需要 deterministic fake/controlled fixture 覆盖 UI 状态、失败、locator 和 app-bundle smoke，不能把真实 ScreenCaptureKit 强制进所有测试启动路径。
+
+决策：
+- 非 XCTest app runtime 的 recording command client 默认使用 `NativeRecordingCommandClient` + `MacOSNativeCapturePermissionChecker` + `AppleScreenCaptureKitNativeCaptureAdapter`。
+- Debug/XCTest 默认继续使用 deterministic fake；`MA_NATIVE_RECORDING_CLIENT=controlled` 只在 Debug/XCTest 且有显式 workspace 时生效。
+- Debug/XCTest 的 app-bundle real capture smoke 仍必须显式设置 `MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit`、`MA_NATIVE_CAPTURE_SMOKE=1`、`MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1` 和 workspace。
+- 非 XCTest runtime 即使设置 fake 或 controlled env，也不得把 production 默认 recording client 降级为 fake/controlled fixture。
+- 该决策不改变 command 字段、artifact type、error code、exit code、workspace schema、no-auto-upload/no-auto-download 或禁用 OBS/BlackHole/FFmpeg 辅助 capture 的边界。
+
+影响：
+- `04-user-journeys-and-ui.md`、`08-implementation-guidance.md` 和 `12-ui-ux-design.md` 记录 production recording command client 默认策略。
+- `MeetingAssistantNativeApp` 的 launch-environment 解析必须把 fake/controlled 作为 Debug/XCTest fixture hook，而不是产品默认。
+- `platform/native-app/tests/ArchitectureTest.md`、`platform/native-app/scripts/architecture.sh` 和 source-contract XCUITest 需要防止生产默认重新退回 fake。
+- `06-product-validation-matrix.md` 可以移除“production/default 录制策略未证明使用 Apple adapter”这一阻塞口径，但 `PV-MA-002/003` 仍保持 `partial`，直到 release-scope gate、TCC/display 可重复性、独立音频策略、真实 native-to-processing 同链路和 release bundle 证据关闭。
+
+备选方案：
+- 继续让非 XCTest app 默认使用 fake：拒绝，因为会让 designed shell 的录制主操作长期停留在 fixture 层，不能证明 native-first capture 策略。
+- 所有 XCTest 默认也使用 Apple ScreenCaptureKit adapter：拒绝，因为会破坏 deterministic UI、安全失败和 locator 回归测试，并引入本机 TCC/display 状态耦合。
+- 允许 OBS/BlackHole/FFmpeg 等辅助 capture 作为自动 fallback：拒绝，因为当前 MVP 事实源明确 native-first，辅助 capture 进入产品路径前必须先走独立 spec-change、ADR 和负向测试。

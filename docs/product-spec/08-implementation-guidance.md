@@ -110,10 +110,11 @@ flowchart LR
 
 ## 原生 App Command Client 选择
 
-1. 非 XCTest app runtime 的 processing command client 默认使用本地 process runner，调用 `generate_transcript` 和 `generate_speaker_labels` 公开命令；Debug/XCTest 可通过隔离 fixture 使用 fake client。
-2. 非 XCTest app runtime 的 transcript action command client 默认使用本地 process runner，调用 `export_transcript` 和 `delete_session` 公开命令；copy/export 的 pasteboard 和保存面板仍位于注入 OS client 后。
-3. 显式 fake command client hook 只能在 Debug/XCTest fixture 中生效；非 XCTest runtime 即使设置 fake env 也不得把产品默认行为降级为 fake。
-4. 该策略不改变 native recording client 的真实 capture hook 边界：真实录制仍只能通过既有 opt-in smoke、权限和验证矩阵关闭条件推进，不能因为 processing/action process runner 默认化而外推录制 PV。
+1. 非 XCTest app runtime 的 recording command client 默认使用 `NativeRecordingCommandClient`、`MacOSNativeCapturePermissionChecker` 和 `AppleScreenCaptureKitNativeCaptureAdapter`；Debug/XCTest 可通过隔离 fixture 使用 fake 或 controlled recording client。
+2. 非 XCTest app runtime 的 processing command client 默认使用本地 process runner，调用 `generate_transcript` 和 `generate_speaker_labels` 公开命令；Debug/XCTest 可通过隔离 fixture 使用 fake client。
+3. 非 XCTest app runtime 的 transcript action command client 默认使用本地 process runner，调用 `export_transcript` 和 `delete_session` 公开命令；copy/export 的 pasteboard 和保存面板仍位于注入 OS client 后。
+4. 显式 fake/controlled command client hook 只能在 Debug/XCTest fixture 中生效；非 XCTest runtime 即使设置 fake 或 controlled env 也不得把产品默认行为降级为 fake。
+5. 该策略只关闭 production/default command-client 策略歧义，不改变 command、artifact、error code、exit code 或验证矩阵 release covered 条件；真实 capture 仍需要 release-scope gate、TCC/display 可重复性、音频产物策略和 native-to-processing 同链路证据。
 
 ## 依赖策略
 
@@ -134,6 +135,7 @@ flowchart LR
 4. 具体 capture API、录制目标支持范围、视频编码、音频捕获方式和权限细节可以在组件骨架阶段以 adapter 方式细化，但不得改变 `07-data-and-events.md` 的 artifact contract。
 5. 录制层必须是可替换 adapter，不得和转写、speaker labeling 或导出强耦合。
 6. 如果系统音频或目标 capture 在 MVP 环境中被技术 spike 证明不可行或不稳定，只能先记录证据，并通过 `10-open-decisions.md`、ADR、主责分卷和验证矩阵更新后，才允许把 OBS/BlackHole/FFmpeg 等辅助路径纳入实现范围。
+7. 非 XCTest 原生 app 默认录制 adapter 是 Apple 官方 ScreenCaptureKit 路径；Debug/XCTest fake、controlled 或 opt-in real smoke 只能用于确定性自动化和局部 evidence，不能静默替代 production 默认路径，也不能单独证明 release readiness。
 
 ## 原生 capture spike 和可测试性
 

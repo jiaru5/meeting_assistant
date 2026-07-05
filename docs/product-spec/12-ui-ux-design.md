@@ -54,11 +54,12 @@ Phase 1 控制面已确认为设计化 Swift/SwiftUI native app shell + local he
 
 1. 生产目标 shell 的主按钮必须调用既有 `06-api-contracts.md` 和 `07-data-and-events.md` 定义的 command/helper/adapter 或其 read model，不得在 UI 层制造与文件契约无关的成功状态。
 2. 生产 app 的 transcript copy/export OS 边界必须位于注入协议后：copy 只在 `export_transcript` 成功返回可复制文本后写入 macOS pasteboard，export 只在用户确认保存目标后把该目标传给 `export_transcript`；Debug/XCTest fixture 继续使用 memory clipboard 和 deterministic target。
-3. 非 XCTest app runtime 的 processing 和 transcript action command client 默认使用本地 process runner，分别调用既有 `generate_transcript` / `generate_speaker_labels` 和 `export_transcript` / `delete_session` 契约；显式 fake client hook 只允许 Debug/XCTest fixture 使用。
-4. Debug/XCTest fixture 可以驱动 deterministic 状态和 fake client，但必须通过 build configuration、environment hook 或 test-only fixture 隔离；Release 默认行为不得依赖这些 hook。
-5. 设计化 shell 的完成不能替代真实 native capture、真实 processing provider、完整 release bundle 或任意 `PV-MA-*` covered 证据；delete 仍必须通过 `delete_session` 契约执行，不得在 UI 层直接删除任意文件。
-6. 每个 shell 区域必须有 XCUITest 可查询的 accessibility identifier，建议使用 `ma.preflight.*`、`ma.recording.*`、`ma.sessionArtifact.*`、`ma.processing.*`、`ma.transcript.*`、`ma.transcriptAction.*` 这类现有语义前缀。
-7. 新视觉层不得删除既有可见状态、accessible name 或稳定 locator；重命名 locator 必须同步测试、验证矩阵和交付说明。
+3. 非 XCTest app runtime 的 recording command client 默认使用 `NativeRecordingCommandClient` + Apple ScreenCaptureKit adapter；Debug/XCTest fake、controlled 或 opt-in real smoke hook 只允许测试路径使用，不能把 production 默认路径降级为 fake。
+4. 非 XCTest app runtime 的 processing 和 transcript action command client 默认使用本地 process runner，分别调用既有 `generate_transcript` / `generate_speaker_labels` 和 `export_transcript` / `delete_session` 契约；显式 fake client hook 只允许 Debug/XCTest fixture 使用。
+5. Debug/XCTest fixture 可以驱动 deterministic 状态和 fake client，但必须通过 build configuration、environment hook 或 test-only fixture 隔离；Release 默认行为不得依赖这些 hook。
+6. 设计化 shell 的完成不能替代真实 native capture、真实 processing provider、完整 release bundle 或任意 `PV-MA-*` covered 证据；delete 仍必须通过 `delete_session` 契约执行，不得在 UI 层直接删除任意文件。
+7. 每个 shell 区域必须有 XCUITest 可查询的 accessibility identifier，建议使用 `ma.preflight.*`、`ma.recording.*`、`ma.sessionArtifact.*`、`ma.processing.*`、`ma.transcript.*`、`ma.transcriptAction.*` 这类现有语义前缀。
+8. 新视觉层不得删除既有可见状态、accessible name 或稳定 locator；重命名 locator 必须同步测试、验证矩阵和交付说明。
 
 ## 页面或本地工具状态要求
 
