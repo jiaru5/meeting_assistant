@@ -136,6 +136,8 @@ Phase 2 以后按“大阶段管理、纵切交付、契约验收”的方式推
 
 2026-07-05 VS-MA-22 补充：`supply-chain-check.sh release` 的 sidecar repeatability gate 现在要求每个 target machine 引用 digest-matched `release-sidecar-target-smoke` report，并解析 commit、target id/os/architecture、runtime/model/audio digest 和 smoke 结果；缺少该逐目标机器 report、文件 digest 不匹配或 report 内语义与 sidecar target machine 不一致时必须 fail closed。该补充只强化 release 输入证据门禁，仍不产出真实 release sidecar repeatability report，不提升任何 `PV-MA-*` 到 `covered`。
 
+2026-07-05 VS-MA 顺序守卫补充：`release-preflight.sh` 现在会先运行 `vs-stage-check.py release`，要求 `VS-MA-14` 到 `VS-MA-22` 的状态表行均为 `已达退出口径`，再进入 `product-validation-check.py release` 和后续 release-scope gates。当前 `VS-MA-21/22` 仍为 `partial evidence`，因此发布候选会先失败在 VS 阶段前置条件，而不是提前把 PV 作为唯一 blocker。
+
 当前顺序：`VS-MA-14/15`、`VS-MA-16`、`VS-MA-17/18/19` 和 `VS-MA-20` 已按阶段退出口径收口；当前继续推进 `VS-MA-21/22` 的 release blocker，最后才进入 `VS-MA-23` 发布候选。
 
 | 顺序 | 纵切 | 能力和验收 | 主要实现表面 | 最小测试和证据 | 退出口径 |

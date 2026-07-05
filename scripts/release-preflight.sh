@@ -25,6 +25,7 @@ if grep -n -E '^\| OD-[^|]* \| open \|' docs/product-spec/10-open-decisions.md; 
   fail "open product or technical decisions remain"
 fi
 
+python3 scripts/vs-stage-check.py release || fail "VS-MA release prerequisites are not closed"
 python3 scripts/product-validation-check.py release || fail "validation matrix contains non-covered release-scope PV-* rows"
 
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then

@@ -182,7 +182,7 @@ release-preflight
 ./scripts/release-preflight.sh
 ```
 
-`release-preflight.sh` 只用于真正的发布候选。它必须 fail-closed：发布范围内任何 `PV-*` 不是 `covered` 时都不能变绿，也不能用阶段收口证据替代。
+`release-preflight.sh` 只用于真正的发布候选。它必须 fail-closed：先由 `vs-stage-check.py release` 确认 `VS-MA-14` 到 `VS-MA-22` 均为 `已达退出口径`，再检查发布范围内所有 `PV-*` 均为 `covered`；任何未关闭 VS、任何非 `covered` PV 或阶段收口证据替代发布证据时都不能变绿。
 
 发布前必须确认：
 

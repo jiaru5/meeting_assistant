@@ -529,6 +529,28 @@ class HarnessValidationTests(unittest.TestCase):
             lines.append(line)
         matrix.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+    def write_vs_statuses(
+        self,
+        fixture: Path,
+        default_status: str,
+        overrides: dict[str, str] | None = None,
+    ) -> None:
+        overrides = overrides or {}
+        plan = fixture / "docs/engineering/07-development-plan.md"
+        lines: list[str] = []
+        for line in plan.read_text(encoding="utf-8").splitlines():
+            match = re.match(r"^(\| `?(VS-MA-\d{2}[A-Z]?)`? \| )([^|]+)( \| .*)$", line)
+            if match and match.group(3).strip() in {
+                "已达退出口径",
+                "partial evidence",
+                "未进入 release-scope",
+                "MVP 外",
+            }:
+                identifier = match.group(2)
+                line = f"{match.group(1)}{overrides.get(identifier, default_status)}{match.group(4)}"
+            lines.append(line)
+        plan.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
     def test_product_validation_current_phase_accepts_documented_partial_rows(self) -> None:
         result = subprocess.run(
             [sys.executable, str(ROOT / "scripts/product-validation-check.py"), "current-phase"],
@@ -576,9 +598,79 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertIn("Release candidate requires every PV-* row to be `covered`.", output)
             self.assertIn("PV-MA-001: partial", output)
 
+    def test_vs_stage_current_phase_accepts_documented_partial_rows(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/vs-stage-check.py"), "current-phase"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("VS-MA stage current-phase passed", result.stdout)
+
+    def test_vs_stage_release_rejects_partial_prerequisite_vs_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+
+            result = subprocess.run(
+                [sys.executable, str(fixture / "scripts/vs-stage-check.py"), "release"],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Release candidate requires VS-MA-14 through VS-MA-22", output)
+            self.assertIn("VS-MA-21: partial evidence", output)
+            self.assertIn("VS-MA-22: partial evidence", output)
+            self.assertNotIn("VS-MA-23: 未进入 release-scope", output)
+
+    def test_vs_stage_release_passes_after_prerequisite_vs_rows_close(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.write_vs_statuses(fixture, "已达退出口径")
+
+            result = subprocess.run(
+                [sys.executable, str(fixture / "scripts/vs-stage-check.py"), "release"],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("VS-MA stage release passed", result.stdout)
+
+    def test_release_preflight_fails_closed_on_vs_prerequisites_before_pv(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+
+            result = subprocess.run(
+                [str(fixture / "scripts/release-preflight.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Release candidate requires VS-MA-14 through VS-MA-22", output)
+            self.assertIn("VS-MA-21: partial evidence", output)
+            self.assertIn("VS-MA-22: partial evidence", output)
+            self.assertIn("release-preflight failed: VS-MA release prerequisites are not closed", output)
+            self.assertNotIn("product validation release failed", output)
+            self.assertTrue((fixture / ".harness/evidence/release/production-readiness.meta").is_file())
+            self.assertFalse((fixture / ".harness/evidence/release/docs.meta").exists())
+
     def test_release_preflight_fails_closed_when_pv_rows_are_partial(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
+            self.write_vs_statuses(fixture, "已达退出口径")
             self.write_validation_statuses(fixture, "covered", {"PV-MA-001": "partial"})
 
             result = subprocess.run(
@@ -632,8 +724,13 @@ class HarnessValidationTests(unittest.TestCase):
         dev_commands = (ROOT / "docs/engineering/02-dev-commands.md").read_text(encoding="utf-8")
         e2e_readme = (ROOT / "platform/e2e/README.md").read_text(encoding="utf-8")
 
+        self.assertIn("python3 scripts/vs-stage-check.py release", release_preflight)
         self.assertIn("python3 scripts/product-validation-check.py release", release_preflight)
         self.assertIn("./platform/e2e/release-native-capture-artifact-smoke.sh", release_preflight)
+        self.assertLess(
+            release_preflight.index("python3 scripts/vs-stage-check.py release"),
+            release_preflight.index("python3 scripts/product-validation-check.py release"),
+        )
         self.assertLess(
             release_preflight.index("python3 scripts/product-validation-check.py release"),
             release_preflight.index("./platform/e2e/release-native-capture-artifact-smoke.sh"),

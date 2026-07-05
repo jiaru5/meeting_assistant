@@ -114,6 +114,7 @@ require_executable "scripts/security-check.sh"
 require_executable "scripts/spec-sync-check.sh"
 require_executable "scripts/start-project.sh"
 require_executable "scripts/supply-chain-check.sh"
+require_executable "scripts/vs-stage-check.py"
 
 if [ "${#CHANGED_FILES[@]}" -eq 0 ]; then
   ./scripts/spec-sync-check.sh >/dev/null

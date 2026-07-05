@@ -80,6 +80,7 @@ required_executable_files=(
   "scripts/spec-sync-check.sh"
   "scripts/start-project.sh"
   "scripts/supply-chain-check.sh"
+  "scripts/vs-stage-check.py"
   "scripts/worktree-fingerprint.py"
 )
 
