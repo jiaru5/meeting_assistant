@@ -99,6 +99,42 @@ print_ui_testing_automation_log_excerpt() {
   fi
 }
 
+print_ui_testing_automation_process_diagnostics() {
+  local processes
+  local launchctl_state
+
+  processes="$(
+    ps -axo pid,ppid,stat,etime,command \
+      | grep -Ei 'testmanagerd|MeetingAssistantNative|AppUITests|xcodebuild|loginwindow|SecurityAgent|LocalAuthentication|coreauth|universalAccessAuthWarn|online-auth-agent' \
+      | grep -Ev 'grep -Ei|test-app-bundle\.sh' \
+      | tail -n 80
+  )" || true
+
+  if [[ -n "$processes" ]]; then
+    {
+      echo
+      echo "UI automation process diagnostics:"
+      echo "$processes"
+    } >&2
+  fi
+
+  if command -v launchctl >/dev/null 2>&1; then
+    launchctl_state="$(
+      launchctl print "gui/$(id -u)/com.apple.testmanagerd" 2>/dev/null \
+        | grep -E 'state =|active count =|pid =|runs =|last terminating signal' \
+        | head -n 20
+    )" || true
+
+    if [[ -n "$launchctl_state" ]]; then
+      {
+        echo
+        echo "testmanagerd launchctl diagnostics:"
+        echo "$launchctl_state"
+      } >&2
+    fi
+  fi
+}
+
 is_ui_testing_automation_blocked() {
   local log_path="$1"
 
@@ -135,6 +171,7 @@ if [[ "$real_capture_smoke" == "1" || "$real_capture_smoke" == "true" || "$real_
     echo "native-app real capture app-bundle XCUITest failed. Captured xcodebuild log: $real_capture_log" >&2
     if is_ui_testing_automation_blocked "$real_capture_log"; then
       print_ui_testing_automation_help "real capture" "$real_capture_log"
+      print_ui_testing_automation_process_diagnostics
       print_ui_testing_automation_log_excerpt
     fi
     if grep -q "permission_denied" "$real_capture_log"; then
@@ -175,6 +212,7 @@ if [[ "$real_processing_smoke" == "1" || "$real_processing_smoke" == "true" || "
     echo "native-app real processing app-bundle XCUITest failed. Captured xcodebuild log: $real_processing_log" >&2
     if is_ui_testing_automation_blocked "$real_processing_log"; then
       print_ui_testing_automation_help "real processing" "$real_processing_log"
+      print_ui_testing_automation_process_diagnostics
       print_ui_testing_automation_log_excerpt
     fi
     exit "$test_status"
@@ -212,6 +250,7 @@ if [[ "$real_action_smoke" == "1" || "$real_action_smoke" == "true" || "$real_ac
     echo "native-app real action app-bundle XCUITest failed. Captured xcodebuild log: $real_action_log" >&2
     if is_ui_testing_automation_blocked "$real_action_log"; then
       print_ui_testing_automation_help "real action" "$real_action_log"
+      print_ui_testing_automation_process_diagnostics
       print_ui_testing_automation_log_excerpt
     fi
     exit "$test_status"
