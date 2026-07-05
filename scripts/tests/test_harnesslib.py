@@ -972,7 +972,7 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertIn("must report zero findings", output)
             self.assertNotIn("supply-chain-check passed: phase=current", result.stdout)
 
-    def test_supply_chain_release_fails_without_release_provenance_and_signature_reports(self) -> None:
+    def test_supply_chain_release_fails_without_release_provenance_signature_and_sidecar_reports(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
             command = self.supply_chain_report_command()
@@ -992,12 +992,13 @@ class HarnessValidationTests(unittest.TestCase):
 
             output = result.stderr + result.stdout
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("release supply-chain provenance/signing evidence failed", output)
+            self.assertIn("release supply-chain provenance/signing/sidecar evidence failed", output)
             self.assertIn("release provenance report is required", output)
             self.assertIn("release signature report is required", output)
+            self.assertIn("release sidecar report is required", output)
             self.assertNotIn("supply-chain-check passed: phase=release", result.stdout)
 
-    def test_supply_chain_release_accepts_provenance_and_signature_reports(self) -> None:
+    def test_supply_chain_release_accepts_provenance_signature_and_sidecar_reports(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
             self.init_git_baseline(fixture)
@@ -1013,6 +1014,7 @@ class HarnessValidationTests(unittest.TestCase):
             reports_dir.mkdir()
             provenance_path = reports_dir / "provenance.json"
             signature_path = reports_dir / "signature.json"
+            sidecar_path = reports_dir / "sidecar.json"
             provenance_path.write_text(
                 json.dumps(
                     {
@@ -1047,9 +1049,58 @@ class HarnessValidationTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            sidecar_path.write_text(
+                json.dumps(
+                    {
+                        "report_schema": 1,
+                        "release_gate": "release-sidecar-portability",
+                        "target_scope": "all-target-machines",
+                        "subject_commit": head,
+                        "builder": "github-actions-oidc",
+                        "source_repository": "example/meeting_assistant",
+                        "packages_runtime_or_model": False,
+                        "auto_downloads": False,
+                        "external_network_access": False,
+                        "target_machines": [
+                            {
+                                "target_id": "macos-arm64-ci",
+                                "os": "macos",
+                                "architecture": "arm64",
+                                "runtime": {
+                                    "name": "whisper-cli",
+                                    "path": "/Users/runner/.local/bin/whisper-cli",
+                                    "digest": digest,
+                                    "source": "user-prepared-local-runtime",
+                                },
+                                "model": {
+                                    "name": "ggml-large-v3-turbo-q5_0.bin",
+                                    "path": "/Users/runner/.local/share/ai-models/whisper.cpp/large-v3-turbo/ggml-large-v3-turbo-q5_0.bin",
+                                    "digest": digest,
+                                    "source": "user-prepared-local-model",
+                                    "license": "Apache-2.0",
+                                    "provenance_ref": "/Users/runner/.local/share/ai-models/whisper.cpp/large-v3-turbo/provenance.json",
+                                },
+                                "smoke_audio_fixture": {
+                                    "name": "mixed-zh-en-tech.wav",
+                                    "path": "/Users/runner/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav",
+                                    "digest": digest,
+                                    "source": "user-prepared-local-fixture",
+                                },
+                                "smoke": {
+                                    "check_dependencies_ok": True,
+                                    "whisper_cpp_smoke_passed": True,
+                                    "no_auto_downloads_observed": True,
+                                },
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
             env = os.environ.copy()
             env["MEETING_ASSISTANT_RELEASE_PROVENANCE_REPORT"] = str(provenance_path)
             env["MEETING_ASSISTANT_RELEASE_SIGNATURE_REPORT"] = str(signature_path)
+            env["MEETING_ASSISTANT_RELEASE_SIDECAR_REPORT"] = str(sidecar_path)
 
             result = subprocess.run(
                 [str(fixture / "scripts/supply-chain-check.sh"), "release"],
@@ -1061,7 +1112,7 @@ class HarnessValidationTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-            self.assertIn("release supply-chain provenance/signing evidence passed", result.stdout)
+            self.assertIn("release supply-chain provenance/signing/sidecar evidence passed", result.stdout)
             self.assertIn("supply-chain-check passed: phase=release", result.stdout)
 
     def test_release_bundle_check_fails_without_release_bundle_report(self) -> None:

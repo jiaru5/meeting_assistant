@@ -195,9 +195,42 @@ def require_equal(report: dict[str, Any], key: str, expected: Any, label: str) -
         failures.append(f"{label} report must set {key}={expected!r}")
 
 
+def require_non_empty_string(report: dict[str, Any], key: str, label: str) -> None:
+    if not isinstance(report.get(key), str) or not report.get(key):
+        failures.append(f"{label} report must include {key}")
+
+
+def require_local_sidecar_path(value: Any, label: str) -> None:
+    if not isinstance(value, str) or not value:
+        failures.append(f"{label} must include path")
+        return
+    if not (value.startswith("~/.local/") or "/.local/" in value):
+        failures.append(f"{label} path must be under a user .local root")
+    disallowed_fragments = ("/Downloads/", "/Desktop/", "/Library/Caches/")
+    if any(fragment in value for fragment in disallowed_fragments):
+        failures.append(f"{label} path must not be under Downloads, Desktop, or Library/Caches")
+
+
 def require_sha256_digest(value: Any, label: str) -> None:
     if not isinstance(value, str) or re.fullmatch(r"sha256:[a-fA-F0-9]{64}", value) is None:
         failures.append(f"{label} must be a sha256:<64 hex> digest")
+
+
+def validate_sidecar_artifact(artifact: Any, label: str, *, require_license: bool = False) -> None:
+    if not isinstance(artifact, dict):
+        failures.append(f"{label} must be an object")
+        return
+    if not isinstance(artifact.get("name"), str) or not artifact.get("name"):
+        failures.append(f"{label} must include name")
+    require_local_sidecar_path(artifact.get("path"), label)
+    require_sha256_digest(artifact.get("digest"), f"{label} digest")
+    if not isinstance(artifact.get("source"), str) or not artifact.get("source"):
+        failures.append(f"{label} must include source")
+    if require_license:
+        if not isinstance(artifact.get("license"), str) or not artifact.get("license"):
+            failures.append(f"{label} must include license")
+        if not isinstance(artifact.get("provenance_ref"), str) or not artifact.get("provenance_ref"):
+            failures.append(f"{label} must include provenance_ref")
 
 
 provenance_path = resolve_evidence_path(
@@ -208,10 +241,15 @@ signature_path = resolve_evidence_path(
     "MEETING_ASSISTANT_RELEASE_SIGNATURE_REPORT",
     ".harness/release-inputs/supply-chain/release-signature-report.json",
 )
+sidecar_path = resolve_evidence_path(
+    "MEETING_ASSISTANT_RELEASE_SIDECAR_REPORT",
+    ".harness/release-inputs/supply-chain/release-sidecar-report.json",
+)
 
 head = current_commit()
 provenance = load_report(provenance_path, "release provenance")
 signature = load_report(signature_path, "release signature")
+sidecar = load_report(sidecar_path, "release sidecar")
 
 if provenance is not None:
     require_equal(provenance, "report_schema", 1, "release provenance")
@@ -258,13 +296,47 @@ if signature is not None:
             if not isinstance(artifact.get("signature_type"), str) or not artifact.get("signature_type"):
                 failures.append(f"release signature artifact #{index} must include signature_type")
 
+if sidecar is not None:
+    require_equal(sidecar, "report_schema", 1, "release sidecar")
+    require_equal(sidecar, "release_gate", "release-sidecar-portability", "release sidecar")
+    require_equal(sidecar, "target_scope", "all-target-machines", "release sidecar")
+    require_equal(sidecar, "packages_runtime_or_model", False, "release sidecar")
+    require_equal(sidecar, "auto_downloads", False, "release sidecar")
+    require_equal(sidecar, "external_network_access", False, "release sidecar")
+    if head is not None:
+        require_equal(sidecar, "subject_commit", head, "release sidecar")
+    require_non_empty_string(sidecar, "builder", "release sidecar")
+    require_non_empty_string(sidecar, "source_repository", "release sidecar")
+    target_machines = sidecar.get("target_machines")
+    if not isinstance(target_machines, list) or not target_machines:
+        failures.append("release sidecar report must include at least one target_machine")
+    else:
+        for index, target in enumerate(target_machines):
+            label = f"release sidecar target_machine #{index}"
+            if not isinstance(target, dict):
+                failures.append(f"{label} must be an object")
+                continue
+            for key in ("target_id", "os", "architecture"):
+                if not isinstance(target.get(key), str) or not target.get(key):
+                    failures.append(f"{label} must include {key}")
+            validate_sidecar_artifact(target.get("runtime"), f"{label} runtime")
+            validate_sidecar_artifact(target.get("model"), f"{label} model", require_license=True)
+            validate_sidecar_artifact(target.get("smoke_audio_fixture"), f"{label} smoke_audio_fixture")
+            smoke = target.get("smoke")
+            if not isinstance(smoke, dict):
+                failures.append(f"{label} smoke must be an object")
+            else:
+                for key in ("check_dependencies_ok", "whisper_cpp_smoke_passed", "no_auto_downloads_observed"):
+                    if smoke.get(key) is not True:
+                        failures.append(f"{label} smoke must set {key}=True")
+
 if failures:
-    print("release supply-chain provenance/signing evidence failed:", file=sys.stderr)
+    print("release supply-chain provenance/signing/sidecar evidence failed:", file=sys.stderr)
     for failure in failures:
         print(f" - {failure}", file=sys.stderr)
     raise SystemExit(1)
 
-print("release supply-chain provenance/signing evidence passed.")
+print("release supply-chain provenance/signing/sidecar evidence passed.")
 PY
 fi
 
