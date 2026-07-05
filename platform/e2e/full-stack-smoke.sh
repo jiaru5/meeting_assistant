@@ -7,13 +7,13 @@ cd "$ROOT_DIR"
 run_stage() {
   local stage="$1"
   local marker="$2"
-  local command_path="$3"
   local output
   local exit_code
+  shift 2
 
   echo "full-stack e2e smoke stage starting: $stage"
   set +e
-  output="$("$command_path" 2>&1)"
+  output="$("$@" 2>&1)"
   exit_code=$?
   set -e
   printf '%s\n' "$output"
@@ -39,6 +39,7 @@ run_stage() {
 
 run_stage "processing local smoke" "p2-c processing local e2e smoke passed." "./platform/e2e/smoke-test.sh"
 run_stage "capture-style processing smoke" "capture-style processing e2e smoke passed." "./platform/e2e/capture-processing-smoke.sh"
+mvp_app_bundle_stage_ran=0
 case "${MA_NATIVE_CAPTURE_SMOKE:-0}" in
   1|true|TRUE|yes|YES)
     run_stage "real native capture artifact smoke" "real native capture artifact e2e smoke passed." "./platform/e2e/native-capture-artifact-smoke.sh"
@@ -47,15 +48,32 @@ case "${MA_NATIVE_CAPTURE_SMOKE:-0}" in
     echo "full-stack e2e smoke optional stage skipped: set MA_NATIVE_CAPTURE_SMOKE=1 to include real native capture artifact smoke."
     ;;
 esac
+case "${MA_NATIVE_APP_MVP_FULL_STACK_SMOKE:-0}" in
+  1|true|TRUE|yes|YES)
+    run_stage \
+      "native app-bundle MVP full-stack smoke" \
+      "native-app MVP full-stack app-bundle XCUITest passed." \
+      env MA_NATIVE_APP_MVP_FULL_STACK_SMOKE=1 ./platform/native-app/scripts/test-app-bundle.sh
+    mvp_app_bundle_stage_ran=1
+    ;;
+  *)
+    echo "full-stack e2e smoke optional stage skipped: set MA_NATIVE_APP_MVP_FULL_STACK_SMOKE=1 to include native app-bundle MVP full-stack smoke."
+    ;;
+esac
 run_stage "native transcript bridge and designed shell smoke" "designed native shell bridge smoke passed." "./platform/e2e/native-transcript-bridge-smoke.sh"
 
 echo "VS-MA-20 provider/e2e attribution [non-contract]: import processing chain remains in scope."
 echo "VS-MA-20 provider/e2e attribution [non-contract]: native_recording-style provider chain remains in scope."
 echo "VS-MA-20 provider/e2e attribution [non-contract]: real native capture artifact stage is opt-in via MA_NATIVE_CAPTURE_SMOKE=1 and remains partial evidence."
+echo "VS-MA-20 provider/e2e attribution [non-contract]: native app-bundle MVP full-stack stage is opt-in via MA_NATIVE_APP_MVP_FULL_STACK_SMOKE=1 and remains partial evidence."
 echo "VS-MA-20 provider/e2e attribution [non-contract]: native read bridge checksum remains in scope."
 echo "VS-MA-20 provider/e2e attribution [non-contract]: designed native shell app-root and ma.shell locator bridge remain in scope."
 echo "VS-MA-20 provider/e2e attribution [non-contract]: no-auto-pull precondition remains in scope."
-echo "VS-MA-20 provider/e2e attribution [non-contract]: real native capture, app-bundle UI launch, and release bundle are not proven by this provider smoke."
+if ((mvp_app_bundle_stage_ran == 1)); then
+  echo "VS-MA-20 provider/e2e attribution [non-contract]: opt-in app-bundle MVP UI launch was exercised; real native capture and release bundle remain unproven."
+else
+  echo "VS-MA-20 provider/e2e attribution [non-contract]: real native capture, app-bundle UI launch, and release bundle are not proven by this provider smoke."
+fi
 echo "VS-MA-23 provider/e2e release readiness [non-contract]: processing local command chain passed."
 echo "VS-MA-23 provider/e2e release readiness [non-contract]: capture-style provider artifact and failure-redaction chain passed."
 echo "VS-MA-23 provider/e2e release readiness [non-contract]: native read bridge and designed shell app-root smoke passed."

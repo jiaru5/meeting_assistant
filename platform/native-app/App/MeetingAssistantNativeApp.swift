@@ -303,7 +303,7 @@ private struct NativeControlPlaneFixtureConfiguration {
             return NativeRecordingCommandClient(
                 permissionChecker: StaticNativeCapturePermissionChecker(snapshot: .granted),
                 captureAdapter: ControlledNativeCaptureAdapter(
-                    stopBehavior: .success(artifacts: Self.controlledRecordingArtifacts)
+                    stopBehavior: .success(artifacts: Self.controlledRecordingArtifacts(environment: environment))
                 ),
                 sessionIDProvider: { sessionID },
                 timestampProvider: { "2026-07-01T00:00:00Z" },
@@ -701,8 +701,12 @@ private struct NativeControlPlaneFixtureConfiguration {
             .map { String($0.dropFirst(prefix.count)) }
     }
 
-    private static func captureAudioFlag(named name: String, defaultValue: Bool) -> Bool {
-        switch ProcessInfo.processInfo.environment[name]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+    private static func captureAudioFlag(
+        named name: String,
+        defaultValue: Bool,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        switch environment[name]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "1", "true", "yes":
             return true
         case "0", "false", "no":
@@ -726,8 +730,10 @@ private struct NativeControlPlaneFixtureConfiguration {
         return URL(fileURLWithPath: workspacePath, isDirectory: true)
     }
 
-    private static var controlledRecordingArtifacts: [NativeCaptureArtifactResult] {
-        [
+    private static func controlledRecordingArtifacts(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [NativeCaptureArtifactResult] {
+        var artifacts: [NativeCaptureArtifactResult] = [
             .available(
                 .screenVideo,
                 format: "mov",
@@ -741,11 +747,56 @@ private struct NativeControlPlaneFixtureConfiguration {
                 .microphoneAudio,
                 reason: "microphone audio degraded in controlled app fixture"
             ),
-            .missing(
+        ]
+        if captureAudioFlag(
+            named: "MA_NATIVE_RECORDING_CONTROLLED_MIXED_AUDIO",
+            defaultValue: false,
+            environment: environment
+        ) {
+            artifacts.append(
+                .available(
+                    .mixedAudio,
+                    format: "wav",
+                    data: controlledMixedAudioWAVData()
+                )
+            )
+        } else {
+            artifacts.append(.missing(
                 .mixedAudio,
                 reason: "mixed audio missing because controlled app fixture lacks one input"
-            ),
-        ]
+            ))
+        }
+        return artifacts
+    }
+
+    private static func controlledMixedAudioWAVData() -> Data {
+        var samples = Data()
+        for index in 0..<2_400 {
+            let value = Int16((((index + 17) % 96) - 48) * 96)
+            appendLittleEndian(value, to: &samples)
+        }
+
+        var data = Data()
+        data.append(Data("RIFF".utf8))
+        appendLittleEndian(UInt32(36 + samples.count), to: &data)
+        data.append(Data("WAVE".utf8))
+        data.append(Data("fmt ".utf8))
+        appendLittleEndian(UInt32(16), to: &data)
+        appendLittleEndian(UInt16(1), to: &data)
+        appendLittleEndian(UInt16(1), to: &data)
+        appendLittleEndian(UInt32(8_000), to: &data)
+        appendLittleEndian(UInt32(16_000), to: &data)
+        appendLittleEndian(UInt16(2), to: &data)
+        appendLittleEndian(UInt16(16), to: &data)
+        data.append(Data("data".utf8))
+        appendLittleEndian(UInt32(samples.count), to: &data)
+        data.append(samples)
+        return data
+    }
+
+    private static func appendLittleEndian<T: FixedWidthInteger>(_ value: T, to data: inout Data) {
+        var littleEndian = value.littleEndian
+        withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
     }
 }
 

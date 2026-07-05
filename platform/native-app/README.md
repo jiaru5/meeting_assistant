@@ -60,6 +60,15 @@
 6. 如果 macOS 没有给测试 app bundle Screen Recording / Screen & System Audio Recording 权限，Start 会 fail closed，UI 暴露 `ma.recording.error`，通常为 `permission_denied`；脚本会把 xcodebuild 输出保存到 `build/DerivedData/AppBundleUITests/real-capture-app-bundle-smoke.log`，并打印系统设置入口、app bundle 位置和重跑命令。这类失败是本机 TCC 环境 blocker，不得报告为真实录制通过。
 7. 该 smoke 不属于默认 `scripts/test.sh`、默认 app-bundle XCUITest 或 Release 门禁；通过也仍是 partial evidence，不证明生产 app 默认启用真实 adapter、独立音频产物、native-to-processing invocation 或 release readiness。
 
+当前已新增 VS-MA-20 opt-in app-bundle MVP full-stack smoke 入口：
+
+1. `AppBundleLocatorSmokeTests.testMVPFullStackDesignedShellRecordingProcessingTranscriptActionsWhenExplicitlyEnabled` 默认 `XCTSkip`，只有测试进程显式设置 `MA_NATIVE_APP_MVP_FULL_STACK_SMOKE=1` 时运行。
+2. 正确执行入口是 `MA_NATIVE_APP_MVP_FULL_STACK_SMOKE=1 ./platform/native-app/scripts/test-app-bundle.sh`。该脚本会先 `build-for-testing`，再把 `MA_NATIVE_APP_MVP_FULL_STACK_SMOKE=1` 注入生成的 `.xctestrun`，最后用 `test-without-building -only-testing:MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testMVPFullStackDesignedShellRecordingProcessingTranscriptActionsWhenExplicitlyEnabled` 跑单用例。
+3. 该测试从 designed shell 点击录制开始/停止，通过 Debug/XCTest-only controlled recording fixture 登记 `screen_video` 和 WAV `mixed_audio`，再通过 provider-owned `platform/e2e/ma-cli-local.sh` 调用真实 `processing-cli` 生成 transcript 和 transcript-only speaker labels。
+4. 同一测试会重启 `.app` 读取同一 workspace/session，验证 transcript review、copy、export 和 delete confirmation；导出文件必须保留在 workspace 外，delete event 不得携带 transcript 文本。
+5. `platform/e2e/full-stack-smoke.sh` 可用 `MA_NATIVE_APP_MVP_FULL_STACK_SMOKE=1` 显式追加该 stage；默认不运行，避免把 Xcode UI automation、controlled recording fixture 或本机窗口状态并入快速 provider smoke。
+6. 该 smoke 只能作为 VS-MA-20 阶段退出的 opt-in partial evidence；不证明真实 ScreenCaptureKit 输出、真实用户 Save Panel、release distribution bundle 或 release readiness。
+
 当前已实现 VS-MA-16 native processing state consumer 边界：
 
 1. `ProcessingCommandClient` 只表达已冻结的 `generate_transcript` 和 `generate_speaker_labels` request/response 模型，失败 `details` 使用 tolerant decode 并只展示摘要。

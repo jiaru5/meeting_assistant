@@ -761,6 +761,124 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         XCTAssertFalse(deleteEvent.contains("Fake transcript generated from local audio."))
     }
 
+    func testMVPFullStackDesignedShellRecordingProcessingTranscriptActionsWhenExplicitlyEnabled() throws {
+        try XCTSkipUnless(
+            Self.mvpFullStackCLISmokeEnabled(),
+            "Set MA_NATIVE_APP_MVP_FULL_STACK_SMOKE=1 to run the VS-MA-20 app-bundle MVP full-stack smoke."
+        )
+
+        let fixture = try AppMVPFullStackCLIFixture()
+        defer { fixture.cleanup() }
+        let app = launchApp(fixture: "ready", mvpFullStackFixture: fixture)
+
+        assertElement("ma.shell.heading", in: app, contains: "Meeting Assistant")
+        assertElement("ma.shell.status.recording", in: app, contains: "Ready")
+        assertElement("ma.shell.status.processing", in: app, contains: "Ready")
+        assertExists("ma.shell.section.recording", in: app)
+        assertExists("ma.shell.section.processing", in: app)
+        assertExists("ma.shell.section.transcript", in: app)
+        assertExists("ma.shell.section.actions", in: app)
+
+        tapButton("ma.recording.startButton", in: app)
+
+        assertRecordingStarted(in: app)
+        assertElement("ma.recording.sessionID", in: app, contains: fixture.sessionID)
+        assertElement("ma.shell.status.recording", in: app, contains: "Recording")
+
+        tapRecordingButton(
+            "ma.recording.stopButton",
+            in: app,
+            expectingStatus: "Recording saved."
+        )
+
+        assertElement("ma.recording.status", in: app, contains: "Recording saved.")
+        assertElement("ma.recording.savedSummary", in: app, contains: "Saved 2 recording artifacts.")
+        assertElement("ma.recording.artifact.screen_video.status", in: app, contains: "screen_video: available")
+        assertElement("ma.recording.artifact.system_audio.status", in: app, contains: "system_audio: missing")
+        assertElement("ma.recording.artifact.microphone_audio.status", in: app, contains: "microphone_audio: degraded")
+        assertElement("ma.recording.artifact.mixed_audio.status", in: app, contains: "mixed_audio: available")
+        assertElement("ma.shell.status.recording", in: app, contains: "Saved")
+
+        let recordedSession = try fixture.sessionMetadata()
+        XCTAssertEqual(recordedSession["id"] as? String, fixture.sessionID)
+        XCTAssertEqual(recordedSession["source_type"] as? String, "native_recording")
+        XCTAssertEqual(recordedSession["status"] as? String, "recorded")
+        let recordedArtifacts = try XCTUnwrap(recordedSession["artifacts"] as? [[String: Any]])
+        XCTAssertEqual(recordedArtifacts.filter { $0["capture_status"] as? String == "available" }.count, 2)
+        XCTAssertEqual(
+            recordedArtifacts.first { $0["artifact_type"] as? String == "mixed_audio" }?["format"] as? String,
+            "wav"
+        )
+
+        tapProcessingButton(
+            "ma.processing.startButton",
+            in: app,
+            expectingStatus: "Processing completed with transcript-only speaker labels."
+        )
+
+        assertElement("ma.processing.status", in: app, contains: "Processing completed with transcript-only speaker labels.")
+        assertElement("ma.processing.transcriptStatus", in: app, contains: "generated with 1 segment")
+        assertElement("ma.processing.degradation", in: app, contains: "transcript-only fallback")
+        assertElement("ma.shell.status.processing", in: app, contains: "Transcript-only")
+        assertDoesNotExist("ma.processing.error", in: app)
+
+        let processedSession = try fixture.sessionMetadata()
+        let processedArtifacts = try XCTUnwrap(processedSession["artifacts"] as? [[String: Any]])
+        let processedArtifactTypes = Set(processedArtifacts.compactMap { $0["artifact_type"] as? String })
+        XCTAssertTrue(
+            processedArtifactTypes.isSuperset(of: ["screen_video", "mixed_audio", "normalized_audio", "transcript_text", "speaker_labels"])
+        )
+
+        let reviewApp = launchApp(
+            workspaceURL: fixture.workspaceURL,
+            sessionID: fixture.sessionID,
+            mvpFullStackFixture: fixture
+        )
+
+        assertElement("ma.shell.status.transcript", in: reviewApp, contains: "Available")
+        assertElement("ma.shell.status.actions", in: reviewApp, contains: "Ready")
+        assertElement("ma.transcript.heading", in: reviewApp, contains: "UI smoke recording")
+        assertElement("ma.transcript.summary", in: reviewApp, contains: "Transcript has 1 segment for review.")
+        assertElement(
+            "ma.transcript.text.segment-0001",
+            in: reviewApp,
+            contains: "Fake transcript generated from local audio."
+        )
+        assertElement("ma.transcript.degradation", in: reviewApp, contains: "transcript-only fallback")
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Transcript actions are ready.")
+
+        tapTranscriptActionButton("ma.transcriptAction.copyButton", in: reviewApp)
+
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Copy complete.")
+        assertElement(
+            "ma.transcriptAction.success",
+            in: reviewApp,
+            contains: "Copied plain text transcript for session \(fixture.sessionID)."
+        )
+
+        tapTranscriptActionButton("ma.transcriptAction.exportButton", in: reviewApp)
+
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Export complete.")
+        assertElement("ma.transcriptAction.success", in: reviewApp, contains: fixture.exportURL.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.exportURL.path))
+        XCTAssertTrue(try fixture.exportContent().contains("Fake transcript generated from local audio."))
+
+        tapTranscriptActionButton("ma.transcriptAction.deleteButton", in: reviewApp)
+        assertElement("ma.transcriptAction.deletePromptText", in: reviewApp, contains: fixture.sessionID)
+        assertElement("ma.transcriptAction.deletePromptText", in: reviewApp, contains: "External exports are retained.")
+        tapTranscriptActionButton("ma.transcriptAction.deleteConfirmButton", in: reviewApp)
+
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Delete complete.")
+        assertElement("ma.transcriptAction.success", in: reviewApp, contains: "Deleted session \(fixture.sessionID).")
+        assertElement("ma.transcriptAction.success", in: reviewApp, contains: "Retained 1 external export.")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.sessionRootURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.exportURL.path))
+        let deleteEvent = try fixture.deleteEventContent()
+        XCTAssertTrue(deleteEvent.contains("meeting_session.deleted.v1"))
+        XCTAssertTrue(deleteEvent.contains(fixture.sessionID))
+        XCTAssertFalse(deleteEvent.contains("Fake transcript generated from local audio."))
+    }
+
     private func launchApp(
         fixture: String? = nil,
         workspaceURL: URL? = nil,
@@ -769,7 +887,8 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         realCaptureFixture: AppAppleScreenCaptureKitRecordingFixture? = nil,
         processingFixture: AppProcessingProcessFixture? = nil,
         realProcessingFixture: AppRealProcessingCLIFixture? = nil,
-        transcriptActionFixture: AppTranscriptActionProcessFixture? = nil
+        transcriptActionFixture: AppTranscriptActionProcessFixture? = nil,
+        mvpFullStackFixture: AppMVPFullStackCLIFixture? = nil
     ) -> XCUIApplication {
         dismissSpotlightIfPresent()
         launchedApp?.terminate()
@@ -805,6 +924,9 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         }
         if let transcriptActionFixture {
             transcriptActionFixture.applyLaunchEnvironment(to: app)
+        }
+        if let mvpFullStackFixture {
+            mvpFullStackFixture.applyLaunchEnvironment(to: app)
         }
         app.terminate()
         _ = app.wait(for: .notRunning, timeout: 5)
@@ -1316,6 +1438,17 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
 
     private static func realActionCLISmokeEnabled() -> Bool {
         switch ProcessInfo.processInfo.environment["MA_NATIVE_APP_REAL_ACTION_SMOKE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() {
+        case "1", "true", "yes":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func mvpFullStackCLISmokeEnabled() -> Bool {
+        switch ProcessInfo.processInfo.environment["MA_NATIVE_APP_MVP_FULL_STACK_SMOKE"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased() {
         case "1", "true", "yes":
@@ -2003,5 +2136,86 @@ private final class AppRealProcessingCLIFixture {
         let digest = SHA256.hash(data: data)
         let hex = digest.map { String(format: "%02x", $0) }.joined()
         return "sha256:\(hex)"
+    }
+}
+
+private final class AppMVPFullStackCLIFixture {
+    let rootURL: URL
+    let workspaceURL: URL
+    let cliURL: URL
+    let sessionID = "session-app-ui-smoke"
+
+    var sessionRootURL: URL {
+        workspaceURL
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+    }
+
+    var exportURL: URL {
+        workspaceURL
+            .appendingPathComponent("exports", isDirectory: true)
+            .appendingPathComponent("\(sessionID).md", isDirectory: false)
+    }
+
+    var deleteEventURL: URL {
+        workspaceURL
+            .appendingPathComponent("events", isDirectory: true)
+            .appendingPathComponent("meeting_session.deleted.v1.jsonl", isDirectory: false)
+    }
+
+    init(sourceFile: StaticString = #filePath) throws {
+        let nativeAppRootURL = URL(fileURLWithPath: String(describing: sourceFile))
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        cliURL = nativeAppRootURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("e2e", isDirectory: true)
+            .appendingPathComponent("ma-cli-local.sh", isDirectory: false)
+
+        guard FileManager.default.isExecutableFile(atPath: cliURL.path) else {
+            throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: cliURL.path])
+        }
+
+        rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ma-native-mvp-full-stack-app-\(UUID().uuidString)", isDirectory: true)
+        workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: exportURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+    }
+
+    deinit {
+        cleanup()
+    }
+
+    func applyLaunchEnvironment(to app: XCUIApplication) {
+        app.launchEnvironment["MA_NATIVE_RECORDING_CLIENT"] = "controlled"
+        app.launchEnvironment["MA_NATIVE_RECORDING_CONTROLLED_MIXED_AUDIO"] = "1"
+        app.launchEnvironment["MA_NATIVE_PROCESSING_CLIENT"] = "process"
+        app.launchEnvironment["MA_NATIVE_TRANSCRIPT_ACTION_CLIENT"] = "process"
+        app.launchEnvironment["MA_NATIVE_APP_XCTEST"] = "1"
+        app.launchEnvironment["MEETING_ASSISTANT_CLI_PATH"] = cliURL.path
+        app.launchEnvironment["MEETING_ASSISTANT_WORKSPACE"] = workspaceURL.path
+        app.launchEnvironment["MA_NATIVE_RECORDING_WORKSPACE"] = workspaceURL.path
+    }
+
+    func cleanup() {
+        try? FileManager.default.removeItem(at: rootURL)
+    }
+
+    func sessionMetadata() throws -> [String: Any] {
+        let data = try Data(contentsOf: sessionRootURL.appendingPathComponent("session.json"))
+        let payload = try JSONSerialization.jsonObject(with: data)
+        return try XCTUnwrap(payload as? [String: Any])
+    }
+
+    func exportContent() throws -> String {
+        try String(contentsOf: exportURL, encoding: .utf8)
+    }
+
+    func deleteEventContent() throws -> String {
+        try String(contentsOf: deleteEventURL, encoding: .utf8)
     }
 }

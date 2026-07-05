@@ -99,3 +99,12 @@ VS-MA-19A designed native shell boundary:
 4. The shell must keep primary controls wired to the existing command/helper/adapter clients: `check_dependencies`, `start_native_recording`, `stop_recording`, processing command bridge, `export_transcript` and `delete_session`; it must not create UI-only mock success.
 5. Debug/XCTest fixtures and process-runner hooks remain isolated behind existing `MA_NATIVE_*` test hooks; Release defaults must continue to use the safe default fake command clients unless later product/spec changes approve otherwise. Production copy/export OS clients may be injected through `TranscriptActionOSClients.swift`.
 6. The shell must not implement uncontrolled capture, processing provider internals, transcription, speaker labeling, network APIs, automatic downloads or direct delete behavior.
+
+VS-MA-20 opt-in native app-bundle MVP full-stack smoke boundary:
+
+1. `AppBundleLocatorSmokeTests` may run a single app-bundle smoke only when the test process is explicitly launched with `MA_NATIVE_APP_MVP_FULL_STACK_SMOKE=1`.
+2. The smoke may compose existing Debug/XCTest-only hooks for controlled native recording, provider-owned processing/action CLI routing through `platform/e2e/ma-cli-local.sh`, deterministic clipboard/export destination and read-only workspace transcript loading.
+3. The controlled recording hook may set `MA_NATIVE_RECORDING_CONTROLLED_MIXED_AUDIO=1` only for this test path so the same recorded session has an existing `mixed_audio` artifact that the frozen processing command contract can consume.
+4. The smoke must drive the designed shell Start/Stop recording, Start Processing, transcript review, copy/export and delete confirmation controls through stable accessibility identifiers; it must not mutate session metadata by hand to fake a processed state.
+5. The smoke must remain opt-in from `platform/e2e/full-stack-smoke.sh` through `MA_NATIVE_APP_MVP_FULL_STACK_SMOKE=1`; default full-stack and component test gates must not require macOS UI automation.
+6. A passing smoke remains partial evidence unless the relevant `PV-MA-*` rows explicitly become `covered`; it does not prove real ScreenCaptureKit output, true user Save Panel interaction, release distribution bundle, or product-validation release readiness.
