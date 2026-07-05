@@ -4,10 +4,11 @@
 
 ## 当前基线
 
-- Baseline: `develop@4ac1528`，已 fast-forward 合入 `codex/meeting-assistant-autopilot`
+- Baseline: 当前 `develop` 已包含 `VS-MA-14/15` release native capture gate 和前序 provider/full-stack evidence
 - 当前工作 diff 已关闭 `PV-MA-001`、`PV-MA-004`、`PV-MA-005` 和 `PV-MA-013`；另补充 `PV-MA-006`/`PV-MA-007`/`PV-MA-008` 的真实 CLI process runner 到 native loader 证据，并把非 XCTest production processing/action command client 默认收紧到 process runner，但这些行仍保持 `partial`。当前目标状态为 `covered=14, partial=9`
 - `./scripts/product-validation-check.py release`: fail，剩余原因是 `PV-MA-002`、`PV-MA-003`、`PV-MA-006` 到 `PV-MA-012` 仍非 `covered`
 - 2026-07-05 已补 `platform/e2e/release-native-capture-artifact-smoke.sh`，本机 `MA_NATIVE_CAPTURE_ARTIFACT_SMOKE_ATTEMPTS=1 MA_NATIVE_CAPTURE_SMOKE_DURATION_SECONDS=2 ./platform/e2e/release-native-capture-artifact-smoke.sh` 通过并生成 `release_gate=release-scope-native-capture` report；这让 `VS-MA-14/15` 可按阶段退出口径收口，但 `PV-MA-002/003` 仍保持 `partial`
+- 2026-07-05 已补 `platform/e2e/release-capture-processing-hardening-smoke.sh`，本机通过并生成 `release_gate=release-scope-provider-hardening` / `not_release_readiness=true` report；这让 `VS-MA-21` provider-side 异常、重试、并发、脱敏和 checksum preservation 有了结构化 release-scope gate，但 `PV-MA-009` 仍保持 `partial`
 - Spec Sync 分类：本计划文档为 `no-product-impact`；每个实现项默认按既有事实源 `spec-covered` 执行，只有改变产品、API、artifact、UI 或 release 范围时才升级为 `spec-change`
 
 ## 执行顺序
@@ -26,7 +27,7 @@
 | 10 | `PV-MA-001` | 已关闭：权限和环境预检 fail closed 达到 covered | 原缺口为真实/受控 macOS 权限负向路径没有写入行级完成口径 | 当前标准 `platform/native-app/scripts/test.sh` 已包含 `MacOSNativeCapturePermissionChecker` + `CoreGraphicsScreenRecordingPermissionProbe(preflight: { false })` denied 测试，断言 `permission_denied`、不启动 adapter、不写 session；opt-in app-bundle real capture smoke 的 TCC denied 证据作为补充，不外推录制 PV | `platform/native-app/scripts/test.sh`; `platform/native-app/tests/MeetingAssistantNativeTests/NativeRecordingCommandClientTests.swift` |
 | 11 | `PV-MA-002` | 原生录制 covered | release-scope native capture gate 已补；剩余为跨机器 TCC/display 可重复性、独立系统/麦克风音频真实产物、真实 capture 到 transcript/export/delete 的 release-scope 同链路和 release bundle | 保留 `release-native-capture-artifact-smoke.sh` 作为标准 gate；继续补跨机器诊断、音频策略和真实 native-to-processing 成功链路证据 | `platform/e2e/release-native-capture-artifact-smoke.sh`; app-bundle real capture smoke; release full-stack smoke |
 | 12 | `PV-MA-003` | 会话和录制产物登记 covered | release-scope stop artifact gate 已补；剩余为独立音频产物策略、真实 capture 后续 processing 成功路径和 release bundle 同链路证据 | 保留四类 artifact available/missing/degraded 的 release-scope report；继续补至少一条真实 native 录制产物进入后续 processing 成功链路 | `platform/e2e/release-native-capture-artifact-smoke.sh`; native capture smoke; session artifact tests |
-| 13 | `PV-MA-009` | 文件化流水线重试和原始媒体保护 covered | 依赖真实 capture、native-processing bridge 和 release-scope 并发/重试 | 在录制、处理、导出、删除全链路关闭后，跑并发/重试/原始媒体保护 release gate | `./scripts/check.sh`; `./scripts/test-e2e-full-stack.sh`; `./scripts/release-preflight.sh` |
+| 13 | `PV-MA-009` | 文件化流水线重试和原始媒体保护 covered | VS-MA-21 provider hardening release gate 已补；剩余依赖真实 ScreenCaptureKit/native UI 并发、真实 capture -> transcript/export/delete 同链路和 release bundle | 保留 `release-capture-processing-hardening-smoke.sh` 作为 provider-side 标准 gate；在录制、处理、导出、删除全链路关闭后，补真实 native/release-scope 并发、重试和原始媒体保护 release gate | `platform/e2e/release-capture-processing-hardening-smoke.sh`; `./scripts/check.sh`; `./scripts/test-e2e-full-stack.sh`; `./scripts/release-preflight.sh` |
 
 ## 合并和验收规则
 

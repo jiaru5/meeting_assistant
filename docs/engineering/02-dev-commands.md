@@ -84,6 +84,8 @@ full-stack E2E 可在 manifest 中声明可选 `pre_start_command`，用于准�
 
 发布候选路径使用 `platform/e2e/release-native-capture-artifact-smoke.sh` 作为 VS-MA-14/15 的 release-scope native capture artifact gate。该 wrapper 固定启用 `MA_NATIVE_CAPTURE_SMOKE=1` 和 `MA_NATIVE_CAPTURE_RELEASE_SCOPE=1`，调用同一个 `native-capture-artifact-smoke.sh`，并让结构化 report 声明 `release_gate=release-scope-native-capture`。`scripts/release-preflight.sh` 在 `product-validation-check.py release` 之后注册该步骤；当前只要任一发布范围 `PV-MA-*` 仍为 `partial`，release preflight 会先 fail closed，不会继续运行该 release-scope native capture 步骤。即使该步骤通过，它也只关闭 VS-MA-14/15 阶段门禁的一部分，仍不单独证明 VS-MA-23 release readiness、独立系统/麦克风音频真实产物、跨机器 TCC/display 可重复、完整 native-to-processing 成功 transcript 链或 release bundle。
 
+发布候选路径还使用 `platform/e2e/release-capture-processing-hardening-smoke.sh` 作为 VS-MA-21 provider hardening gate。该 wrapper 运行既有 `capture-processing-smoke.sh`，再由 `platform/e2e/capture_processing_hardening_report.py` 生成结构化 report，声明 `release_gate=release-scope-provider-hardening`，并校验 no-auto-download、path/lock/temp/checksum rollback、provider failure redaction、retry success 和 capture checksum preservation marker 都存在。它同样排在 `product-validation-check.py release` 之后；当前 PV 仍为 `partial` 时不会作为发布放行证据。即使该步骤通过，它也仍保持 `not_release_readiness=true`，不证明真实 ScreenCaptureKit 并发、native UI release-scope 并发、真实 release bundle 或 VS-MA-23 release readiness。
+
 已注册的非业务 skeleton 只能承载未来原生录制控制面、本地 processing、dependency-check、artifact contract、transcription adapter、speaker-label fallback 和 export 命令边界。
 
 注册组件必须提供 argv 形式的标准命令：
