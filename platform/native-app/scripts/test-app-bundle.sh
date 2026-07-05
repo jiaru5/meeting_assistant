@@ -326,8 +326,8 @@ if [[ "$real_runtime_smoke" == "1" || "$real_runtime_smoke" == "true" || "$real_
 
   if [[ "$test_status" -ne 0 ]]; then
     echo "native-app real runtime app-bundle XCUITest failed. Captured xcodebuild log: $real_runtime_log" >&2
+    write_ui_testing_automation_blocker_report "real runtime" "$real_runtime_log" "$real_runtime_ui_automation_report" "$test_status"
     if is_ui_testing_automation_blocked "$real_runtime_log"; then
-      write_ui_testing_automation_blocker_report "real runtime" "$real_runtime_log" "$real_runtime_ui_automation_report" "$test_status"
       print_ui_testing_automation_help "real runtime" "$real_runtime_log"
       print_ui_testing_automation_process_diagnostics
       print_ui_testing_automation_log_excerpt

@@ -789,6 +789,22 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn(".harness/release-inputs/supply-chain/release-provenance-report.json", dev_commands)
         self.assertNotIn(".harness/evidence/release/supply-chain/release-provenance-report.json", dev_commands)
 
+    def test_real_runtime_app_bundle_failures_always_refresh_structured_report(self) -> None:
+        script = (ROOT / "platform/native-app/scripts/test-app-bundle.sh").read_text(encoding="utf-8")
+        failure_block = script[
+            script.index('echo "native-app real runtime app-bundle XCUITest failed.')
+            : script.index('echo "native-app real runtime app-bundle XCUITest passed."')
+        ]
+
+        self.assertIn("write_ui_testing_automation_blocker_report", failure_block)
+        self.assertIn("is_ui_testing_automation_blocked", failure_block)
+        self.assertLess(
+            failure_block.index("write_ui_testing_automation_blocker_report"),
+            failure_block.index("if is_ui_testing_automation_blocked"),
+        )
+        self.assertIn("real-runtime-ui-automation-report.json", script)
+        self.assertIn("native_app_bundle_ui_automation_report.py", script)
+
     def test_release_preflight_registers_release_bundle_gate_before_supply_chain(self) -> None:
         release_preflight = (ROOT / "scripts/release-preflight.sh").read_text(encoding="utf-8")
         dev_commands = (ROOT / "docs/engineering/02-dev-commands.md").read_text(encoding="utf-8")
