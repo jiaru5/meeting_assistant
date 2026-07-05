@@ -38,6 +38,8 @@
 
 Meeting Assistant 当前 native app 和 processing CLI 的 `Dockerfile` 是 release gate 用的最小 validation image：只验证 digest-pinned base、非 root `USER`、组件元数据和 SBOM 文件存在，不代表 macOS app 已具备团队分发包、真实 capture 发布物或生产服务镜像。产品发布可用性仍以 `06-product-validation-matrix.md` 中 `PV-MA-*` 是否达到 `covered` 为准。
 
+当前 native app 和 processing CLI 组件 SBOM 必须显式声明 first-party application 的 `Apache-2.0` license evidence、`packaged-third-party-runtime-components=none` 和 `release-gate-image=validation-only`。这些字段只证明当前 validation image 没有打包第三方 runtime component，并且 SBOM gate 会在许可证或范围声明退化时 fail closed；不等同于完整 release-scope SCA、provenance、签名、公证或模型 sidecar 放行。
+
 ## Meeting Assistant MVP 依赖策略
 
 `meeting_assistant` Phase 1 采用允许来源 + 人工安装策略：

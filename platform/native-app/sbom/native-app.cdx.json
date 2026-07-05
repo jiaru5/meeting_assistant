@@ -7,8 +7,29 @@
     "component": {
       "type": "application",
       "name": "meeting-assistant-native-app",
-      "version": "0.1.0-vs-ma-12"
-    }
+      "version": "0.1.0-vs-ma-12",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ]
+    },
+    "properties": [
+      {
+        "name": "meeting-assistant:license-evidence",
+        "value": "Apache-2.0"
+      },
+      {
+        "name": "meeting-assistant:packaged-third-party-runtime-components",
+        "value": "none"
+      },
+      {
+        "name": "meeting-assistant:release-gate-image",
+        "value": "validation-only"
+      }
+    ]
   },
   "components": []
 }

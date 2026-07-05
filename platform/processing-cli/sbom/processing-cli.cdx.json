@@ -7,8 +7,29 @@
     "component": {
       "type": "application",
       "name": "meeting-assistant-processing-cli",
-      "version": "0.1.0-dependency-check"
-    }
+      "version": "0.1.0-dependency-check",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ]
+    },
+    "properties": [
+      {
+        "name": "meeting-assistant:license-evidence",
+        "value": "Apache-2.0"
+      },
+      {
+        "name": "meeting-assistant:packaged-third-party-runtime-components",
+        "value": "none"
+      },
+      {
+        "name": "meeting-assistant:release-gate-image",
+        "value": "validation-only"
+      }
+    ]
   },
   "components": []
 }
