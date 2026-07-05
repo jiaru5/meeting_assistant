@@ -299,7 +299,9 @@ private enum AppleScreenCaptureKitRuntimeError: Error, LocalizedError {
     case unavailable(String)
     case noDisplayAvailable
     case unknownRecording(AppleScreenCaptureKitRecordingToken)
+    case recordingOutputStartTimedOut
     case recordingOutputTimedOut
+    case recordingOutputWaitAlreadyActive(String)
 
     var errorDescription: String? {
         switch self {
@@ -309,8 +311,12 @@ private enum AppleScreenCaptureKitRuntimeError: Error, LocalizedError {
             return "No ScreenCaptureKit display is available for native capture."
         case .unknownRecording(let token):
             return "ScreenCaptureKit recording token is not active: \(token.rawValue)."
+        case .recordingOutputStartTimedOut:
+            return "ScreenCaptureKit recording output did not start before timeout."
         case .recordingOutputTimedOut:
             return "ScreenCaptureKit recording output did not finish writing before timeout."
+        case .recordingOutputWaitAlreadyActive(let phase):
+            return "ScreenCaptureKit recording output already has an active \(phase) waiter."
         }
     }
 }
@@ -354,10 +360,16 @@ private actor DefaultAppleScreenCaptureKitRecordingRuntime: AppleScreenCaptureKi
             configuration: recordingConfiguration,
             delegate: recordingDelegate
         )
-        try stream.addRecordingOutput(recordingOutput)
-        try await stream.startCapture()
-        try streamDelegate.throwIfFailed()
-        try recordingDelegate.throwIfFailed()
+        do {
+            try stream.addRecordingOutput(recordingOutput)
+            try await stream.startCapture()
+            try streamDelegate.throwIfFailed()
+            try await recordingDelegate.waitForStart()
+            try recordingDelegate.throwIfFailed()
+        } catch {
+            try? await stream.stopCapture()
+            throw error
+        }
 
         let token = AppleScreenCaptureKitRecordingToken(rawValue: context.sessionID)
         recordings[token] = ScreenCaptureKitRecordingSession(
@@ -379,10 +391,10 @@ private actor DefaultAppleScreenCaptureKitRecordingRuntime: AppleScreenCaptureKi
 
         do {
             try session.stream.removeRecordingOutput(session.recordingOutput)
-            try await session.stream.stopCapture()
             try await session.recordingDelegate.waitForFinish()
             try session.streamDelegate.throwIfFailed()
             try session.recordingDelegate.throwIfFailed()
+            try? await session.stream.stopCapture()
             return AppleScreenCaptureKitRecordingFile(url: session.outputURL, format: "mp4")
         } catch {
             try? await session.stream.stopCapture()
@@ -421,42 +433,131 @@ private final class ScreenCaptureKitStreamDelegate: NSObject, SCStreamDelegate, 
 
 @available(macOS 15.0, *)
 private final class ScreenCaptureKitRecordingOutputDelegate: NSObject, SCRecordingOutputDelegate, @unchecked Sendable {
-    private let lock = NSLock()
-    private var failure: Error?
-    private var didFinish = false
-    private var finishContinuation: CheckedContinuation<Void, Error>?
+    private let eventState = ScreenCaptureKitRecordingEventState()
+
+    func recordingOutputDidStartRecording(_ recordingOutput: SCRecordingOutput) {
+        eventState.recordingDidStart()
+    }
 
     func recordingOutput(
         _ recordingOutput: SCRecordingOutput,
         didFailWithError error: Error
     ) {
-        let continuation = lock.withLock {
-            failure = error
-            let continuation = finishContinuation
-            finishContinuation = nil
-            return continuation
-        }
-        continuation?.resume(throwing: error)
+        eventState.recordingDidFail(error)
     }
 
     func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) {
-        let continuation = lock.withLock {
-            didFinish = true
-            let continuation = finishContinuation
-            finishContinuation = nil
+        eventState.recordingDidFinish()
+    }
+
+    func waitForStart() async throws {
+        try await eventState.waitForStart()
+    }
+
+    func waitForFinish() async throws {
+        try await eventState.waitForFinish()
+    }
+
+    func throwIfFailed() throws {
+        try eventState.throwIfFailed()
+    }
+}
+
+final class ScreenCaptureKitRecordingEventState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var failure: Error?
+    private var didStart = false
+    private var didFinish = false
+    private var startContinuation: CheckedContinuation<Void, Error>?
+    private var finishContinuation: CheckedContinuation<Void, Error>?
+
+    func recordingDidStart() {
+        let continuation = lock.withLock { () -> CheckedContinuation<Void, Error>? in
+            didStart = true
+            let continuation = startContinuation
+            startContinuation = nil
             return continuation
         }
         continuation?.resume()
     }
 
-    func waitForFinish() async throws {
+    func recordingDidFail(_ error: Error) {
+        let continuations = lock.withLock { () -> [CheckedContinuation<Void, Error>] in
+            failure = error
+            var continuations: [CheckedContinuation<Void, Error>] = []
+            if let startContinuation {
+                continuations.append(startContinuation)
+                self.startContinuation = nil
+            }
+            if let finishContinuation {
+                continuations.append(finishContinuation)
+                self.finishContinuation = nil
+            }
+            return continuations
+        }
+        for continuation in continuations {
+            continuation.resume(throwing: error)
+        }
+    }
+
+    func recordingDidFinish() {
+        let continuations = lock.withLock { () -> [CheckedContinuation<Void, Error>] in
+            didStart = true
+            didFinish = true
+            var continuations: [CheckedContinuation<Void, Error>] = []
+            if let startContinuation {
+                continuations.append(startContinuation)
+                self.startContinuation = nil
+            }
+            if let finishContinuation {
+                continuations.append(finishContinuation)
+                self.finishContinuation = nil
+            }
+            return continuations
+        }
+        for continuation in continuations {
+            continuation.resume()
+        }
+    }
+
+    func waitForStart(timeoutSeconds: TimeInterval = 10) async throws {
         try await withCheckedThrowingContinuation { continuation in
             let result: Result<Void, Error>? = lock.withLock {
                 if let failure {
-                    return Result<Void, Error>.failure(failure)
+                    return .failure(failure)
+                }
+                if didStart || didFinish {
+                    return .success(())
+                }
+                if startContinuation != nil {
+                    return .failure(AppleScreenCaptureKitRuntimeError.recordingOutputWaitAlreadyActive("start"))
+                }
+                startContinuation = continuation
+                return nil
+            }
+            if let result {
+                continuation.resume(with: result)
+                return
+            }
+            scheduleTimeout(
+                seconds: timeoutSeconds,
+                error: AppleScreenCaptureKitRuntimeError.recordingOutputStartTimedOut,
+                phase: .start
+            )
+        }
+    }
+
+    func waitForFinish(timeoutSeconds: TimeInterval = 10) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            let result: Result<Void, Error>? = lock.withLock {
+                if let failure {
+                    return .failure(failure)
                 }
                 if didFinish {
-                    return Result<Void, Error>.success(())
+                    return .success(())
+                }
+                if finishContinuation != nil {
+                    return .failure(AppleScreenCaptureKitRuntimeError.recordingOutputWaitAlreadyActive("finish"))
                 }
                 finishContinuation = continuation
                 return nil
@@ -465,17 +566,11 @@ private final class ScreenCaptureKitRecordingOutputDelegate: NSObject, SCRecordi
                 continuation.resume(with: result)
                 return
             }
-            DispatchQueue.global().asyncAfter(deadline: .now() + 10) { [weak self] in
-                let continuation = self?.lock.withLock { () -> CheckedContinuation<Void, Error>? in
-                    guard let continuation = self?.finishContinuation else {
-                        return nil
-                    }
-                    self?.failure = AppleScreenCaptureKitRuntimeError.recordingOutputTimedOut
-                    self?.finishContinuation = nil
-                    return continuation
-                }
-                continuation?.resume(throwing: AppleScreenCaptureKitRuntimeError.recordingOutputTimedOut)
-            }
+            scheduleTimeout(
+                seconds: timeoutSeconds,
+                error: AppleScreenCaptureKitRuntimeError.recordingOutputTimedOut,
+                phase: .finish
+            )
         }
     }
 
@@ -483,6 +578,51 @@ private final class ScreenCaptureKitRecordingOutputDelegate: NSObject, SCRecordi
         let error = lock.withLock { failure }
         if let error {
             throw error
+        }
+    }
+
+    private enum WaitPhase {
+        case start
+        case finish
+    }
+
+    private func scheduleTimeout(
+        seconds: TimeInterval,
+        error: Error,
+        phase: WaitPhase
+    ) {
+        let milliseconds = max(1, Int(seconds * 1_000))
+        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(milliseconds)) {
+            let continuations = self.lock.withLock { () -> [CheckedContinuation<Void, Error>] in
+                if self.failure != nil {
+                    return []
+                }
+
+                switch phase {
+                case .start:
+                    guard let startContinuation = self.startContinuation else {
+                        return []
+                    }
+                    self.failure = error
+                    self.startContinuation = nil
+                    var continuations = [startContinuation]
+                    if let finishContinuation = self.finishContinuation {
+                        continuations.append(finishContinuation)
+                        self.finishContinuation = nil
+                    }
+                    return continuations
+                case .finish:
+                    guard let finishContinuation = self.finishContinuation else {
+                        return []
+                    }
+                    self.failure = error
+                    self.finishContinuation = nil
+                    return [finishContinuation]
+                }
+            }
+            for continuation in continuations {
+                continuation.resume(throwing: error)
+            }
         }
     }
 }

@@ -648,6 +648,47 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         assertDoesNotExist("ma.transcript.degradation", in: reviewApp)
     }
 
+    func testRealProcessingCLIProcessesNativeRecordingFromLaunchedAppBundleWhenExplicitlyEnabled() throws {
+        try XCTSkipUnless(
+            Self.realProcessingCLISmokeEnabled(),
+            "Set MA_NATIVE_APP_REAL_PROCESSING_SMOKE=1 to run the real processing-cli app-bundle smoke."
+        )
+
+        let processingFixture = try AppRealProcessingCLIFixture()
+        defer { processingFixture.cleanup() }
+        let app = launchApp(fixture: "ready", realProcessingFixture: processingFixture)
+
+        tapProcessingButton(
+            "ma.processing.startButton",
+            in: app,
+            expectingStatus: "Processing completed with transcript-only speaker labels."
+        )
+
+        assertElement(
+            "ma.processing.status",
+            in: app,
+            contains: "Processing completed with transcript-only speaker labels."
+        )
+        assertElement("ma.processing.transcriptStatus", in: app, contains: "generated with 1 segment")
+        assertElement("ma.processing.speakerLabelStatus", in: app, contains: "Speaker labels degraded:")
+        assertElement("ma.processing.degradation", in: app, contains: "transcript-only fallback")
+        assertDoesNotExist("ma.processing.error", in: app)
+
+        let session = try processingFixture.sessionMetadata()
+        let artifacts = try XCTUnwrap(session["artifacts"] as? [[String: Any]])
+        let artifactTypes = Set(artifacts.compactMap { $0["artifact_type"] as? String })
+        XCTAssertTrue(artifactTypes.isSuperset(of: ["mixed_audio", "normalized_audio", "transcript_text", "speaker_labels"]))
+        XCTAssertEqual(
+            artifacts.first { $0["artifact_type"] as? String == "speaker_labels" }?["capture_status"] as? String,
+            "degraded"
+        )
+
+        let transcript = try processingFixture.transcriptPayload()
+        let segments = try XCTUnwrap(transcript["segments"] as? [[String: Any]])
+        XCTAssertEqual(segments.count, 1)
+        XCTAssertEqual(segments.first?["text"] as? String, "Fake transcript generated from local audio.")
+    }
+
     private func launchApp(
         fixture: String? = nil,
         workspaceURL: URL? = nil,
@@ -655,6 +696,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         recordingFixture: AppControlledRecordingFixture? = nil,
         realCaptureFixture: AppAppleScreenCaptureKitRecordingFixture? = nil,
         processingFixture: AppProcessingProcessFixture? = nil,
+        realProcessingFixture: AppRealProcessingCLIFixture? = nil,
         transcriptActionFixture: AppTranscriptActionProcessFixture? = nil
     ) -> XCUIApplication {
         dismissSpotlightIfPresent()
@@ -685,6 +727,9 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         }
         if let processingFixture {
             processingFixture.applyLaunchEnvironment(to: app)
+        }
+        if let realProcessingFixture {
+            realProcessingFixture.applyLaunchEnvironment(to: app)
         }
         if let transcriptActionFixture {
             transcriptActionFixture.applyLaunchEnvironment(to: app)
@@ -1184,6 +1229,17 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
 
     private func transcriptActionInvocationLine(parts: [String], arguments: [String]) -> String {
         ([parts.joined(separator: "_")] + arguments).joined(separator: " ")
+    }
+
+    private static func realProcessingCLISmokeEnabled() -> Bool {
+        switch ProcessInfo.processInfo.environment["MA_NATIVE_APP_REAL_PROCESSING_SMOKE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() {
+        case "1", "true", "yes":
+            return true
+        default:
+            return false
+        }
     }
 
     private func bringAppToForeground(
@@ -1687,5 +1743,157 @@ private final class AppProcessingProcessFixture {
         let data = try Data(contentsOf: sessionURL)
         let payload = try JSONSerialization.jsonObject(with: data)
         return try XCTUnwrap(payload as? [String: Any])
+    }
+}
+
+private final class AppRealProcessingCLIFixture {
+    let rootURL: URL
+    let workspaceURL: URL
+    let cliURL: URL
+    let sessionID = "session-app-ui-smoke"
+
+    var sessionRootURL: URL {
+        workspaceURL
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+    }
+
+    init(sourceFile: StaticString = #filePath) throws {
+        let nativeAppRootURL = URL(fileURLWithPath: String(describing: sourceFile))
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        cliURL = nativeAppRootURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("e2e", isDirectory: true)
+            .appendingPathComponent("ma-cli-local.sh", isDirectory: false)
+
+        guard FileManager.default.isExecutableFile(atPath: cliURL.path) else {
+            throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: cliURL.path])
+        }
+
+        rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ma-native-real-processing-app-\(UUID().uuidString)", isDirectory: true)
+        workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+
+        try FileManager.default.createDirectory(
+            at: sessionRootURL.appendingPathComponent("artifacts", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: sessionRootURL.appendingPathComponent("logs", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try createNativeRecordingWorkspace()
+    }
+
+    deinit {
+        cleanup()
+    }
+
+    func applyLaunchEnvironment(to app: XCUIApplication) {
+        app.launchEnvironment["MA_NATIVE_PROCESSING_CLIENT"] = "process"
+        app.launchEnvironment["MA_NATIVE_APP_XCTEST"] = "1"
+        app.launchEnvironment["MEETING_ASSISTANT_CLI_PATH"] = cliURL.path
+        app.launchEnvironment["MEETING_ASSISTANT_WORKSPACE"] = workspaceURL.path
+    }
+
+    func cleanup() {
+        try? FileManager.default.removeItem(at: rootURL)
+    }
+
+    func sessionMetadata() throws -> [String: Any] {
+        let data = try Data(contentsOf: sessionRootURL.appendingPathComponent("session.json"))
+        let payload = try JSONSerialization.jsonObject(with: data)
+        return try XCTUnwrap(payload as? [String: Any])
+    }
+
+    func transcriptPayload() throws -> [String: Any] {
+        let session = try sessionMetadata()
+        let artifacts = try XCTUnwrap(session["artifacts"] as? [[String: Any]])
+        let transcript = try XCTUnwrap(artifacts.first { $0["artifact_type"] as? String == "transcript_text" })
+        let path = try XCTUnwrap(transcript["path"] as? String)
+        let transcriptURL = URL(fileURLWithPath: path, relativeTo: sessionRootURL)
+        let data = try Data(contentsOf: transcriptURL)
+        let payload = try JSONSerialization.jsonObject(with: data)
+        return try XCTUnwrap(payload as? [String: Any])
+    }
+
+    private func createNativeRecordingWorkspace() throws {
+        let artifactsURL = sessionRootURL.appendingPathComponent("artifacts", isDirectory: true)
+        let audioURL = artifactsURL.appendingPathComponent("mixed_audio.wav", isDirectory: false)
+        let audioData = Self.fixtureWAVData()
+        try audioData.write(to: audioURL)
+        let audioChecksum = Self.sha256(audioData)
+        let now = "2026-07-05T00:00:00Z"
+
+        _ = try writeJSON(
+            [
+                "id": sessionID,
+                "title": "Real processing CLI app-bundle fixture",
+                "source_type": "native_recording",
+                "status": "recorded",
+                "started_at": now,
+                "workspace_dir": sessionRootURL.path,
+                "created_at": now,
+                "updated_at": now,
+                "artifacts": [
+                    [
+                        "id": "artifact-real-processing-mixed",
+                        "session_id": sessionID,
+                        "artifact_type": "mixed_audio",
+                        "path": "artifacts/mixed_audio.wav",
+                        "format": "wav",
+                        "capture_status": "available",
+                        "checksum": audioChecksum,
+                        "created_at": now,
+                    ],
+                ],
+            ],
+            to: sessionRootURL.appendingPathComponent("session.json", isDirectory: false)
+        )
+    }
+
+    @discardableResult
+    private func writeJSON(_ payload: Any, to url: URL) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: url)
+        return Self.sha256(data)
+    }
+
+    private static func fixtureWAVData() -> Data {
+        var samples = Data()
+        for index in 0..<2_400 {
+            let value = Int16((((index + 31) % 96) - 48) * 96)
+            appendLittleEndian(value, to: &samples)
+        }
+
+        var data = Data()
+        data.append(Data("RIFF".utf8))
+        appendLittleEndian(UInt32(36 + samples.count), to: &data)
+        data.append(Data("WAVE".utf8))
+        data.append(Data("fmt ".utf8))
+        appendLittleEndian(UInt32(16), to: &data)
+        appendLittleEndian(UInt16(1), to: &data)
+        appendLittleEndian(UInt16(1), to: &data)
+        appendLittleEndian(UInt32(8_000), to: &data)
+        appendLittleEndian(UInt32(16_000), to: &data)
+        appendLittleEndian(UInt16(2), to: &data)
+        appendLittleEndian(UInt16(16), to: &data)
+        data.append(Data("data".utf8))
+        appendLittleEndian(UInt32(samples.count), to: &data)
+        data.append(samples)
+        return data
+    }
+
+    private static func appendLittleEndian<T: FixedWidthInteger>(_ value: T, to data: inout Data) {
+        var littleEndian = value.littleEndian
+        withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
+    }
+
+    private static func sha256(_ data: Data) -> String {
+        let digest = SHA256.hash(data: data)
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "sha256:\(hex)"
     }
 }

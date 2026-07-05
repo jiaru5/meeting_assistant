@@ -364,6 +364,64 @@ struct NativeRecordingCommandClientTests {
     }
 
     @Test
+    func screenCaptureKitRecordingEventStateWaitsForStartAndFinishCallbacks() async throws {
+        let eventState = ScreenCaptureKitRecordingEventState()
+
+        let startWait = Task {
+            try await eventState.waitForStart(timeoutSeconds: 1)
+        }
+        try await Task.sleep(nanoseconds: 10_000_000)
+        eventState.recordingDidStart()
+        try await startWait.value
+
+        let finishWait = Task {
+            try await eventState.waitForFinish(timeoutSeconds: 1)
+        }
+        try await Task.sleep(nanoseconds: 10_000_000)
+        eventState.recordingDidFinish()
+        try await finishWait.value
+    }
+
+    @Test
+    func screenCaptureKitRecordingEventStateTimeoutsResumeWaiters() async throws {
+        let eventState = ScreenCaptureKitRecordingEventState()
+
+        do {
+            try await eventState.waitForFinish(timeoutSeconds: 0.02)
+            Issue.record("Expected ScreenCaptureKit recording finish wait to time out.")
+        } catch {
+            #expect(error.localizedDescription.contains("did not finish writing before timeout"))
+        }
+    }
+
+    @Test
+    func screenCaptureKitRecordingEventStateFailureResumesStartAndFinishWaiters() async throws {
+        let eventState = ScreenCaptureKitRecordingEventState()
+        let startWait = Task {
+            try await eventState.waitForStart(timeoutSeconds: 1)
+        }
+        let finishWait = Task {
+            try await eventState.waitForFinish(timeoutSeconds: 1)
+        }
+
+        try await Task.sleep(nanoseconds: 10_000_000)
+        eventState.recordingDidFail(FakeAppleScreenCaptureKitRuntimeError(message: "recording output failed"))
+
+        do {
+            try await startWait.value
+            Issue.record("Expected ScreenCaptureKit recording start waiter to fail.")
+        } catch {
+            #expect(error.localizedDescription == "recording output failed")
+        }
+        do {
+            try await finishWait.value
+            Issue.record("Expected ScreenCaptureKit recording finish waiter to fail.")
+        } catch {
+            #expect(error.localizedDescription == "recording output failed")
+        }
+    }
+
+    @Test
     func screenCaptureKitCombinedRecordingRegistersPartialAudioDegradation() async throws {
         let workspace = try temporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }

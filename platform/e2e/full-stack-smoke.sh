@@ -39,10 +39,19 @@ run_stage() {
 
 run_stage "processing local smoke" "p2-c processing local e2e smoke passed." "./platform/e2e/smoke-test.sh"
 run_stage "capture-style processing smoke" "capture-style processing e2e smoke passed." "./platform/e2e/capture-processing-smoke.sh"
+case "${MA_NATIVE_CAPTURE_SMOKE:-0}" in
+  1|true|TRUE|yes|YES)
+    run_stage "real native capture artifact smoke" "real native capture artifact e2e smoke passed." "./platform/e2e/native-capture-artifact-smoke.sh"
+    ;;
+  *)
+    echo "full-stack e2e smoke optional stage skipped: set MA_NATIVE_CAPTURE_SMOKE=1 to include real native capture artifact smoke."
+    ;;
+esac
 run_stage "native transcript bridge and designed shell smoke" "designed native shell bridge smoke passed." "./platform/e2e/native-transcript-bridge-smoke.sh"
 
 echo "VS-MA-20 provider/e2e attribution [non-contract]: import processing chain remains in scope."
 echo "VS-MA-20 provider/e2e attribution [non-contract]: native_recording-style provider chain remains in scope."
+echo "VS-MA-20 provider/e2e attribution [non-contract]: real native capture artifact stage is opt-in via MA_NATIVE_CAPTURE_SMOKE=1 and remains partial evidence."
 echo "VS-MA-20 provider/e2e attribution [non-contract]: native read bridge checksum remains in scope."
 echo "VS-MA-20 provider/e2e attribution [non-contract]: designed native shell app-root and ma.shell locator bridge remain in scope."
 echo "VS-MA-20 provider/e2e attribution [non-contract]: no-auto-pull precondition remains in scope."

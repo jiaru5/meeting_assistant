@@ -9,6 +9,9 @@ destination="${MA_NATIVE_APP_XCODE_DESTINATION:-platform=macOS}"
 real_capture_smoke="${MA_NATIVE_APP_REAL_CAPTURE_SMOKE:-0}"
 real_capture_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testOptInAppleScreenCaptureKitRecordsFromDesignedShellWhenExplicitlyEnabled"
 real_capture_log="$derived_data_path/real-capture-app-bundle-smoke.log"
+real_processing_smoke="${MA_NATIVE_APP_REAL_PROCESSING_SMOKE:-0}"
+real_processing_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testRealProcessingCLIProcessesNativeRecordingFromLaunchedAppBundleWhenExplicitlyEnabled"
+real_processing_log="$derived_data_path/real-processing-app-bundle-smoke.log"
 
 mkdir -p "$derived_data_path"
 
@@ -49,6 +52,56 @@ Optional settings shortcut:
 EOF
 }
 
+print_ui_testing_automation_help() {
+  local smoke_name="$1"
+  local log_path="$2"
+
+  cat >&2 <<EOF
+
+native-app ${smoke_name} app-bundle XCUITest was blocked before the test body by macOS UI automation setup.
+The runner reported LocalAuthentication or Automation Mode initialization failure, so this run cannot prove UI or provider behavior.
+Captured xcodebuild log: $log_path
+
+To unblock this machine:
+  1. Resolve or dismiss any pending macOS loginwindow / Touch ID / password authentication prompt.
+  2. Keep the display awake and unlocked before starting the app-bundle smoke.
+  3. Check System Settings > Privacy & Security > Accessibility / Developer Tools for Xcode and the UI test runner if macOS prompts for automation control.
+  4. Rerun the same command after Automation Mode can be enabled without another LocalAuthentication request or timeout.
+EOF
+}
+
+print_ui_testing_automation_log_excerpt() {
+  local output
+
+  if ! command -v /usr/bin/log >/dev/null 2>&1; then
+    return 0
+  fi
+
+  output="$(
+    /usr/bin/log show \
+      --style compact \
+      --last 3m \
+      --predicate 'process == "testmanagerd" OR process == "loginwindow" OR process == "coreauthd" OR process == "MeetingAssistantNativeAppUITests-Runner" OR eventMessage CONTAINS[c] "Failed to enable Automation Mode" OR eventMessage CONTAINS[c] "Timed out while enabling automation mode" OR eventMessage CONTAINS[c] "System authentication is running"' \
+      2>/dev/null \
+      | grep -Ei 'Failed to enable Automation Mode|Timed out while enabling automation mode|System authentication is running|loginwindow.*CoreAuthentication|remoteAuthenticationInProgress|MeetingAssistantNativeAppUITests-Runner|testmanagerd' \
+      | tail -n 40
+  )" || true
+
+  if [[ -n "$output" ]]; then
+    {
+      echo
+      echo "UI automation diagnostic excerpt:"
+      echo "$output"
+    } >&2
+  fi
+}
+
+is_ui_testing_automation_blocked() {
+  local log_path="$1"
+
+  grep -Eqi 'LocalAuthentication|System authentication is running|Timed out while enabling automation mode|Failed to initialize for UI testing|Failed to enable Automation Mode' "$log_path"
+}
+
 if [[ "$real_capture_smoke" == "1" || "$real_capture_smoke" == "true" || "$real_capture_smoke" == "yes" ]]; then
   xcodebuild build-for-testing \
     -project "$component_dir/MeetingAssistantNative.xcodeproj" \
@@ -77,6 +130,10 @@ if [[ "$real_capture_smoke" == "1" || "$real_capture_smoke" == "true" || "$real_
 
   if [[ "$test_status" -ne 0 ]]; then
     echo "native-app real capture app-bundle XCUITest failed. Captured xcodebuild log: $real_capture_log" >&2
+    if is_ui_testing_automation_blocked "$real_capture_log"; then
+      print_ui_testing_automation_help "real capture" "$real_capture_log"
+      print_ui_testing_automation_log_excerpt
+    fi
     if grep -q "permission_denied" "$real_capture_log"; then
       print_real_capture_permission_help "$app_bundle_path"
     fi
@@ -84,6 +141,43 @@ if [[ "$real_capture_smoke" == "1" || "$real_capture_smoke" == "true" || "$real_
   fi
 
   echo "native-app real capture app-bundle XCUITest passed."
+  exit 0
+fi
+
+if [[ "$real_processing_smoke" == "1" || "$real_processing_smoke" == "true" || "$real_processing_smoke" == "yes" ]]; then
+  xcodebuild build-for-testing \
+    -project "$component_dir/MeetingAssistantNative.xcodeproj" \
+    -scheme "MeetingAssistantNative" \
+    -destination "$destination" \
+    -derivedDataPath "$derived_data_path" \
+    -parallel-testing-enabled NO
+
+  xctestrun_path="$(find "$derived_data_path/Build/Products" -maxdepth 1 -name "*.xctestrun" -print -quit)"
+  if [[ -z "$xctestrun_path" ]]; then
+    echo "error: build-for-testing did not produce an .xctestrun file under $derived_data_path/Build/Products" >&2
+    exit 1
+  fi
+
+  set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_REAL_PROCESSING_SMOKE" "1"
+
+  set +e
+  xcodebuild test-without-building \
+    -xctestrun "$xctestrun_path" \
+    -destination "$destination" \
+    "-only-testing:$real_processing_test" 2>&1 | tee "$real_processing_log"
+  test_status=${PIPESTATUS[0]}
+  set -e
+
+  if [[ "$test_status" -ne 0 ]]; then
+    echo "native-app real processing app-bundle XCUITest failed. Captured xcodebuild log: $real_processing_log" >&2
+    if is_ui_testing_automation_blocked "$real_processing_log"; then
+      print_ui_testing_automation_help "real processing" "$real_processing_log"
+      print_ui_testing_automation_log_excerpt
+    fi
+    exit "$test_status"
+  fi
+
+  echo "native-app real processing app-bundle XCUITest passed."
   exit 0
 fi
 

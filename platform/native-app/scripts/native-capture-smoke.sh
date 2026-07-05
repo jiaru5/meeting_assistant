@@ -23,10 +23,16 @@ run_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 workspace="${MA_NATIVE_CAPTURE_SMOKE_WORKSPACE:-$component_dir/build/native-capture-smoke/workspace-$run_stamp}"
 session_id="${MA_NATIVE_CAPTURE_SMOKE_SESSION_ID:-session-native-capture-smoke-$run_stamp-$$}"
 duration_seconds="${MA_NATIVE_CAPTURE_SMOKE_DURATION_SECONDS:-2}"
+timeout_seconds="${MA_NATIVE_CAPTURE_SMOKE_TIMEOUT_SECONDS:-90}"
 capture_system_audio="${MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO:-false}"
 capture_microphone_audio="${MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO:-false}"
 title="${MA_NATIVE_CAPTURE_SMOKE_TITLE:-Native capture smoke $run_stamp}"
 build_root="${MA_NATIVE_CAPTURE_SMOKE_BUILD_DIR:-$component_dir/build/native-capture-smoke/build-$run_stamp-$$}"
+
+if ! [[ "$timeout_seconds" =~ ^[1-9][0-9]*$ ]] || ((timeout_seconds > 600)); then
+  echo "native capture smoke failed: MA_NATIVE_CAPTURE_SMOKE_TIMEOUT_SECONDS must be an integer from 1 to 600." >&2
+  exit 2
+fi
 
 mkdir -p "$(dirname "$workspace")" "$build_root"
 tmp_dir="$(mktemp -d "$build_root/package.XXXXXX")"
@@ -93,6 +99,7 @@ struct SmokeSummary: Encodable {
     let screenVideoBytes: Int?
     let screenVideoChecksum: String?
     let artifactStatuses: [String: String]
+    let artifactDegradationReasons: [String: String]
     let validationErrors: [String]
     let notes: [String]
 }
@@ -155,6 +162,7 @@ struct ValidationOutcome {
     let screenVideoBytes: Int?
     let screenVideoChecksum: String?
     let artifactStatuses: [String: String]
+    let artifactDegradationReasons: [String: String]
     let errors: [String]
 }
 
@@ -179,12 +187,14 @@ struct SessionArtifactMetadata: Decodable {
     let path: String
     let captureStatus: String
     let checksum: String?
+    let degradationReason: String?
 
     private enum CodingKeys: String, CodingKey {
         case artifactType = "artifact_type"
         case path
         case captureStatus = "capture_status"
         case checksum
+        case degradationReason = "degradation_reason"
     }
 }
 
@@ -318,7 +328,9 @@ struct NativeCaptureSmoke {
 
         let validation = validateSession(
             workspaceURL: configuration.workspaceURL,
-            sessionID: startedSessionID
+            sessionID: startedSessionID,
+            captureSystemAudio: configuration.captureSystemAudio,
+            captureMicrophoneAudio: configuration.captureMicrophoneAudio
         )
         let ok = stopResponse.ok && validation.errors.isEmpty
         let failureStage: String?
@@ -352,6 +364,7 @@ struct NativeCaptureSmoke {
             screenVideoBytes: validation.screenVideoBytes,
             screenVideoChecksum: validation.screenVideoChecksum,
             artifactStatuses: validation.artifactStatuses,
+            artifactDegradationReasons: validation.artifactDegradationReasons,
             validationErrors: validation.errors,
             notes: notes
         )
@@ -383,6 +396,7 @@ struct NativeCaptureSmoke {
             screenVideoBytes: nil,
             screenVideoChecksum: nil,
             artifactStatuses: [:],
+            artifactDegradationReasons: [:],
             validationErrors: [],
             notes: notes
         )
@@ -420,7 +434,12 @@ struct NativeCaptureSmoke {
         )
     }
 
-    private static func validateSession(workspaceURL: URL, sessionID: String) -> ValidationOutcome {
+    private static func validateSession(
+        workspaceURL: URL,
+        sessionID: String,
+        captureSystemAudio: Bool,
+        captureMicrophoneAudio: Bool
+    ) -> ValidationOutcome {
         let sessionURL = workspaceURL
             .appendingPathComponent("sessions", isDirectory: true)
             .appendingPathComponent(sessionID, isDirectory: true)
@@ -431,6 +450,7 @@ struct NativeCaptureSmoke {
         var screenVideoPath: String?
         var screenVideoBytes: Int?
         var screenVideoChecksum: String?
+        var artifactDegradationReasons: [String: String] = [:]
 
         guard FileManager.default.fileExists(atPath: sessionJSON.path) else {
             return ValidationOutcome(
@@ -439,6 +459,7 @@ struct NativeCaptureSmoke {
                 screenVideoBytes: nil,
                 screenVideoChecksum: nil,
                 artifactStatuses: [:],
+                artifactDegradationReasons: [:],
                 errors: ["session.json was not written at \(sessionJSON.path)"]
             )
         }
@@ -465,6 +486,13 @@ struct NativeCaptureSmoke {
             }
             for artifact in session.artifacts {
                 artifactStatuses[artifact.artifactType] = artifact.captureStatus
+                if let degradationReason = artifact.degradationReason {
+                    artifactDegradationReasons[artifact.artifactType] = degradationReason
+                }
+                if artifact.captureStatus != "available",
+                   (artifact.degradationReason ?? "").isEmpty {
+                    errors.append("\(artifact.artifactType) \(artifact.captureStatus) artifact must include degradation_reason")
+                }
             }
 
             if let screenVideo = session.artifacts.first(where: { $0.artifactType == "screen_video" }) {
@@ -502,6 +530,25 @@ struct NativeCaptureSmoke {
             } else {
                 errors.append("session.json missing screen_video artifact")
             }
+
+            validateAudioArtifact(
+                type: "system_audio",
+                expectedStatus: captureSystemAudio ? "degraded" : "missing",
+                artifacts: session.artifacts,
+                errors: &errors
+            )
+            validateAudioArtifact(
+                type: "microphone_audio",
+                expectedStatus: captureMicrophoneAudio ? "degraded" : "missing",
+                artifacts: session.artifacts,
+                errors: &errors
+            )
+            validateAudioArtifact(
+                type: "mixed_audio",
+                expectedStatus: (captureSystemAudio || captureMicrophoneAudio) ? "degraded" : "missing",
+                artifacts: session.artifacts,
+                errors: &errors
+            )
         } catch {
             errors.append("session.json validation failed: \(error.localizedDescription)")
         }
@@ -512,8 +559,33 @@ struct NativeCaptureSmoke {
             screenVideoBytes: screenVideoBytes,
             screenVideoChecksum: screenVideoChecksum,
             artifactStatuses: artifactStatuses,
+            artifactDegradationReasons: artifactDegradationReasons,
             errors: errors
         )
+    }
+
+    private static func validateAudioArtifact(
+        type: String,
+        expectedStatus: String,
+        artifacts: [SessionArtifactMetadata],
+        errors: inout [String]
+    ) {
+        guard let artifact = artifacts.first(where: { $0.artifactType == type }) else {
+            errors.append("session.json missing artifact type \(type)")
+            return
+        }
+        if artifact.captureStatus != expectedStatus {
+            errors.append("\(type) capture_status must be \(expectedStatus); got \(artifact.captureStatus)")
+        }
+        if artifact.checksum != nil {
+            errors.append("\(type) \(expectedStatus) artifact must not include a checksum")
+        }
+        if artifact.path.isEmpty || artifact.path.hasPrefix("/") || !artifact.path.hasPrefix("artifacts/") || artifact.path.contains("..") {
+            errors.append("\(type) path must stay under artifacts/")
+        }
+        if (artifact.degradationReason ?? "").isEmpty {
+            errors.append("\(type) \(expectedStatus) artifact must include degradation_reason")
+        }
     }
 
     private static func boolEnvironment(
@@ -578,5 +650,47 @@ export MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO="$capture_system_audio"
 export MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO="$capture_microphone_audio"
 export MA_NATIVE_CAPTURE_SMOKE_TITLE="$title"
 
-printf '%s\n' "native capture smoke running: workspace=$workspace session_id=$session_id duration=${duration_seconds}s" >&2
-(cd "$tmp_dir" && swift run NativeCaptureSmoke)
+run_native_capture_smoke() {
+  local executable_path="$1"
+  local timeout="$2"
+  local child_pid
+  local elapsed
+  local state
+
+  "$executable_path" &
+  child_pid=$!
+
+  while :; do
+    state="$(ps -p "$child_pid" -o state= 2>/dev/null || true)"
+    state="${state//[[:space:]]/}"
+    if [[ -z "$state" || "$state" == Z* ]]; then
+      break
+    fi
+
+    elapsed=$((SECONDS - run_start_seconds))
+    if ((elapsed >= timeout)); then
+      echo "native capture smoke failed: NativeCaptureSmoke timed out after ${timeout}s." >&2
+      kill "$child_pid" 2>/dev/null || true
+      sleep 2
+      if kill -0 "$child_pid" 2>/dev/null; then
+        kill -9 "$child_pid" 2>/dev/null || true
+      fi
+      wait "$child_pid" 2>/dev/null || true
+      printf '{"adapter":"apple_screencapturekit","failure_stage":"timeout","message":"NativeCaptureSmoke timed out after %s seconds.","ok":false,"script":"native-capture-smoke"}\n' "$timeout"
+      return 124
+    fi
+
+    sleep 1
+  done
+
+  wait "$child_pid"
+}
+
+printf '%s\n' "native capture smoke running: workspace=$workspace session_id=$session_id duration=${duration_seconds}s timeout=${timeout_seconds}s" >&2
+(
+  cd "$tmp_dir"
+  swift build --product NativeCaptureSmoke >&2
+  bin_path="$(swift build --show-bin-path)"
+  run_start_seconds=$SECONDS
+  run_native_capture_smoke "$bin_path/NativeCaptureSmoke" "$timeout_seconds"
+)

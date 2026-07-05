@@ -95,6 +95,47 @@ Phase 2 以后按“大阶段管理、纵切交付、契约验收”的方式推
 
 进入每个纵切前必须检查上方 `TDG-MA-*` 映射。若相关 TDG 未关闭，该纵切的第一交付物应是关闭 testability gate；退出口径必须在验证矩阵中记录 TDG 状态和下一步关闭条件。
 
+## 当前 VS-MA 状态盘点
+
+本表是工程执行状态索引，不是产品完成度事实源。产品能力是否完成仍以 `06-product-validation-matrix.md` 的 `PV-MA-*` 状态和 `product-validation-check.py release` 为准。状态含义：
+
+1. `已达退出口径`：该纵切的当前开发退出条件已有仓库内证据或标准门禁支撑；后续 release 证据仍可能由更晚纵切补齐。
+2. `partial evidence`：已有实现、fixture、smoke 或组件级证据，但该纵切要求的 release-scope 证据还未闭合。
+3. `未进入 release-scope`：前置纵切或发布范围 `PV-MA-*` 尚未关闭，不能作为 release candidate 输入。
+4. `MVP 外`：当前 Phase 1 MVP 不执行，除非用户先触发 spec-change。
+
+| 纵切 | 当前状态 | 证据口径 | 下一步 |
+|---|---|---|---|
+| `VS-MA-00` | 已达退出口径 | Project 模式、清单、文档和 workflow 门禁已建立 | 作为后续纵切的基线校验保留 |
+| `VS-MA-01` | 已达退出口径 | `check_dependencies`、依赖 fail-closed 和 no-auto-download 已有标准证据 | 只在依赖策略变更时回归 |
+| `VS-MA-02` | 已达退出口径 | workspace、session、artifact registry、lock、checksum 和路径边界已有可复用契约证据 | 后续真实 native capture 只补录制产物维度，不重开存储语义 |
+| `VS-MA-03` | 已达退出口径 | `import_media` 格式白名单、artifact 映射和源文件保护已进入组件/E2E 证据 | 作为 processing smoke 输入路径保留 |
+| `VS-MA-04` | 已达退出口径 | 标准化音频和原始媒体保护已有 processing 侧证据 | release-scope 仍要由 native-to-processing 链路复用证明 |
+| `VS-MA-05` | 已达退出口径 | transcript command、adapter 契约、失败保留原始媒体已有测试证据 | release-scope 仍要由真实 native 触发 processing 证明 |
+| `VS-MA-06` | partial evidence | `whisper.cpp` mixed-language smoke 和 runtime/model fail-closed 已有组件证据 | 补 release provider 的 model hash、license、provenance 和 native 触发链路 |
+| `VS-MA-07` | 已达退出口径 | transcript-only fallback、匿名 label 和不声明真实身份已有契约证据 | 真实 diarization 质量不是 MVP 强承诺；release-scope 需证明 native 链路能消费结果 |
+| `VS-MA-08` | partial evidence | fallback 路径已支撑 MVP；可选 speaker adapter 仍只有有限证据 | 若引入具体 speaker runtime，先确认是否需要 spec-change |
+| `VS-MA-09` | 已达退出口径 | `export_transcript` 命令层导出、路径冲突和 no-auto-upload 已有证据 | release-scope OS/UI 集成在 `VS-MA-18` 收口 |
+| `VS-MA-10` | 已达退出口径 | `delete_session` 命令层确认、路径边界、外部导出保留已有证据 | release-scope OS/UI 集成在 `VS-MA-19` 收口 |
+| `VS-MA-11` | 已达退出口径 | import -> normalize -> transcript -> speaker fallback -> export -> delete processing smoke 已建立 | 作为后续 full-stack 和 release smoke 的 provider 侧基础 |
+| `VS-MA-12` | 已达退出口径 | native 权限/依赖状态、blocked readiness 和 app-bundle locator 已有证据 | 只在权限或 dependency contract 变化时回归 |
+| `VS-MA-13` | 已达退出口径 | fake capture adapter、recording state UI 和 start/stop 状态机已可测 | 不外推为真实 capture；真实录制在 `VS-MA-14/15` 收口 |
+| `VS-MA-14` | partial evidence | ScreenCaptureKit adapter、opt-in native capture smoke 和 app-bundle real capture smoke 已有单机/显式 opt-in 证据；脚本级真实 capture smoke 已验证 `screen_video` 非空和四类 artifact presence；opt-in E2E 已证明 processing workspace contract 可读取真实 native session；`full-stack-smoke.sh` 已可显式 opt-in 纳入真实 capture artifact stage，display wake guard + ScreenCaptureKit start/finish wait 修复后本机 opt-in full-stack 已通过 | 优先补 release-scope 真实 native capture 标准门禁、跨机器 TCC/ReplayKit 诊断和 production/default 录制策略 |
+| `VS-MA-15` | partial evidence | stop artifact registration、degradation reason、path-conflict retry、restart recovery 和 adapter path 防御已有测试；脚本级真实 capture smoke 已断言三类音频缺失/降级必须带 `degradation_reason`；opt-in E2E 已证明三类音频缺失时 processing `generate_transcript` fail closed 且不登记派生产物；opt-in full-stack 已在本机验证真实 stop artifact registry 可进入 processing fail-closed transcript path | 优先补 release-scope stop 产物登记标准门禁、独立音频产物策略和后续 native-to-processing 成功链路 |
+| `VS-MA-16` | partial evidence | native processing state consumer、process runner、safe display、retry/busy guard 和 controlled fixture 已有证据；real processing-cli app-bundle UI smoke 已改为 provider-owned `platform/e2e/ma-cli-local.sh` 路由并通过 `build-for-testing` / architecture 检查，但本机 `testmanagerd` 启用 XCTest Automation Mode 时被 `loginwindow`/LocalAuthentication 系统认证会话抢占或 Automation Mode 初始化超时，测试 body 前持续返回 `LocalAuthentication Code=-4 System authentication is running` / `Timed out while enabling automation mode`，尚无执行通过证据 | 补 production app-bundle/native UI 真实触发 processing provider；先解除本机 macOS loginwindow/Touch ID/Automation Mode LocalAuthentication/timeout 阻塞，再重跑 `MA_NATIVE_APP_REAL_PROCESSING_SMOKE=1 ./platform/native-app/scripts/test-app-bundle.sh` |
+| `VS-MA-17` | partial evidence | transcript review UI 和 workspace artifact loader 已能消费 fixture/受控 artifact | 补真实 native-triggered processing 后的 transcript review release-scope 证据 |
+| `VS-MA-18` | partial evidence | copy/export UI 和受控 process-runner workspace 证据已有 | 补 release-scope pasteboard/save destination 和 production action bridge 证据 |
+| `VS-MA-19` | partial evidence | delete confirmation UI、受控 process-runner 删除和安全错误展示已有 | 补 release-scope OS 删除边界和 production action bridge 证据 |
+| `VS-MA-19A` | 已达退出口径 | designed native shell、主操作 wiring、Debug/Release fixture 隔离和 app-bundle XCUITest 已覆盖 | 后续纵切不得退回 primitive debug UI |
+| `VS-MA-20` | partial evidence | 默认 local/full-stack smoke、designed shell marker 和 provider attribution 已有阶段证据；真实 native capture artifact stage 已接入 opt-in full-stack，且本机 opt-in full-stack 已通过 screen-only capture -> processing fail-closed transcript path；仍未覆盖 app-bundle UI launch、release bundle、native UI 触发 processing、transcript/export/delete 的同一条 release-scope 链 | 补同一条 release-scope smoke 串起 designed shell + native recording + processing + transcript/export/delete |
+| `VS-MA-21` | partial evidence | processing failure retry、native safe display、stop retry、restart recovery 和路径/日志脱敏已有证据 | 在真实 capture/native-processing 链路闭合后补并发、重试和 checksum release 证据 |
+| `VS-MA-22` | partial evidence | 组件 security/SBOM/build/architecture 和 provider redaction 已有证据 | 补完整 release-scope SAST/SCA/license/provenance 和 model sidecar 证据 |
+| `VS-MA-23` | 未进入 release-scope | `product-validation-check.py release` 仍有发布范围 `partial` 行 | 等 `VS-MA-14`-`VS-MA-22` 关闭后再运行 release candidate |
+| `VS-MA-24` | MVP 外 | 团队分发、签名公证、自动更新和商业化分发不属于当前 MVP | 用户重新纳入范围时先走 spec-change 和 ADR |
+| `VS-MA-25` | MVP 外 | 自动纪要或模型集成受 `OD-MA-009` watch 约束 | 用户确认自动 GPT/Qwen 后再新增 `CAP/AC/PV` |
+
+当前顺序：先收口 `VS-MA-14/15`，再收口 `VS-MA-16`，随后处理 `VS-MA-17/18/19`，再进入 `VS-MA-20`、`VS-MA-21/22` 和最终 `VS-MA-23`。
+
 | 顺序 | 纵切 | 能力和验收 | 主要实现表面 | 最小测试和证据 | 退出口径 |
 |---|---|---|---|---|---|
 | VS-MA-00 | 基线校准和证据管线 | Harness 基线，确认 `PROJECT-STATUS.md` 为 `project`，检查当前 `PV-MA-*` 状态 | `harness/project-manifest.json`、`scripts/`、现有 component scripts | `./scripts/docs-check.sh`、`./scripts/project-manifest-check.sh current`、`./scripts/agent-workflow-check.sh`、`./scripts/review-report.sh` | 现有门禁可运行；确认产品行为仍以验证矩阵为准，不把 skeleton smoke 当产品完成 |

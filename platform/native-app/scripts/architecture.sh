@@ -117,11 +117,16 @@ grep -R -q "isRealNativeCaptureSmokeEnabled" App/MeetingAssistantNativeApp.swift
 grep -R -q "MA_NATIVE_CAPTURE_SMOKE" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MA_NATIVE_APP_REAL_CAPTURE_SMOKE" UITests/MeetingAssistantNativeAppUITests
 grep -q "MA_NATIVE_APP_REAL_CAPTURE_SMOKE" scripts/test-app-bundle.sh
+grep -q "MA_NATIVE_APP_REAL_PROCESSING_SMOKE" scripts/test-app-bundle.sh
 grep -q "test-without-building" scripts/test-app-bundle.sh
 grep -q "PlistBuddy" scripts/test-app-bundle.sh
 grep -q "permission_denied" scripts/test-app-bundle.sh
 grep -q "real-capture-app-bundle-smoke.log" scripts/test-app-bundle.sh
+grep -q "real-processing-app-bundle-smoke.log" scripts/test-app-bundle.sh
 grep -R -q "MA_NATIVE_PROCESSING_CLIENT" App UITests/MeetingAssistantNativeAppUITests
+grep -R -q "AppRealProcessingCLIFixture" UITests/MeetingAssistantNativeAppUITests
+test -x ../e2e/ma-cli-local.sh
+grep -q "meeting_assistant_cli" ../e2e/ma-cli-local.sh
 grep -R -q "MA_NATIVE_APP_XCTEST" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "isProcessClientTestHookAllowed" App/MeetingAssistantNativeApp.swift
 grep -R -q "MA_NATIVE_TRANSCRIPT_ACTION_CLIENT" App UITests/MeetingAssistantNativeAppUITests
@@ -277,8 +282,9 @@ fi
 
 app_bundle_forbidden='meeting_assistant_cli|ProcessingCLIDependencyCheckRunner|DependencyCheckProcessRunner|native-helper|processing-cli|helper[[:space:]]+tool|AVCapture|CGDisplayStream|SCStream|AVAudioEngine|AVAudioRecorder|generate_transcript|generate_speaker_labels|normalize_audio|import_media|export_transcript|delete_session|URLSession|URLRequest|NWConnection|NWListener|https?://|curl|wget'
 
-if grep -R --include '*.swift' -n -E "$app_bundle_forbidden" App UITests/MeetingAssistantNativeAppUITests; then
-  echo "native-app architecture check failed: app-bundle smoke must keep processing command strings inside the native-owned shell fixture and must not call provider internals, capture frameworks, downloads, or network APIs." >&2
+if grep -R --include '*.swift' -n -E "$app_bundle_forbidden" App UITests/MeetingAssistantNativeAppUITests |
+  grep -v -E 'MA_NATIVE_APP_REAL_PROCESSING_SMOKE|real processing-cli app-bundle smoke'; then
+  echo "native-app architecture check failed: app-bundle smoke must keep processing command strings inside the native-owned shell fixture or the explicit real-processing CLI shim, and must not call capture frameworks, downloads, network APIs, or raw provider commands." >&2
   exit 1
 fi
 
