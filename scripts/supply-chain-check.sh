@@ -140,6 +140,9 @@ if [ "$phase" = "release" ]; then
   python3 - "$ROOT_DIR" <<'PY'
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
 import json
 import os
 import re
@@ -153,6 +156,9 @@ root = Path(sys.argv[1])
 manifest = json.loads((root / "harness/project-manifest.json").read_text(encoding="utf-8"))
 supply_chain = manifest.get("supply_chain", {})
 failures: list[str] = []
+SLSA_PROVENANCE_V1 = "https://slsa.dev/provenance/v1"
+IN_TOTO_STATEMENT_V1 = "https://in-toto.io/Statement/v1"
+DSSE_IN_TOTO_PAYLOAD_TYPE = "application/vnd.in-toto+json"
 
 
 def resolve_evidence_path(env_name: str, default_relative: str) -> Path:
@@ -174,6 +180,18 @@ def load_report(path: Path, label: str) -> dict[str, Any] | None:
         return None
     if not isinstance(payload, dict):
         failures.append(f"{label} report must be a JSON object: {path}")
+        return None
+    return payload
+
+
+def load_json_file(path: Path, label: str) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        failures.append(f"{label} must be valid JSON: {path}: {exc}")
+        return None
+    if not isinstance(payload, dict):
+        failures.append(f"{label} must be a JSON object: {path}")
         return None
     return payload
 
@@ -216,6 +234,131 @@ def require_sha256_digest(value: Any, label: str) -> str | None:
         failures.append(f"{label} must be a sha256:<64 hex> digest")
         return None
     return value.lower()
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
+
+
+def resolve_report_artifact_path(value: Any, label: str) -> Path | None:
+    if not isinstance(value, str) or not value:
+        failures.append(f"{label} must include path")
+        return None
+    path = Path(value)
+    if not path.is_absolute():
+        path = root / path
+    return path
+
+
+def validate_report_artifact_reference(reference: Any, label: str) -> Path | None:
+    if not isinstance(reference, dict):
+        failures.append(f"{label} must be an object")
+        return None
+    path = resolve_report_artifact_path(reference.get("path"), label)
+    expected_digest = require_sha256_digest(reference.get("digest"), f"{label} digest")
+    if path is None:
+        return None
+    if not path.is_file():
+        failures.append(f"{label} must exist as a file: {path}")
+        return None
+    if expected_digest is not None and sha256_file(path) != expected_digest:
+        failures.append(f"{label} digest mismatch: {path}")
+    return path
+
+
+def subject_includes_bundle(subjects: Any, digest: str, names: set[str], label: str) -> bool:
+    expected_hex = digest.split(":", 1)[1]
+    if not isinstance(subjects, list) or not subjects:
+        failures.append(f"{label} must include at least one subject")
+        return False
+    for subject in subjects:
+        if not isinstance(subject, dict):
+            continue
+        subject_name = subject.get("name")
+        if names and subject_name not in names:
+            continue
+        subject_digest = subject.get("digest")
+        if not isinstance(subject_digest, dict):
+            continue
+        if subject_digest.get("sha256") == expected_hex:
+            return True
+    return False
+
+
+def statement_from_dsse_envelope(envelope: dict[str, Any], label: str) -> dict[str, Any] | None:
+    if envelope.get("payloadType") != DSSE_IN_TOTO_PAYLOAD_TYPE:
+        failures.append(f"{label} DSSE envelope must set payloadType={DSSE_IN_TOTO_PAYLOAD_TYPE!r}")
+    signatures = envelope.get("signatures")
+    if not isinstance(signatures, list) or not signatures:
+        failures.append(f"{label} DSSE envelope must include at least one signature")
+    payload = envelope.get("payload")
+    if not isinstance(payload, str) or not payload:
+        failures.append(f"{label} DSSE envelope must include payload")
+        return None
+    try:
+        decoded = base64.b64decode(payload, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        failures.append(f"{label} DSSE payload must be base64: {exc}")
+        return None
+    try:
+        statement = json.loads(decoded.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        failures.append(f"{label} DSSE payload must decode to JSON: {exc}")
+        return None
+    if not isinstance(statement, dict):
+        failures.append(f"{label} DSSE payload must decode to a JSON object")
+        return None
+    return statement
+
+
+def validate_slsa_attestation(
+    attestation: Any,
+    digest: str | None,
+    names: set[str],
+    label: str = "release provenance attestation",
+) -> None:
+    if not isinstance(attestation, dict):
+        failures.append(f"{label} must be an object")
+        return
+    if attestation.get("format") != "dsse-in-toto-slsa-provenance-v1":
+        failures.append(f"{label} must set format='dsse-in-toto-slsa-provenance-v1'")
+    if attestation.get("predicate_type") != SLSA_PROVENANCE_V1:
+        failures.append(f"{label} must set predicate_type={SLSA_PROVENANCE_V1!r}")
+    path = validate_report_artifact_reference(attestation, label)
+    if path is None:
+        return
+    envelope = load_json_file(path, f"{label} file")
+    if envelope is None:
+        return
+    statement = statement_from_dsse_envelope(envelope, label)
+    if statement is None:
+        return
+    if statement.get("_type") != IN_TOTO_STATEMENT_V1:
+        failures.append(f"{label} statement must set _type={IN_TOTO_STATEMENT_V1!r}")
+    if statement.get("predicateType") != SLSA_PROVENANCE_V1:
+        failures.append(f"{label} statement must set predicateType={SLSA_PROVENANCE_V1!r}")
+    if digest is not None and not subject_includes_bundle(statement.get("subject"), digest, names, label):
+        name_hint = ""
+        if names:
+            name_hint = f" with name one of {', '.join(sorted(names))}"
+        failures.append(f"{label} statement must include release bundle subject digest {digest}{name_hint}")
+    predicate = statement.get("predicate")
+    if not isinstance(predicate, dict):
+        failures.append(f"{label} statement must include predicate object")
+        return
+    build_definition = predicate.get("buildDefinition")
+    if not isinstance(build_definition, dict):
+        failures.append(f"{label} predicate must include buildDefinition")
+    elif not isinstance(build_definition.get("buildType"), str) or not build_definition.get("buildType"):
+        failures.append(f"{label} predicate buildDefinition must include buildType")
+    run_details = predicate.get("runDetails")
+    builder = run_details.get("builder") if isinstance(run_details, dict) else None
+    if not isinstance(builder, dict) or not isinstance(builder.get("id"), str) or not builder.get("id"):
+        failures.append(f"{label} predicate runDetails must include builder.id")
 
 
 def validate_sidecar_artifact(artifact: Any, label: str, *, require_license: bool = False) -> None:
@@ -265,7 +408,9 @@ def validate_release_bundle_report(report: dict[str, Any], head: str | None) -> 
     return bundle_digest, bundle_names
 
 
-def includes_release_bundle_artifact(artifacts: list[Any], digest: str, names: set[str]) -> bool:
+def find_release_bundle_artifact(artifacts: Any, digest: str, names: set[str]) -> dict[str, Any] | None:
+    if not isinstance(artifacts, list):
+        return None
     for artifact in artifacts:
         if not isinstance(artifact, dict):
             continue
@@ -275,19 +420,48 @@ def includes_release_bundle_artifact(artifacts: list[Any], digest: str, names: s
         artifact_name = artifact.get("name")
         if names and artifact_name not in names:
             continue
-        return True
-    return False
+        return artifact
+    return None
 
 
 def require_release_bundle_artifact(artifacts: Any, label: str, digest: str | None, names: set[str]) -> None:
     if digest is None or not isinstance(artifacts, list) or not artifacts:
         return
-    if includes_release_bundle_artifact(artifacts, digest, names):
+    if find_release_bundle_artifact(artifacts, digest, names) is not None:
         return
     name_hint = ""
     if names:
         name_hint = f" with name one of {', '.join(sorted(names))}"
     failures.append(f"{label} report must include release bundle artifact digest {digest}{name_hint}")
+
+
+def require_release_signature_evidence(artifacts: Any, digest: str | None, names: set[str]) -> None:
+    if digest is None:
+        return
+    artifact = find_release_bundle_artifact(artifacts, digest, names)
+    if artifact is None:
+        return
+    if artifact.get("signature_type") != supply_chain.get("artifact_signing"):
+        failures.append(
+            "release signature artifact for release bundle must set "
+            f"signature_type={supply_chain.get('artifact_signing')!r}"
+        )
+    if not isinstance(artifact.get("certificate_identity"), str) or not artifact.get("certificate_identity"):
+        failures.append("release signature artifact for release bundle must include certificate_identity")
+    if not isinstance(artifact.get("certificate_issuer"), str) or not artifact.get("certificate_issuer"):
+        failures.append("release signature artifact for release bundle must include certificate_issuer")
+    transparency_log = artifact.get("transparency_log")
+    if not isinstance(transparency_log, dict):
+        failures.append("release signature artifact for release bundle must include transparency_log object")
+    else:
+        if not isinstance(transparency_log.get("log_id"), str) or not transparency_log.get("log_id"):
+            failures.append("release signature artifact transparency_log must include log_id")
+        if not isinstance(transparency_log.get("log_index"), int) or transparency_log.get("log_index") < 0:
+            failures.append("release signature artifact transparency_log must include non-negative log_index")
+    signature_bundle = artifact.get("signature_bundle")
+    if isinstance(signature_bundle, dict) and signature_bundle.get("format") != "sigstore-bundle-json":
+        failures.append("release signature artifact signature_bundle must set format='sigstore-bundle-json'")
+    validate_report_artifact_reference(signature_bundle, "release signature artifact signature_bundle")
 
 
 bundle_report_path = resolve_evidence_path(
@@ -346,6 +520,11 @@ if provenance is not None:
             release_bundle_digest,
             release_bundle_names,
         )
+        validate_slsa_attestation(
+            provenance.get("attestation"),
+            release_bundle_digest,
+            release_bundle_names,
+        )
 
 if signature is not None:
     require_equal(signature, "report_schema", 1, "release signature")
@@ -371,6 +550,11 @@ if signature is not None:
         require_release_bundle_artifact(
             signed_artifacts,
             "release signature",
+            release_bundle_digest,
+            release_bundle_names,
+        )
+        require_release_signature_evidence(
+            signed_artifacts,
             release_bundle_digest,
             release_bundle_names,
         )

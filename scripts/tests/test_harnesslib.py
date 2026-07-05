@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import hashlib
 import os
@@ -181,6 +182,48 @@ class HarnessValidationTests(unittest.TestCase):
         provenance_path = reports_dir / "provenance.json"
         signature_path = reports_dir / "signature.json"
         sidecar_path = reports_dir / "sidecar.json"
+        attestation_path = reports_dir / "release-provenance.intoto.dsse.json"
+        signature_bundle_path = reports_dir / "release-signature.sigstore-bundle.json"
+        attestation_statement = {
+            "_type": "https://in-toto.io/Statement/v1",
+            "subject": [
+                {
+                    "name": "MeetingAssistantNative.app",
+                    "digest": {"sha256": provenance_digest.split(":", 1)[1]},
+                }
+            ],
+            "predicateType": "https://slsa.dev/provenance/v1",
+            "predicate": {
+                "buildDefinition": {
+                    "buildType": "https://github.com/example/meeting_assistant/.github/workflows/release.yml",
+                    "externalParameters": {"repository": "example/meeting_assistant"},
+                },
+                "runDetails": {"builder": {"id": "github-actions-oidc"}},
+            },
+        }
+        attestation_payload = base64.b64encode(json.dumps(attestation_statement).encode("utf-8")).decode("ascii")
+        attestation_path.write_text(
+            json.dumps(
+                {
+                    "payloadType": "application/vnd.in-toto+json",
+                    "payload": attestation_payload,
+                    "signatures": [{"keyid": "sigstore-keyless", "sig": "MEUCIQDfixture"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        signature_bundle_path.write_text(
+            json.dumps(
+                {
+                    "mediaType": "application/vnd.dev.sigstore.bundle+json;version=0.3",
+                    "verificationMaterial": {"tlogEntries": [{"logIndex": 7}]},
+                    "messageSignature": {"messageDigest": {"algorithm": "SHA2_256"}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        attestation_digest = "sha256:" + hashlib.sha256(attestation_path.read_bytes()).hexdigest()
+        signature_bundle_digest = "sha256:" + hashlib.sha256(signature_bundle_path.read_bytes()).hexdigest()
         bundle_path.write_text(
             json.dumps(
                 {
@@ -210,6 +253,12 @@ class HarnessValidationTests(unittest.TestCase):
                     "subject_commit": head,
                     "builder": "github-actions-oidc",
                     "source_repository": "example/meeting_assistant",
+                    "attestation": {
+                        "format": "dsse-in-toto-slsa-provenance-v1",
+                        "predicate_type": "https://slsa.dev/provenance/v1",
+                        "path": str(attestation_path),
+                        "digest": attestation_digest,
+                    },
                     "artifacts": [{"name": "MeetingAssistantNative.app", "digest": provenance_digest}],
                 }
             ),
@@ -228,6 +277,14 @@ class HarnessValidationTests(unittest.TestCase):
                             "name": "MeetingAssistantNative.app",
                             "digest": signature_digest,
                             "signature_type": "keyless-oidc",
+                            "certificate_identity": "https://github.com/example/meeting_assistant/.github/workflows/release.yml@refs/tags/v0.1.0",
+                            "certificate_issuer": "https://token.actions.githubusercontent.com",
+                            "transparency_log": {"log_id": "rekor", "log_index": 7},
+                            "signature_bundle": {
+                                "format": "sigstore-bundle-json",
+                                "path": str(signature_bundle_path),
+                                "digest": signature_bundle_digest,
+                            },
                         }
                     ],
                 }
@@ -1198,6 +1255,90 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("release provenance report must include release bundle artifact digest", output)
             self.assertIn("release signature report must include release bundle artifact digest", output)
+            self.assertNotIn("supply-chain-check passed: phase=release", result.stdout)
+
+    def test_supply_chain_release_rejects_missing_slsa_attestation_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=fixture, text=True).strip()
+            digest = "sha256:" + ("a" * 64)
+            command = self.supply_chain_report_command()
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["sbom"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            reports_dir = Path(directory) / "release-reports"
+            bundle_path, provenance_path, signature_path, sidecar_path = self.write_release_supply_chain_reports(
+                reports_dir,
+                manifest,
+                head,
+                digest,
+            )
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+            provenance.pop("attestation")
+            provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+            env = os.environ.copy()
+            env["MEETING_ASSISTANT_RELEASE_BUNDLE_REPORT"] = str(bundle_path)
+            env["MEETING_ASSISTANT_RELEASE_PROVENANCE_REPORT"] = str(provenance_path)
+            env["MEETING_ASSISTANT_RELEASE_SIGNATURE_REPORT"] = str(signature_path)
+            env["MEETING_ASSISTANT_RELEASE_SIDECAR_REPORT"] = str(sidecar_path)
+
+            result = subprocess.run(
+                [str(fixture / "scripts/supply-chain-check.sh"), "release"],
+                cwd=fixture,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("release provenance attestation must be an object", output)
+            self.assertNotIn("supply-chain-check passed: phase=release", result.stdout)
+
+    def test_supply_chain_release_rejects_signature_without_sigstore_bundle_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=fixture, text=True).strip()
+            digest = "sha256:" + ("a" * 64)
+            command = self.supply_chain_report_command()
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["sbom"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            reports_dir = Path(directory) / "release-reports"
+            bundle_path, provenance_path, signature_path, sidecar_path = self.write_release_supply_chain_reports(
+                reports_dir,
+                manifest,
+                head,
+                digest,
+            )
+            signature = json.loads(signature_path.read_text(encoding="utf-8"))
+            signature["signed_artifacts"][0].pop("signature_bundle")
+            signature_path.write_text(json.dumps(signature), encoding="utf-8")
+            env = os.environ.copy()
+            env["MEETING_ASSISTANT_RELEASE_BUNDLE_REPORT"] = str(bundle_path)
+            env["MEETING_ASSISTANT_RELEASE_PROVENANCE_REPORT"] = str(provenance_path)
+            env["MEETING_ASSISTANT_RELEASE_SIGNATURE_REPORT"] = str(signature_path)
+            env["MEETING_ASSISTANT_RELEASE_SIDECAR_REPORT"] = str(sidecar_path)
+
+            result = subprocess.run(
+                [str(fixture / "scripts/supply-chain-check.sh"), "release"],
+                cwd=fixture,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("release signature artifact signature_bundle must be an object", output)
             self.assertNotIn("supply-chain-check passed: phase=release", result.stdout)
 
     def test_release_bundle_check_fails_without_release_bundle_report(self) -> None:
