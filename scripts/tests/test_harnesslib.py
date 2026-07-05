@@ -397,6 +397,21 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("VS-MA-21/22 provider/e2e blocker reminder", script)
         self.assertIn("VS-MA-23 is not entered until partial PV rows close", script)
 
+    def test_phase_preflight_exposes_native_capture_opt_in_as_partial_evidence(self) -> None:
+        phase_preflight = (ROOT / "scripts/phase-preflight.sh").read_text(encoding="utf-8")
+        full_stack = (ROOT / "platform/e2e/full-stack-smoke.sh").read_text(encoding="utf-8")
+        dev_commands = (ROOT / "docs/engineering/02-dev-commands.md").read_text(encoding="utf-8")
+
+        self.assertIn("./scripts/test-e2e-full-stack.sh", phase_preflight)
+        self.assertIn("MA_NATIVE_CAPTURE_SMOKE", phase_preflight)
+        self.assertIn("VS-MA-14/15 real native capture artifact smoke", phase_preflight)
+        self.assertIn("partial evidence, not release readiness", phase_preflight)
+        self.assertIn("MA_NATIVE_CAPTURE_SMOKE=1", full_stack)
+        self.assertIn("./platform/e2e/native-capture-artifact-smoke.sh", full_stack)
+        self.assertIn("MA_NATIVE_CAPTURE_SMOKE=1 ./scripts/phase-preflight.sh", dev_commands)
+        self.assertIn("partial evidence", dev_commands)
+        self.assertIn("release readiness", dev_commands)
+
     def test_product_validation_current_phase_rejects_missing_status(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
