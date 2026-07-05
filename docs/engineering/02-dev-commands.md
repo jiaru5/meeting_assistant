@@ -58,7 +58,7 @@
 | `agent-workflow-check.sh` | 检查本次 diff 是否同步了必要 spec、测试、验证矩阵和工程规范 |
 | `architecture-check.sh` | 执行每个注册组件的结构和依赖边界测试 |
 | `security-check.sh` | 执行 secret、Action pin 和组件安全扫描 |
-| `supply-chain-check.sh` | 验证依赖/Action 固定，发布阶段生成 SBOM 并校验供应链要求 |
+| `supply-chain-check.sh` | 验证依赖/Action 固定，运行组件 SBOM gate，聚合校验组件供应链报告；发布阶段还需完整 release provenance 和签名证据 |
 | `production-readiness-check.sh` | 阻断非 project、缺少 E2E、生产工件或发布策略的候选版本 |
 | `review-report.sh` | 根据当前 diff 生成交付审查摘要 |
 | `lint.sh` | 运行已接入前端、后端和脚本 lint |

@@ -8,6 +8,7 @@ python3 - <<'PY'
 import json
 from pathlib import Path
 
+component_metadata = json.loads(Path("component.json").read_text(encoding="utf-8"))
 sbom = json.loads(Path("sbom/native-app.cdx.json").read_text(encoding="utf-8"))
 metadata = sbom.get("metadata", {})
 component = metadata.get("component", {})
@@ -50,6 +51,28 @@ if "COPY --chown=node:node sbom/native-app.cdx.json ./sbom/native-app.cdx.json" 
     raise SystemExit("native-app sbom failed: release validation image must copy the component SBOM")
 if "FROM node@sha256:" not in dockerfile or "USER node" not in dockerfile:
     raise SystemExit("native-app sbom failed: release validation image must be digest-pinned and non-root")
+
+report = {
+    "component": component_metadata["id"],
+    "report_schema": 1,
+    "release_gate": "validation-only",
+    "sbom_format": "cyclonedx-json",
+    "sbom": component["name"],
+    "first_party_license": "Apache-2.0",
+    "packaged_third_party_runtime_components": "none",
+    "sca_dependency_review": True,
+    "license_review": True,
+    "packages_runtime_or_model": False,
+    "auto_downloads": False,
+    "provenance_scope": "validation-only",
+    "release_provenance_attestation": "not-produced",
+    "findings": [],
+}
+Path("supply-chain").mkdir(exist_ok=True)
+Path("supply-chain/supply-chain-report.json").write_text(
+    json.dumps(report, indent=2, sort_keys=True) + "\n",
+    encoding="utf-8",
+)
 PY
 
 echo "native-app sbom release evidence passed."

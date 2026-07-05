@@ -121,6 +121,47 @@ class HarnessValidationTests(unittest.TestCase):
             "import json; from pathlib import Path; " + report_code + marker_code,
         ]
 
+    def supply_chain_report_command(
+        self,
+        marker: Path | None = None,
+        overrides: dict[str, object] | None = None,
+        write_report: bool = True,
+    ) -> list[str]:
+        marker_code = ""
+        if marker is not None:
+            marker_code = f"Path({str(marker)!r}).open('a').write('sbom\\n'); "
+        report_code = ""
+        if write_report:
+            report_code = (
+                "component = json.loads(Path('component.json').read_text(encoding='utf-8')); "
+                "sbom = json.loads(next(Path('sbom').glob('*.cdx.json')).read_text(encoding='utf-8')); "
+                "sbom_name = sbom['metadata']['component']['name']; "
+                "Path('supply-chain').mkdir(exist_ok=True); "
+                "report = {"
+                "'component': component['id'], "
+                "'report_schema': 1, "
+                "'release_gate': 'validation-only', "
+                "'sbom_format': 'cyclonedx-json', "
+                "'sbom': sbom_name, "
+                "'first_party_license': 'Apache-2.0', "
+                "'packaged_third_party_runtime_components': 'none', "
+                "'sca_dependency_review': True, "
+                "'license_review': True, "
+                "'packages_runtime_or_model': False, "
+                "'auto_downloads': False, "
+                "'provenance_scope': 'validation-only', "
+                "'release_provenance_attestation': 'not-produced', "
+                "'findings': []"
+                "}; "
+                f"report.update({repr(overrides or {})}); "
+                "Path('supply-chain/supply-chain-report.json').write_text(json.dumps(report), encoding='utf-8'); "
+            )
+        return [
+            sys.executable,
+            "-c",
+            "import json; from pathlib import Path; " + report_code + marker_code,
+        ]
+
     def test_framework_manifest_and_policy_are_valid(self) -> None:
         self.assertEqual([], validate_manifest(ROOT, "current"))
         self.assertEqual([], validate_agent_policy(ROOT))
@@ -727,11 +768,7 @@ class HarnessValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
             marker = fixture / "sbom-current.log"
-            command = [
-                sys.executable,
-                "-c",
-                f"from pathlib import Path; Path({str(marker)!r}).open('a').write('sbom\\n')",
-            ]
+            command = self.supply_chain_report_command(marker)
             manifest_path = fixture / "harness/project-manifest.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             for component in manifest["components"]:
@@ -748,7 +785,72 @@ class HarnessValidationTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
             self.assertEqual(marker.read_text(encoding="utf-8"), "sbom\nsbom\n")
+            self.assertIn("supply-chain evidence reports passed.", result.stdout)
             self.assertIn("supply-chain-check passed: phase=current", result.stdout)
+
+    def test_supply_chain_current_fails_when_production_component_supply_chain_report_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            marker = fixture / "sbom-current-no-report.log"
+            command = self.supply_chain_report_command(marker, write_report=False)
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["sbom"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/supply-chain-check.sh"), "current"],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "sbom\nsbom\n")
+            self.assertIn("missing supply-chain report for production component", output)
+            self.assertNotIn("supply-chain-check passed: phase=current", result.stdout)
+
+    def test_supply_chain_current_fails_when_production_component_supply_chain_report_has_unsafe_values(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            command = self.supply_chain_report_command(
+                overrides={
+                    "sca_dependency_review": False,
+                    "license_review": False,
+                    "packages_runtime_or_model": True,
+                    "auto_downloads": True,
+                    "provenance_scope": "release",
+                    "release_provenance_attestation": "claimed",
+                    "findings": ["unreviewed supply-chain issue"],
+                }
+            )
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["sbom"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/supply-chain-check.sh"), "current"],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must set sca_dependency_review=True", output)
+            self.assertIn("must set license_review=True", output)
+            self.assertIn("must set packages_runtime_or_model=False", output)
+            self.assertIn("must set auto_downloads=False", output)
+            self.assertIn("must set provenance_scope='validation-only'", output)
+            self.assertIn("must set release_provenance_attestation='not-produced'", output)
+            self.assertIn("must report zero findings", output)
+            self.assertNotIn("supply-chain-check passed: phase=current", result.stdout)
 
     def test_security_check_runs_registered_security_gates(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

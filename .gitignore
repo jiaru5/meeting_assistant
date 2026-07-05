@@ -13,4 +13,5 @@ __pycache__/
 
 platform/*/build/
 platform/*/security/
+platform/*/supply-chain/
 *.log
