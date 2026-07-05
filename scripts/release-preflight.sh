@@ -56,6 +56,7 @@ fi
 run_step docs ./scripts/docs-check.sh
 run_step check ./scripts/check.sh
 run_step mocked-e2e ./scripts/test-e2e.sh
+run_step native-capture ./platform/e2e/release-native-capture-artifact-smoke.sh
 run_step full-stack-e2e ./scripts/test-e2e-full-stack.sh
 run_step supply-chain ./scripts/supply-chain-check.sh release
 run_step review-report ./scripts/review-report.sh --require-release-evidence

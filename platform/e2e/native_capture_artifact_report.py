@@ -26,11 +26,16 @@ TRANSCRIPTION_ENV_NAMES = (
     "MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO",
 )
 DERIVED_ARTIFACT_TYPES = {"normalized_audio", "transcript_text", "speaker_labels"}
-RELEASE_BLOCKERS = [
-    "not a default or release-scope ScreenCaptureKit gate",
+PARTIAL_EVIDENCE_BLOCKERS = [
+    "not a release-scope ScreenCaptureKit gate",
     "does not prove independent system_audio or microphone_audio capture artifacts",
-    "does not prove production/default Apple adapter strategy",
     "does not prove cross-machine TCC/display repeatability",
+    "does not prove real native-to-processing successful transcript chain",
+    "does not prove VS-MA-23 release readiness",
+]
+RELEASE_SCOPE_RESIDUAL_RISKS = [
+    "does not prove independent system_audio or microphone_audio capture artifacts beyond productized missing/degraded registration",
+    "does not prove cross-machine TCC/display repeatability beyond this release-scope run",
     "does not prove real native-to-processing successful transcript chain",
     "does not prove VS-MA-23 release readiness",
 ]
@@ -246,6 +251,7 @@ def build_report(
     report_path: Path | None = None,
     root: Path | None = None,
     python: str | None = None,
+    release_scope: bool = False,
 ) -> dict[str, Any]:
     root = (root or Path.cwd()).resolve()
     python = python or sys.executable
@@ -273,11 +279,14 @@ def build_report(
     processing = run_generate_transcript_fail_closed(workspace, session_id, root=root, python=python)
     derived_pollution = assert_no_derived_artifact_pollution(load_session(session_dir))
 
+    release_gate = "release-scope-native-capture" if release_scope else "partial-evidence-only"
+    release_blockers = RELEASE_SCOPE_RESIDUAL_RISKS if release_scope else PARTIAL_EVIDENCE_BLOCKERS
     report: dict[str, Any] = {
         "report_schema": 1,
         "component": "platform/e2e/native-capture-artifact-smoke",
         "scope": "validation-only",
-        "release_gate": "partial-evidence-only",
+        "release_gate": release_gate,
+        "release_scope_native_capture": release_scope,
         "vs_ma": ["VS-MA-14", "VS-MA-15"],
         "pv": ["PV-MA-002", "PV-MA-003"],
         "summary_path": str(summary_path),
@@ -294,7 +303,7 @@ def build_report(
             "derived_artifact_pollution": derived_pollution,
         },
         "not_release_readiness": True,
-        "release_blockers": RELEASE_BLOCKERS,
+        "release_blockers": release_blockers,
         "findings": [],
     }
     if report_path is not None:
@@ -368,6 +377,7 @@ def build_failure_report(
     attempts: int | None = None,
     display_wake_seconds: int | None = None,
     display_wake_settle_seconds: int | None = None,
+    release_scope: bool = False,
 ) -> dict[str, Any]:
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     if not isinstance(summary, dict):
@@ -376,11 +386,19 @@ def build_failure_report(
         fail("native capture failure report requires a failed summary")
 
     diagnostics, remediation_hints = failure_diagnostics(summary)
+    release_gate = "release-scope-native-capture" if release_scope else "partial-evidence-only"
+    release_blockers = RELEASE_SCOPE_RESIDUAL_RISKS if release_scope else PARTIAL_EVIDENCE_BLOCKERS
+    finding = (
+        "native capture smoke did not pass; release-scope evidence remains unavailable"
+        if release_scope
+        else "native capture smoke did not pass; evidence remains partial"
+    )
     report: dict[str, Any] = {
         "report_schema": 1,
         "component": "platform/e2e/native-capture-artifact-smoke",
         "scope": "validation-only",
-        "release_gate": "partial-evidence-only",
+        "release_gate": release_gate,
+        "release_scope_native_capture": release_scope,
         "vs_ma": ["VS-MA-14", "VS-MA-15"],
         "pv": ["PV-MA-002", "PV-MA-003"],
         "summary_path": str(summary_path),
@@ -405,8 +423,8 @@ def build_failure_report(
         "diagnostics": diagnostics,
         "remediation_hints": remediation_hints,
         "not_release_readiness": True,
-        "release_blockers": RELEASE_BLOCKERS,
-        "findings": ["native capture smoke did not pass; evidence remains partial"],
+        "release_blockers": release_blockers,
+        "findings": [finding],
     }
     if report_path is not None:
         report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -423,6 +441,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--attempts", type=int)
     parser.add_argument("--display-wake-seconds", type=int)
     parser.add_argument("--display-wake-settle-seconds", type=int)
+    parser.add_argument("--release-scope", action="store_true")
     args = parser.parse_args(argv)
     if not args.summary:
         print("native capture artifact report failed: --summary is required", file=sys.stderr)
@@ -437,6 +456,7 @@ def main(argv: list[str] | None = None) -> int:
                 attempts=args.attempts,
                 display_wake_seconds=args.display_wake_seconds,
                 display_wake_settle_seconds=args.display_wake_settle_seconds,
+                release_scope=args.release_scope,
             )
         else:
             report = build_report(
@@ -444,6 +464,7 @@ def main(argv: list[str] | None = None) -> int:
                 report_path=Path(args.report) if args.report else None,
                 root=Path.cwd(),
                 python=sys.executable,
+                release_scope=args.release_scope,
             )
     except (ContractError, NativeCaptureArtifactReportError, OSError, json.JSONDecodeError) as exc:
         print(f"native capture artifact report failed: {exc}", file=sys.stderr)
@@ -465,6 +486,8 @@ def main(argv: list[str] | None = None) -> int:
         "VS-MA-14/15 real native capture artifact report marker [non-contract]: "
         f"report_schema={report['report_schema']} release_gate={report['release_gate']}."
     )
+    if args.release_scope:
+        print("VS-MA-14/15 release-scope native capture artifact gate passed.")
     print("real native capture artifact e2e smoke passed.")
     return 0
 

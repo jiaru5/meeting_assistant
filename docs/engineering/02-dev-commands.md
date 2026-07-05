@@ -82,6 +82,8 @@ full-stack E2E 可在 manifest 中声明可选 `pre_start_command`，用于准�
 
 阶段收口如需把 VS-MA-14/15 真实 native capture artifact evidence 纳入同一次运行，可显式执行 `MA_NATIVE_CAPTURE_SMOKE=1 ./scripts/phase-preflight.sh`。该环境变量会传递到 manifest full-stack E2E 的 opt-in stage，并触发 `phase-preflight.sh` 输出 partial evidence 提示；通过后还会由 `platform/e2e/native_capture_artifact_report.py` 生成结构化 JSON evidence report，默认位于 `platform/e2e/build/native-capture-artifact-smoke/reports/`，可用 `MA_NATIVE_CAPTURE_ARTIFACT_SMOKE_REPORT` 指定文件路径。若真实 capture 因 TCC、display、runtime、timeout 或 artifact validation 失败，同一 report 生成器会写 failure report 并保留原始失败退出码。该 report 仍只声明 `release_gate=partial-evidence-only`；production/default recording client 的 Apple adapter 选择由 native app 架构和 source-contract 守卫证明，但该 report 仍不证明 release readiness、独立音频产物或所有 TCC/display 环境可重复。
 
+发布候选路径使用 `platform/e2e/release-native-capture-artifact-smoke.sh` 作为 VS-MA-14/15 的 release-scope native capture artifact gate。该 wrapper 固定启用 `MA_NATIVE_CAPTURE_SMOKE=1` 和 `MA_NATIVE_CAPTURE_RELEASE_SCOPE=1`，调用同一个 `native-capture-artifact-smoke.sh`，并让结构化 report 声明 `release_gate=release-scope-native-capture`。`scripts/release-preflight.sh` 在 `product-validation-check.py release` 之后注册该步骤；当前只要任一发布范围 `PV-MA-*` 仍为 `partial`，release preflight 会先 fail closed，不会继续运行该 release-scope native capture 步骤。即使该步骤通过，它也只关闭 VS-MA-14/15 阶段门禁的一部分，仍不单独证明 VS-MA-23 release readiness、独立系统/麦克风音频真实产物、跨机器 TCC/display 可重复、完整 native-to-processing 成功 transcript 链或 release bundle。
+
 已注册的非业务 skeleton 只能承载未来原生录制控制面、本地 processing、dependency-check、artifact contract、transcription adapter、speaker-label fallback 和 export 命令边界。
 
 注册组件必须提供 argv 形式的标准命令：

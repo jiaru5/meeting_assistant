@@ -25,6 +25,7 @@ report_path="${MA_NATIVE_CAPTURE_ARTIFACT_SMOKE_REPORT:-$report_dir/native-captu
 attempts="${MA_NATIVE_CAPTURE_ARTIFACT_SMOKE_ATTEMPTS:-2}"
 display_wake_seconds="${MA_NATIVE_CAPTURE_ARTIFACT_SMOKE_DISPLAY_WAKE_SECONDS:-120}"
 display_wake_settle_seconds="${MA_NATIVE_CAPTURE_ARTIFACT_SMOKE_DISPLAY_WAKE_SETTLE_SECONDS:-3}"
+release_scope="${MA_NATIVE_CAPTURE_RELEASE_SCOPE:-0}"
 
 if ! [[ "$attempts" =~ ^[1-9][0-9]*$ ]] || ((attempts > 5)); then
   echo "native capture artifact e2e failed: MA_NATIVE_CAPTURE_ARTIFACT_SMOKE_ATTEMPTS must be an integer from 1 to 5." >&2
@@ -40,6 +41,19 @@ if ! [[ "$display_wake_settle_seconds" =~ ^[0-9]+$ ]] || ((display_wake_settle_s
   echo "native capture artifact e2e failed: MA_NATIVE_CAPTURE_ARTIFACT_SMOKE_DISPLAY_WAKE_SETTLE_SECONDS must be an integer from 0 to 30." >&2
   exit 2
 fi
+
+report_scope_args=()
+case "$release_scope" in
+  1|true|TRUE|yes|YES)
+    report_scope_args=(--release-scope)
+    ;;
+  0|false|FALSE|no|NO|"")
+    ;;
+  *)
+    echo "native capture artifact e2e failed: MA_NATIVE_CAPTURE_RELEASE_SCOPE must be 0/1, true/false, or yes/no." >&2
+    exit 2
+    ;;
+esac
 
 mkdir -p "$summary_dir" "$report_dir" "$(dirname "$workspace")" "$build_dir"
 
@@ -111,7 +125,8 @@ if ((native_exit != 0)); then
       --native-exit-code "$native_exit" \
       --attempts "$attempts" \
       --display-wake-seconds "$display_wake_seconds" \
-      --display-wake-settle-seconds "$display_wake_settle_seconds" >&2
+      --display-wake-settle-seconds "$display_wake_settle_seconds" \
+      "${report_scope_args[@]}" >&2
     report_exit=$?
     set -e
     if ((report_exit != 0)); then
@@ -127,4 +142,5 @@ MA_NATIVE_CAPTURE_ARTIFACT_SUMMARY="$summary_path" \
 MA_NATIVE_CAPTURE_ARTIFACT_REPORT="$report_path" \
 python3 "$ROOT_DIR/platform/e2e/native_capture_artifact_report.py" \
   --summary "$summary_path" \
-  --report "$report_path"
+  --report "$report_path" \
+  "${report_scope_args[@]}"

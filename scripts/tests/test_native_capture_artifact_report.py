@@ -161,6 +161,7 @@ class NativeCaptureArtifactReportTests(unittest.TestCase):
             written = json.loads(report_path.read_text(encoding="utf-8"))
             self.assertEqual(report, written)
             self.assertEqual(report["release_gate"], "partial-evidence-only")
+            self.assertFalse(report["release_scope_native_capture"])
             self.assertEqual(report["vs_ma"], ["VS-MA-14", "VS-MA-15"])
             self.assertEqual(report["pv"], ["PV-MA-002", "PV-MA-003"])
             self.assertTrue(report["not_release_readiness"])
@@ -174,6 +175,34 @@ class NativeCaptureArtifactReportTests(unittest.TestCase):
             session = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
             artifact_types = {artifact["artifact_type"] for artifact in session["artifacts"]}
             self.assertFalse({"normalized_audio", "transcript_text", "speaker_labels"} & artifact_types)
+
+    def test_build_report_writes_release_scope_gate_without_release_readiness(self) -> None:
+        module = load_report_module()
+        with tempfile.TemporaryDirectory() as directory:
+            summary_path, report_path, _ = self.write_fixture(directory)
+
+            report = module.build_report(
+                summary_path,
+                report_path=report_path,
+                root=ROOT,
+                python=sys.executable,
+                release_scope=True,
+            )
+
+            self.assertTrue(report_path.is_file())
+            self.assertEqual(report["release_gate"], "release-scope-native-capture")
+            self.assertTrue(report["release_scope_native_capture"])
+            self.assertTrue(report["not_release_readiness"])
+            self.assertNotIn("not a release-scope ScreenCaptureKit gate", report["release_blockers"])
+            self.assertIn(
+                "does not prove independent system_audio or microphone_audio capture artifacts beyond productized missing/degraded registration",
+                report["release_blockers"],
+            )
+            self.assertIn(
+                "does not prove real native-to-processing successful transcript chain",
+                report["release_blockers"],
+            )
+            self.assertEqual(report["processing_contract"]["code"], "artifact_missing")
 
     def test_build_report_rejects_missing_audio_degradation_reason(self) -> None:
         module = load_report_module()
@@ -201,6 +230,7 @@ class NativeCaptureArtifactReportTests(unittest.TestCase):
 
             self.assertTrue(report_path.is_file())
             self.assertEqual(report["release_gate"], "partial-evidence-only")
+            self.assertFalse(report["release_scope_native_capture"])
             self.assertTrue(report["not_release_readiness"])
             self.assertEqual(report["failure_stage"], "start")
             self.assertEqual(report["native_exit_code"], 1)
@@ -210,6 +240,23 @@ class NativeCaptureArtifactReportTests(unittest.TestCase):
             self.assertEqual(report["start_response"]["code"], "permission_denied")
             self.assertIn("Screen Recording", " ".join(report["remediation_hints"]))
             self.assertIn("native capture smoke did not pass", report["findings"][0])
+
+    def test_build_failure_report_can_mark_release_scope_gate_unavailable(self) -> None:
+        module = load_report_module()
+        with tempfile.TemporaryDirectory() as directory:
+            summary_path, report_path = self.write_failure_summary(directory)
+
+            report = module.build_failure_report(
+                summary_path,
+                report_path=report_path,
+                native_exit_code=1,
+                release_scope=True,
+            )
+
+            self.assertEqual(report["release_gate"], "release-scope-native-capture")
+            self.assertTrue(report["release_scope_native_capture"])
+            self.assertTrue(report["not_release_readiness"])
+            self.assertIn("release-scope evidence remains unavailable", report["findings"][0])
 
     def test_cli_writes_report_and_emits_non_contract_markers(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -242,6 +289,38 @@ class NativeCaptureArtifactReportTests(unittest.TestCase):
             self.assertIn("partial-evidence-only", result.stdout)
             self.assertIn(str(report_path), result.stderr)
             self.assertTrue(report_path.is_file())
+
+    def test_cli_writes_release_scope_report_and_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            summary_path, report_path, _ = self.write_fixture(directory)
+            env = os.environ.copy()
+            pythonpath = [str(PROCESSING_SRC)]
+            if env.get("PYTHONPATH"):
+                pythonpath.append(env["PYTHONPATH"])
+            env["PYTHONPATH"] = os.pathsep.join(pythonpath)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "platform/e2e/native_capture_artifact_report.py"),
+                    "--summary",
+                    str(summary_path),
+                    "--report",
+                    str(report_path),
+                    "--release-scope",
+                ],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("release-scope-native-capture", result.stdout)
+            self.assertIn("release-scope native capture artifact gate passed", result.stdout)
+            written = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertTrue(written["release_scope_native_capture"])
 
     def test_cli_writes_failure_report_and_emits_failure_marker(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
