@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -475,6 +476,25 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("release-scope-security-supply-chain", dev_commands)
         self.assertIn("release-scope-security-supply-chain", e2e_readme)
         self.assertIn("not_release_readiness=true", e2e_readme)
+
+    def test_release_preflight_registers_release_bundle_gate_before_supply_chain(self) -> None:
+        release_preflight = (ROOT / "scripts/release-preflight.sh").read_text(encoding="utf-8")
+        dev_commands = (ROOT / "docs/engineering/02-dev-commands.md").read_text(encoding="utf-8")
+        production_readiness = (ROOT / "docs/engineering/11-production-readiness.md").read_text(encoding="utf-8")
+
+        self.assertIn("./scripts/test-e2e-full-stack.sh", release_preflight)
+        self.assertIn("./scripts/release-bundle-check.sh", release_preflight)
+        self.assertIn("./scripts/supply-chain-check.sh release", release_preflight)
+        self.assertLess(
+            release_preflight.index("./scripts/test-e2e-full-stack.sh"),
+            release_preflight.index("./scripts/release-bundle-check.sh"),
+        )
+        self.assertLess(
+            release_preflight.index("./scripts/release-bundle-check.sh"),
+            release_preflight.index("./scripts/supply-chain-check.sh release"),
+        )
+        self.assertIn("release bundle evidence", dev_commands)
+        self.assertIn("release-bundle-check.sh", production_readiness)
 
     def test_product_validation_current_phase_rejects_missing_status(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1032,6 +1052,77 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
             self.assertIn("release supply-chain provenance/signing evidence passed", result.stdout)
             self.assertIn("supply-chain-check passed: phase=release", result.stdout)
+
+    def test_release_bundle_check_fails_without_release_bundle_report(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+
+            result = subprocess.run(
+                [str(fixture / "scripts/release-bundle-check.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("release bundle evidence failed", output)
+            self.assertIn("release bundle report is required", output)
+            self.assertNotIn("release-bundle-check passed", result.stdout)
+
+    def test_release_bundle_check_accepts_signed_notarized_bundle_report(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=fixture, text=True).strip()
+            reports_dir = fixture / ".harness/evidence/release/bundle"
+            reports_dir.mkdir(parents=True)
+            bundle_path = reports_dir / "MeetingAssistantNative.zip"
+            bundle_bytes = b"release bundle fixture\n"
+            bundle_path.write_bytes(bundle_bytes)
+            digest = "sha256:" + hashlib.sha256(bundle_bytes).hexdigest()
+            report_path = reports_dir / "release-bundle-report.json"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "report_schema": 1,
+                        "release_gate": "release-bundle",
+                        "subject_commit": head,
+                        "builder": "github-actions-oidc",
+                        "source_repository": "example/meeting_assistant",
+                        "bundle": {
+                            "name": bundle_path.name,
+                            "path": str(bundle_path.relative_to(fixture)),
+                            "digest": digest,
+                            "artifact_type": "macos-app-archive",
+                            "app_bundle": "MeetingAssistantNative.app",
+                            "build_configuration": "Release",
+                            "code_signed": True,
+                            "signing_identity": "Developer ID Application",
+                            "notarized": True,
+                            "notarization_ticket": "ticket-id",
+                            "stapled": True,
+                            "packages_runtime_or_model": False,
+                            "auto_downloads": False,
+                            "contains_meeting_data": False,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [str(fixture / "scripts/release-bundle-check.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("release bundle evidence passed", result.stdout)
+            self.assertIn("release-bundle-check passed", result.stdout)
 
     def test_security_check_runs_registered_security_gates(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

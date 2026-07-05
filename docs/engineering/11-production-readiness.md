@@ -31,6 +31,8 @@
 4. rollback 不能依赖修改已执行的 versioned migration。
 5. 数据和应用版本必须明确向前兼容窗口。
 
+`./scripts/release-bundle-check.sh` 是 release bundle evidence 的机器入口。发布候选必须提供 `.harness/evidence/release/bundle/release-bundle-report.json`，或通过 `MEETING_ASSISTANT_RELEASE_BUNDLE_REPORT` 指向等价 report；report 必须绑定当前 commit、builder 和 source repository，并指向真实存在且 `sha256:` digest 匹配的 `MeetingAssistantNative.app` Release archive。bundle evidence 必须声明 code-signed、notarized、stapled、签名身份、notarization ticket、不打包 runtime/model、不自动下载且不包含会议数据；缺少这些字段时 release bundle gate 必须 fail closed。
+
 ## 数据保护和恢复
 
 1. 为关键数据定义 RPO 和 RTO。
