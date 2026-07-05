@@ -14,6 +14,8 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -88,6 +90,64 @@ def sha256_file(path: Path) -> str:
     return "sha256:" + digest.hexdigest()
 
 
+def run_verifier(command: list[str], label: str) -> str:
+    try:
+        completed = subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        failures.append(f"{label} verifier is not available: {exc.filename}")
+        return ""
+    output = (completed.stdout + completed.stderr).strip()
+    if completed.returncode != 0:
+        detail = output.splitlines()[0] if output else f"exit {completed.returncode}"
+        failures.append(f"{label} verification failed: {detail}")
+    return output
+
+
+def extract_expected_app(archive_path: Path, expected_app_name: str, destination: Path) -> Path | None:
+    if not zipfile.is_zipfile(archive_path):
+        failures.append("release bundle artifact must be a valid zip archive")
+        return None
+
+    destination_root = destination.resolve()
+    with zipfile.ZipFile(archive_path) as archive:
+        for member in archive.infolist():
+            target = (destination / member.filename).resolve()
+            if not str(target).startswith(str(destination_root) + "/") and target != destination_root:
+                failures.append(f"release bundle archive contains unsafe path: {member.filename}")
+                return None
+        archive.extractall(destination)
+
+    app_paths = [path for path in destination.rglob(expected_app_name) if path.is_dir()]
+    if not app_paths:
+        failures.append(f"release bundle archive must contain {expected_app_name}")
+        return None
+    if len(app_paths) > 1:
+        failures.append(f"release bundle archive must contain exactly one {expected_app_name}")
+        return None
+
+    app_path = app_paths[0]
+    if not (app_path / "Contents" / "Info.plist").is_file():
+        failures.append(f"{expected_app_name} must include Contents/Info.plist")
+        return None
+    return app_path
+
+
+def verify_release_app(app_path: Path, signing_identity: Any) -> None:
+    run_verifier(["/usr/bin/codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app_path)], "codesign")
+    codesign_details = run_verifier(["/usr/bin/codesign", "-dv", "--verbose=4", str(app_path)], "codesign details")
+    if "Signature=adhoc" in codesign_details:
+        failures.append("release bundle must not be ad-hoc signed")
+    if isinstance(signing_identity, str) and signing_identity and signing_identity not in codesign_details:
+        failures.append("release bundle codesign details must include reported signing_identity")
+    run_verifier(["/usr/bin/xcrun", "stapler", "validate", str(app_path)], "stapler")
+    run_verifier(["/usr/sbin/spctl", "-a", "-t", "exec", "-vv", str(app_path)], "spctl")
+
+
 head = current_commit()
 report = load_report(configured_report_path)
 
@@ -107,6 +167,7 @@ if report is not None:
         artifact_path = resolve_path(bundle.get("path"), "release bundle path")
         expected_digest = require_sha256_digest(bundle.get("digest"), "release bundle digest")
         require_equal(bundle, "artifact_type", "macos-app-archive", "release bundle")
+        require_equal(bundle, "archive_format", "zip", "release bundle")
         require_equal(bundle, "app_bundle", "MeetingAssistantNative.app", "release bundle")
         require_equal(bundle, "build_configuration", "Release", "release bundle")
         require_equal(bundle, "code_signed", True, "release bundle")
@@ -122,6 +183,11 @@ if report is not None:
                 failures.append(f"release bundle artifact must exist as a file: {artifact_path}")
             elif expected_digest is not None and sha256_file(artifact_path) != expected_digest:
                 failures.append(f"release bundle artifact digest mismatch: {artifact_path}")
+            elif expected_digest is not None:
+                with tempfile.TemporaryDirectory(prefix="meeting-assistant-release-bundle-") as directory:
+                    app_path = extract_expected_app(artifact_path, str(bundle.get("app_bundle")), Path(directory))
+                    if app_path is not None:
+                        verify_release_app(app_path, bundle.get("signing_identity"))
 
 if failures:
     print("release bundle evidence failed:", file=sys.stderr)

@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 import importlib.util
+import zipfile
 from pathlib import Path
 
 
@@ -496,7 +497,13 @@ class HarnessValidationTests(unittest.TestCase):
             release_preflight.index("./scripts/supply-chain-check.sh release"),
         )
         self.assertIn("release bundle evidence", dev_commands)
+        self.assertIn("codesign", dev_commands)
+        self.assertIn("stapler", dev_commands)
+        self.assertIn("spctl", dev_commands)
         self.assertIn("release-bundle-check.sh", production_readiness)
+        self.assertIn("codesign", production_readiness)
+        self.assertIn("stapler", production_readiness)
+        self.assertIn("spctl", production_readiness)
         self.assertIn(".harness/release-inputs/bundle/release-bundle-report.json", production_readiness)
         self.assertNotIn(".harness/evidence/release/bundle/release-bundle-report.json", production_readiness)
 
@@ -1075,7 +1082,7 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertIn("release bundle report is required", output)
             self.assertNotIn("release-bundle-check passed", result.stdout)
 
-    def test_release_bundle_check_accepts_signed_notarized_bundle_report(self) -> None:
+    def test_release_bundle_check_rejects_unsigned_unstapled_zip_archive_report(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
             self.init_git_baseline(fixture)
@@ -1083,9 +1090,21 @@ class HarnessValidationTests(unittest.TestCase):
             reports_dir = fixture / ".harness/release-inputs/bundle"
             reports_dir.mkdir(parents=True)
             bundle_path = reports_dir / "MeetingAssistantNative.zip"
-            bundle_bytes = b"release bundle fixture\n"
-            bundle_path.write_bytes(bundle_bytes)
-            digest = "sha256:" + hashlib.sha256(bundle_bytes).hexdigest()
+            app_root = reports_dir / "fixture-app" / "MeetingAssistantNative.app"
+            contents = app_root / "Contents"
+            macos = contents / "MacOS"
+            macos.mkdir(parents=True)
+            (contents / "Info.plist").write_text(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict /></plist>\n",
+                encoding="utf-8",
+            )
+            executable = macos / "MeetingAssistantNative"
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o755)
+            with zipfile.ZipFile(bundle_path, "w") as archive:
+                for path in sorted(app_root.rglob("*")):
+                    archive.write(path, path.relative_to(app_root.parent))
+            digest = "sha256:" + hashlib.sha256(bundle_path.read_bytes()).hexdigest()
             report_path = reports_dir / "release-bundle-report.json"
             report_path.write_text(
                 json.dumps(
@@ -1100,6 +1119,7 @@ class HarnessValidationTests(unittest.TestCase):
                             "path": str(bundle_path.relative_to(fixture)),
                             "digest": digest,
                             "artifact_type": "macos-app-archive",
+                            "archive_format": "zip",
                             "app_bundle": "MeetingAssistantNative.app",
                             "build_configuration": "Release",
                             "code_signed": True,
@@ -1124,9 +1144,10 @@ class HarnessValidationTests(unittest.TestCase):
                 check=False,
             )
 
-            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-            self.assertIn("release bundle evidence passed", result.stdout)
-            self.assertIn("release-bundle-check passed", result.stdout)
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("codesign", output)
+            self.assertNotIn("release-bundle-check passed", result.stdout)
 
     def test_security_check_runs_registered_security_gates(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
