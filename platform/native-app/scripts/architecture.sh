@@ -108,6 +108,9 @@ grep -R -q "TranscriptActionStaticDestinationSelector" Sources tests
 grep -R -q "ProcessingStateViewModel" Sources tests App UITests
 grep -R -q "ProcessingCommandFakeClient" Sources tests App UITests
 grep -R -q "ProcessingCommandProcessRunner" Sources tests App UITests
+grep -R -q "MA_NATIVE_REAL_RUNTIME_BRIDGE_SMOKE" tests scripts
+grep -R -q "processRunnerWithRealWhisperRuntimeWritesWorkspaceArtifactsLoadableByTranscriptReviewWhenEnabled" tests
+grep -R -q "VS-MA-22 native-app real runtime bridge marker" tests
 grep -R -q "DesignedNativeShellViewModel" Sources tests App UITests
 grep -R -q "DesignedNativeShellView" Sources tests App UITests
 grep -R -q "ma.shell" Sources tests App UITests

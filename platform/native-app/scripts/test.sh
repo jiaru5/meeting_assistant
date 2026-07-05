@@ -4,6 +4,31 @@ set -euo pipefail
 component_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$component_dir"
 
+is_truthy() {
+  case "$1" in
+    1|true|TRUE|yes|YES) return 0 ;;
+    0|false|FALSE|no|NO|"") return 1 ;;
+    *)
+      echo "native-app test failed: boolean flags must be 0/1, true/false, or yes/no." >&2
+      exit 2
+      ;;
+  esac
+}
+
+real_runtime_bridge_smoke="${MA_NATIVE_REAL_RUNTIME_BRIDGE_SMOKE:-0}"
+if is_truthy "$real_runtime_bridge_smoke"; then
+  for name in \
+    MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL \
+    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO
+  do
+    if [[ -z "${!name:-}" ]]; then
+      echo "native-app real runtime bridge smoke requires $name to be configured." >&2
+      exit 1
+    fi
+  done
+fi
+
 python3 - <<'PY'
 import json
 from pathlib import Path
@@ -54,6 +79,7 @@ required_phrases = (
     "VS-MA-17 read-only transcript review boundary",
     "read-only workspace transcript loading boundary",
     "VS-MA-18/VS-MA-19 deterministic transcript action consumer boundary",
+    "VS-MA-22 opt-in real runtime native bridge smoke boundary",
     "TranscriptActionOSClients.swift",
     "NSPasteboard",
     "NSSavePanel",
@@ -66,6 +92,7 @@ required_phrases = (
     "MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit",
     "MA_NATIVE_PROCESSING_CLIENT=process",
     "MA_NATIVE_TRANSCRIPT_ACTION_CLIENT=process",
+    "MA_NATIVE_REAL_RUNTIME_BRIDGE_SMOKE=1",
     "AppleScreenCaptureKitNativeCaptureAdapter.swift",
     "MA_NATIVE_CAPTURE_SMOKE=1",
     "MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1",
@@ -170,6 +197,10 @@ let package = Package(
 SWIFT
 
 (cd "$tmp_dir" && MEETING_ASSISTANT_REPO_ROOT="$component_dir/../.." swift test)
+
+if is_truthy "$real_runtime_bridge_smoke"; then
+  echo "native-app real runtime bridge smoke passed."
+fi
 
 case "${MA_NATIVE_APP_RUN_XCUITEST:-0}" in
   1|true|TRUE|yes|YES)

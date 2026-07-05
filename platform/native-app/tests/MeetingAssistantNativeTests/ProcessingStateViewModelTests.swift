@@ -719,6 +719,67 @@ struct ProcessingStateViewModelTests {
     }
 
     @Test
+    func processRunnerWithRealWhisperRuntimeWritesWorkspaceArtifactsLoadableByTranscriptReviewWhenEnabled() async throws {
+        guard Self.realRuntimeBridgeSmokeEnabled() else {
+            return
+        }
+
+        let fixture = try RealProcessingCLIWorkspaceFixture(mode: .realWhisperRuntime)
+        let sessionID = try fixture.createNativeRecordingSession(title: "Native real runtime bridge fixture")
+        let viewModel = ProcessingStateViewModel(
+            commandClient: fixture.runner,
+            readinessState: readyReadinessState(),
+            defaultSessionID: sessionID
+        )
+
+        await viewModel.start(sessionID: sessionID, language: "zh", runtime: .whisperCpp)
+
+        #expect(viewModel.state.phase == .degraded)
+        #expect(viewModel.state.statusText == "Processing completed with transcript-only speaker labels.")
+        #expect(viewModel.state.sessionID == sessionID)
+        #expect(viewModel.state.transcriptID?.isEmpty == false)
+        #expect(viewModel.state.transcriptArtifactID?.isEmpty == false)
+        #expect((viewModel.state.segmentCount ?? 0) > 0)
+        #expect(viewModel.state.labelStatus == "transcript_only")
+        #expect(viewModel.state.degradationReason?.contains("transcript-only fallback") == true)
+        #expect(viewModel.state.errorMessage == nil)
+
+        let artifactTypes = try fixture.artifactTypes(sessionID: sessionID)
+        #expect(artifactTypes == [
+            "mixed_audio",
+            "normalized_audio",
+            "transcript_text",
+            "speaker_labels",
+        ])
+        #expect(try fixture.sourceChecksumUnchanged())
+
+        let transcriptText = try fixture.transcriptText(sessionID: sessionID)
+        #expect(transcriptText.range(of: #"\p{Han}"#, options: .regularExpression) != nil)
+        for term in ["http", "llm", "clean architecture", "eda"] {
+            #expect(Self.transcriptContains(transcriptText, term: term))
+        }
+
+        let input = try TranscriptReviewWorkspaceLoader.load(
+            workspaceURL: fixture.workspaceURL,
+            sessionID: sessionID
+        )
+        let transcript = try #require(input.transcript)
+        #expect(transcript.id == viewModel.state.transcriptID)
+        #expect(transcript.sessionID == sessionID)
+        #expect(transcript.segments.isEmpty == false)
+        #expect(Self.transcriptContains(transcript.segments.map(\.text).joined(separator: " "), term: "llm"))
+        #expect(input.speakerLabels?.sessionID == sessionID)
+        #expect(input.speakerLabels?.labels.isEmpty == true)
+        #expect(input.speakerLabels?.segmentMapping.isEmpty == true)
+        #expect(input.speakerLabelsDegradationReason?.contains("transcript-only fallback") == true)
+
+        print(
+            "VS-MA-22 native-app real runtime bridge marker [non-contract]: "
+                + "ProcessingCommandProcessRunner -> provider CLI -> whisper.cpp -> TranscriptReviewWorkspaceLoader verified"
+        )
+    }
+
+    @Test
     func processRunnerDrivenViewModelShowsFailureAndRetryFromStdoutJSON() async throws {
         let fixture = try ProcessingProcessRunnerFixture(script: .structuredTranscriptFailure)
         let viewModel = ProcessingStateViewModel(
@@ -745,9 +806,41 @@ struct ProcessingStateViewModelTests {
             "generate_transcript --session-id session-process",
         ])
     }
+
+    private static func realRuntimeBridgeSmokeEnabled() -> Bool {
+        switch ProcessInfo.processInfo.environment["MA_NATIVE_REAL_RUNTIME_BRIDGE_SMOKE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() {
+        case "1", "true", "yes":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func normalizedTranscriptText(_ value: String) -> String {
+        var normalized = value.lowercased()
+        for punctuation in [".", ",", ":", ";", "!", "?", "(", ")", "[", "]", "{", "}", "\"", "'", "\n", "\t"] {
+            normalized = normalized.replacingOccurrences(of: punctuation, with: " ")
+        }
+        return normalized.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    private static func transcriptContains(_ transcript: String, term: String) -> Bool {
+        let normalizedTranscript = normalizedTranscriptText(transcript)
+        let normalizedTerm = normalizedTranscriptText(term)
+        let compactTranscript = normalizedTranscript.replacingOccurrences(of: " ", with: "")
+        let compactTerm = normalizedTerm.replacingOccurrences(of: " ", with: "")
+        return normalizedTranscript.contains(normalizedTerm) || compactTranscript.contains(compactTerm)
+    }
 }
 
 private final class RealProcessingCLIWorkspaceFixture {
+    enum Mode {
+        case defaultFakeRuntime
+        case realWhisperRuntime
+    }
+
     let rootURL: URL
     let workspaceURL: URL
     let mediaURL: URL
@@ -755,20 +848,31 @@ private final class RealProcessingCLIWorkspaceFixture {
 
     private let cliURL: URL
     private let mediaChecksum: String
+    private let realRuntimeConfiguration: RealRuntimeConfiguration?
 
-    init() throws {
+    init(mode: Mode = .defaultFakeRuntime) throws {
         rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("meeting-assistant-real-processing-\(UUID().uuidString)", isDirectory: true)
         workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
         mediaURL = rootURL.appendingPathComponent("fixtures/native-processing.wav")
         cliURL = rootURL.appendingPathComponent("meeting-assistant-cli")
+        switch mode {
+        case .defaultFakeRuntime:
+            realRuntimeConfiguration = nil
+        case .realWhisperRuntime:
+            realRuntimeConfiguration = try Self.realRuntimeConfiguration()
+        }
 
         try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(
             at: mediaURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        try Self.writeFixtureWAV(to: mediaURL)
+        if let realRuntimeConfiguration {
+            try FileManager.default.copyItem(at: realRuntimeConfiguration.smokeAudioURL, to: mediaURL)
+        } else {
+            try Self.writeFixtureWAV(to: mediaURL)
+        }
         mediaChecksum = try Self.sha256(mediaURL)
 
         let repoRoot = try Self.repositoryRootURL()
@@ -787,7 +891,10 @@ private final class RealProcessingCLIWorkspaceFixture {
 
         runner = ProcessingCommandProcessRunner(
             executablePath: cliURL.path,
-            environment: Self.cliEnvironment(workspaceURL: workspaceURL)
+            environment: Self.cliEnvironment(
+                workspaceURL: workspaceURL,
+                realRuntimeConfiguration: realRuntimeConfiguration
+            )
         )
     }
 
@@ -806,6 +913,48 @@ private final class RealProcessingCLIWorkspaceFixture {
         return try #require(payload["session_id"] as? String)
     }
 
+    func createNativeRecordingSession(title: String) throws -> String {
+        let sessionID = "session-native-real-runtime"
+        let sessionRootURL = self.sessionRootURL(sessionID: sessionID)
+        let artifactsURL = sessionRootURL.appendingPathComponent("artifacts", isDirectory: true)
+        try FileManager.default.createDirectory(at: artifactsURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: sessionRootURL.appendingPathComponent("logs", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        let audioURL = artifactsURL.appendingPathComponent("mixed_audio.wav", isDirectory: false)
+        try FileManager.default.copyItem(at: mediaURL, to: audioURL)
+        let checksum = try Self.sha256(audioURL)
+        let now = "2026-07-05T00:00:00Z"
+        try writeJSON(
+            [
+                "id": sessionID,
+                "title": title,
+                "source_type": "native_recording",
+                "status": "recorded",
+                "started_at": now,
+                "workspace_dir": sessionRootURL.path,
+                "created_at": now,
+                "updated_at": now,
+                "artifacts": [
+                    [
+                        "id": "artifact-native-real-runtime-mixed",
+                        "session_id": sessionID,
+                        "artifact_type": "mixed_audio",
+                        "path": "artifacts/mixed_audio.wav",
+                        "format": "wav",
+                        "capture_status": "available",
+                        "checksum": checksum,
+                        "created_at": now,
+                    ],
+                ],
+            ],
+            to: sessionRootURL.appendingPathComponent("session.json", isDirectory: false)
+        )
+        return sessionID
+    }
+
     func artifactTypes(sessionID: String) throws -> [String] {
         let session = try sessionMetadata(sessionID: sessionID)
         let artifacts = try #require(session["artifacts"] as? [[String: Any]])
@@ -816,13 +965,29 @@ private final class RealProcessingCLIWorkspaceFixture {
         try Self.sha256(mediaURL) == mediaChecksum
     }
 
+    func transcriptText(sessionID: String) throws -> String {
+        let session = try sessionMetadata(sessionID: sessionID)
+        let artifacts = try #require(session["artifacts"] as? [[String: Any]])
+        let transcriptArtifact = try #require(artifacts.first { $0["artifact_type"] as? String == "transcript_text" })
+        let transcriptURL = try artifactURL(transcriptArtifact, sessionID: sessionID)
+        let data = try Data(contentsOf: transcriptURL)
+        let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let segments = try #require(payload?["segments"] as? [[String: Any]])
+        let text = segments.compactMap { $0["text"] as? String }.joined(separator: " ")
+        #expect(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+        return text
+    }
+
     private func runCLI(_ arguments: [String]) throws -> [String: Any] {
         let process = Process()
         let stdout = Pipe()
         let stderr = Pipe()
         process.executableURL = cliURL
         process.arguments = arguments
-        process.environment = Self.cliEnvironment(workspaceURL: workspaceURL)
+        process.environment = Self.cliEnvironment(
+            workspaceURL: workspaceURL,
+            realRuntimeConfiguration: realRuntimeConfiguration
+        )
         process.standardOutput = stdout
         process.standardError = stderr
 
@@ -852,15 +1017,33 @@ private final class RealProcessingCLIWorkspaceFixture {
     }
 
     private func sessionMetadata(sessionID: String) throws -> [String: Any] {
-        let sessionURL = workspaceURL
-            .appendingPathComponent("sessions", isDirectory: true)
-            .appendingPathComponent(sessionID, isDirectory: true)
+        let sessionURL = sessionRootURL(sessionID: sessionID)
             .appendingPathComponent("session.json", isDirectory: false)
         let data = try Data(contentsOf: sessionURL)
         guard let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw RealProcessingCLIFixtureError.invalidJSON(stdout: sessionURL.path)
         }
         return payload
+    }
+
+    private func sessionRootURL(sessionID: String) -> URL {
+        workspaceURL
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+    }
+
+    private func artifactURL(_ artifact: [String: Any], sessionID: String) throws -> URL {
+        let path = try #require(artifact["path"] as? String)
+        if path.hasPrefix("/") {
+            return URL(fileURLWithPath: path, isDirectory: false)
+        }
+        return sessionRootURL(sessionID: sessionID)
+            .appendingPathComponent(path, isDirectory: false)
+    }
+
+    private func writeJSON(_ payload: Any, to url: URL) throws {
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: url)
     }
 
     private static func repositoryRootURL(filePath: String = #filePath) throws -> URL {
@@ -887,13 +1070,69 @@ private final class RealProcessingCLIWorkspaceFixture {
         throw RealProcessingCLIFixtureError.repositoryRootNotFound
     }
 
-    private static func cliEnvironment(workspaceURL: URL) -> [String: String] {
+    private static func cliEnvironment(
+        workspaceURL: URL,
+        realRuntimeConfiguration: RealRuntimeConfiguration?
+    ) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
         environment["MEETING_ASSISTANT_WORKSPACE"] = workspaceURL.path
-        environment.removeValue(forKey: "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME")
-        environment.removeValue(forKey: "MEETING_ASSISTANT_TRANSCRIPTION_MODEL")
-        environment.removeValue(forKey: "MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO")
+        if let realRuntimeConfiguration {
+            environment["MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME"] = realRuntimeConfiguration.runtimePath
+            environment["MEETING_ASSISTANT_TRANSCRIPTION_MODEL"] = realRuntimeConfiguration.modelPath
+            environment["MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO"] = realRuntimeConfiguration.smokeAudioURL.path
+        } else {
+            environment.removeValue(forKey: "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME")
+            environment.removeValue(forKey: "MEETING_ASSISTANT_TRANSCRIPTION_MODEL")
+            environment.removeValue(forKey: "MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO")
+        }
         return environment
+    }
+
+    private static func realRuntimeConfiguration() throws -> RealRuntimeConfiguration {
+        let environment = ProcessInfo.processInfo.environment
+        let runtimePath = try nonEmptyEnvironmentValue(
+            named: "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME",
+            message: "real runtime bridge smoke requires MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME"
+        )
+        let modelPath = try nonEmptyEnvironmentValue(
+            named: "MEETING_ASSISTANT_TRANSCRIPTION_MODEL",
+            message: "real runtime bridge smoke requires MEETING_ASSISTANT_TRANSCRIPTION_MODEL"
+        )
+        let smokeAudioPath = try nonEmptyEnvironmentValue(
+            named: "MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO",
+            message: "real runtime bridge smoke requires MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO"
+        )
+        let smokeAudioURL = URL(fileURLWithPath: smokeAudioPath)
+        guard FileManager.default.isReadableFile(atPath: smokeAudioURL.path) else {
+            throw RealProcessingCLIFixtureError.missingFixture(path: smokeAudioURL.path)
+        }
+        guard FileManager.default.isReadableFile(atPath: modelPath) else {
+            throw RealProcessingCLIFixtureError.missingFixture(path: modelPath)
+        }
+        if !FileManager.default.isExecutableFile(atPath: runtimePath) {
+            let resolvedRuntime = environment["PATH"]?
+                .split(separator: ":")
+                .map { URL(fileURLWithPath: String($0)).appendingPathComponent(runtimePath).path }
+                .first { FileManager.default.isExecutableFile(atPath: $0) }
+            if resolvedRuntime == nil {
+                throw RealProcessingCLIFixtureError.missingFixture(path: runtimePath)
+            }
+        }
+        return RealRuntimeConfiguration(
+            runtimePath: runtimePath,
+            modelPath: modelPath,
+            smokeAudioURL: smokeAudioURL
+        )
+    }
+
+    private static func nonEmptyEnvironmentValue(named name: String, message: String) throws -> String {
+        guard let value = ProcessInfo.processInfo.environment[name]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !value.isEmpty
+        else {
+            throw RealProcessingCLIFixtureError.missingConfiguration(message)
+        }
+        return value
     }
 
     private static func writeFixtureWAV(to url: URL) throws {
@@ -926,11 +1165,19 @@ private final class RealProcessingCLIWorkspaceFixture {
         let hex = digest.map { String(format: "%02x", $0) }.joined()
         return "sha256:\(hex)"
     }
+
+    private struct RealRuntimeConfiguration {
+        let runtimePath: String
+        let modelPath: String
+        let smokeAudioURL: URL
+    }
 }
 
 private enum RealProcessingCLIFixtureError: Error, CustomStringConvertible {
     case commandFailed(stdout: String, stderr: String)
     case invalidJSON(stdout: String)
+    case missingConfiguration(String)
+    case missingFixture(path: String)
     case repositoryRootNotFound
 
     var description: String {
@@ -939,6 +1186,10 @@ private enum RealProcessingCLIFixtureError: Error, CustomStringConvertible {
             return "real processing CLI command failed; stdout=\(stdout), stderr=\(stderr)"
         case .invalidJSON(let stdout):
             return "real processing CLI returned invalid JSON: \(stdout)"
+        case .missingConfiguration(let message):
+            return message
+        case .missingFixture(let path):
+            return "real processing CLI fixture is missing or unreadable: \(path)"
         case .repositoryRootNotFound:
             return "repository root containing platform/processing-cli/src was not found"
         }

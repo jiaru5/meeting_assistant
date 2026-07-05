@@ -116,3 +116,10 @@ VS-MA-22 opt-in real runtime app-bundle smoke boundary:
 3. The launched app must still call provider-owned `platform/e2e/ma-cli-local.sh` through `ProcessingCommandProcessRunner`; the UI test must not call `meeting_assistant_cli` directly to create the transcript.
 4. Production/default app runtime must not enable this hook, must not automatically choose a runtime from environment alone, and must not download models or audio fixtures.
 5. A passing real runtime app-bundle smoke remains partial evidence for native-to-provider runtime integration; it does not prove real ScreenCaptureKit output, true user Save Panel interaction, release distribution bundle, all developer machines, or product-validation release readiness.
+
+VS-MA-22 opt-in real runtime native bridge smoke boundary:
+
+1. `ProcessingStateViewModelTests` may exercise `ProcessingCommandProcessRunner` with the real `whisper.cpp` runtime only when `MA_NATIVE_REAL_RUNTIME_BRIDGE_SMOKE=1` is explicitly set.
+2. The smoke must use a native-recording workspace fixture whose `mixed_audio` is copied from `MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO`, pass `runtime=whisper_cpp` and `language=zh` through the public command contract, and read the resulting transcript through `TranscriptReviewWorkspaceLoader`.
+3. `platform/native-app/scripts/test.sh` must require `MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME`, `MEETING_ASSISTANT_TRANSCRIPTION_MODEL`, and `MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO` before enabling this smoke; it must not infer, download, copy, or package runtime/model/audio assets.
+4. A passing native bridge smoke is not app-bundle evidence and remains partial evidence; it does not prove launched `.app` UI automation, real ScreenCaptureKit output, true user Save Panel interaction, release distribution bundle, all developer machines, or product-validation release readiness.
