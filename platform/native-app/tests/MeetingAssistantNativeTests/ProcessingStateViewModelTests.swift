@@ -493,6 +493,23 @@ struct ProcessingStateViewModelTests {
     }
 
     @Test
+    func processRunnerDrainsStderrWhileWaitingForStdoutJSON() async throws {
+        let fixture = try ProcessingProcessRunnerFixture(script: .noisyStderrTranscriptSuccess)
+        let transcriptResponse = try await fixture.runner.generateTranscript(
+            GenerateTranscriptRequest(sessionID: "session-process")
+        )
+
+        #expect(transcriptResponse.ok)
+        #expect(transcriptResponse.command == .generateTranscript)
+        #expect(transcriptResponse.transcriptID == "transcript-process")
+        #expect(try fixture.recordedArguments() == [
+            "generate_transcript",
+            "--session-id",
+            "session-process",
+        ])
+    }
+
+    @Test
     func processRunnerDecodesStructuredNonzeroTranscriptFailure() async throws {
         let fixture = try ProcessingProcessRunnerFixture(script: .structuredTranscriptFailure)
         let response = try await fixture.runner.generateTranscript(
@@ -1288,6 +1305,7 @@ private final class ProcessingProcessRunnerFixture {
     enum Script {
         case success
         case labeledSuccess
+        case noisyStderrTranscriptSuccess
         case structuredTranscriptFailure
         case nonJSONTranscriptFailure(exitCode: Int32)
         case invalidJSONTranscriptFailure
@@ -1356,6 +1374,26 @@ private final class ProcessingProcessRunnerFixture {
             }
             JSON
             """
+        case .noisyStderrTranscriptSuccess:
+            transcriptCase = """
+                i=0
+                while [ "$i" -lt 4096 ]; do
+                  printf '%s\\n' "whisper.cpp progress line with local runtime diagnostics and token timing noise" >&2
+                  i=$((i + 1))
+                done
+                cat <<JSON
+            {
+              "ok": true,
+              "request_id": "local-process-transcript",
+              "command": "generate_transcript",
+              "session_id": "$3",
+              "transcript_id": "transcript-process",
+              "artifact_id": "artifact-transcript-process",
+              "segment_count": 1,
+              "warnings": []
+            }
+            JSON
+            """
         case .structuredTranscriptFailure:
             transcriptCase = """
                 cat <<JSON
@@ -1388,7 +1426,8 @@ private final class ProcessingProcessRunnerFixture {
         }
         let speakerStatus: String
         switch script {
-        case .labeledSuccess, .structuredTranscriptFailure, .nonJSONTranscriptFailure(_), .invalidJSONTranscriptFailure:
+        case .labeledSuccess, .noisyStderrTranscriptSuccess, .structuredTranscriptFailure,
+                .nonJSONTranscriptFailure(_), .invalidJSONTranscriptFailure:
             speakerStatus = """
                 "label_status": "labeled",
                 "speaker_labels_artifact_id": "artifact-speakers-process",

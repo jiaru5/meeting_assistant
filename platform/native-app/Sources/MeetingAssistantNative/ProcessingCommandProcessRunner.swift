@@ -219,11 +219,21 @@ public struct ProcessingCommandProcessRunner: ProcessingCommandClient, Sendable 
         } catch {
             throw ProcessingCommandBridgeError.launchFailed(command: command)
         }
+        let stdoutDrain = ProcessingCommandPipeDrain(
+            pipe: stdout,
+            label: "local.meeting-assistant.processing.stdout"
+        )
+        let stderrDrain = ProcessingCommandPipeDrain(
+            pipe: stderr,
+            label: "local.meeting-assistant.processing.stderr"
+        )
+        stdoutDrain.start()
+        stderrDrain.start()
         process.waitUntilExit()
 
         return (
-            stdout.fileHandleForReading.readDataToEndOfFile(),
-            stderr.fileHandleForReading.readDataToEndOfFile(),
+            stdoutDrain.wait(),
+            stderrDrain.wait(),
             process.terminationStatus
         )
     }
@@ -240,6 +250,29 @@ public struct ProcessingCommandProcessRunner: ProcessingCommandClient, Sendable 
             return .processingFailed
         default:
             return .internalError
+        }
+    }
+}
+
+private final class ProcessingCommandPipeDrain: @unchecked Sendable {
+    private let handle: FileHandle
+    private let queue: DispatchQueue
+    private var data = Data()
+
+    init(pipe: Pipe, label: String) {
+        handle = pipe.fileHandleForReading
+        queue = DispatchQueue(label: label)
+    }
+
+    func start() {
+        queue.async { [self] in
+            data = handle.readDataToEndOfFile()
+        }
+    }
+
+    func wait() -> Data {
+        queue.sync {
+            data
         }
     }
 }

@@ -80,6 +80,9 @@ class NativeAppBundleUIAutomationReportTests(unittest.TestCase):
                 'Test Case "-[MeetingAssistantNativeAppUITests.AppBundleLocatorSmokeTests '
                 'testRealWhisperRuntimeTranscriptReviewFromLaunchedAppBundleWhenExplicitlyEnabled]" started.\n'
                 'Click "ma.processing.startButton" Button[0.50, 0.50]\n'
+                "Checking `Expect predicate `label CONTAINS "
+                '"Processing completed with transcript-only speaker labels." '
+                'OR value CONTAINS "Processing completed with transcript-only speaker labels."`\n'
                 "XCTAssertTrue failed - Expected real runtime processing to complete from the launched app bundle.\n",
                 encoding="utf-8",
             )

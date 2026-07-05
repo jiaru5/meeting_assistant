@@ -105,9 +105,11 @@ def build_report(
     processing_start_clicked = bool(
         re.search(r'Click "ma\.processing\.startButton"', log_text, re.IGNORECASE)
     )
-    processing_completed = bool(
-        re.search(r"Processing completed with transcript-only speaker labels\.", log_text)
-    )
+    processing_completed = False
+    if blocker_type != "real_runtime_processing_timeout":
+        processing_completed = bool(
+            re.search(r"Processing completed with transcript-only speaker labels\.", log_text)
+        )
     remediation = list(REMEDIATION)
     residual_risks = list(RESIDUAL_RISKS)
     if blocker_type == "real_runtime_processing_timeout":

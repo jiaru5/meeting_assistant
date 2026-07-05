@@ -138,6 +138,8 @@ Phase 2 以后按“大阶段管理、纵切交付、契约验收”的方式推
 
 2026-07-05 VS-MA 顺序守卫补充：`release-preflight.sh` 现在会先运行 `vs-stage-check.py release`，要求 `VS-MA-14` 到 `VS-MA-22` 的状态表行均为 `已达退出口径`，再进入 `product-validation-check.py release` 和后续 release-scope gates。当前 `VS-MA-21/22` 仍为 `partial evidence`，因此发布候选会先失败在 VS 阶段前置条件，而不是提前把 PV 作为唯一 blocker。
 
+2026-07-05 23:08 CST VS-MA-22 real-runtime blocker 补充：`ProcessingCommandProcessRunner` 已补并发 drain stdout/stderr 的组件硬化，新增大量 stderr 回归用例并通过 `./platform/native-app/scripts/test.sh`；同一 runtime/model/audio 的 `smoke-whisper-cpp.sh` 直跑约 3.56 秒通过，说明 provider CLI 本身不是 120 秒超时根因。复跑 `MA_NATIVE_APP_REAL_RUNTIME_SMOKE=1 ./platform/native-app/scripts/test-app-bundle.sh` 仍在点击 `ma.processing.startButton` 后超时，且 blocker report 已修正为 `processing_completed=false`，因此 `VS-MA-22` 继续保持 `partial evidence`，下一步定位 `.app` real-runtime 启动环境、默认 runtime 参数或 child process 返回路径。
+
 当前顺序：`VS-MA-14/15`、`VS-MA-16`、`VS-MA-17/18/19` 和 `VS-MA-20` 已按阶段退出口径收口；当前继续推进 `VS-MA-21/22` 的 release blocker，最后才进入 `VS-MA-23` 发布候选。
 
 | 顺序 | 纵切 | 能力和验收 | 主要实现表面 | 最小测试和证据 | 退出口径 |
