@@ -941,6 +941,98 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertIn("must report zero findings", output)
             self.assertNotIn("supply-chain-check passed: phase=current", result.stdout)
 
+    def test_supply_chain_release_fails_without_release_provenance_and_signature_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            command = self.supply_chain_report_command()
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["sbom"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/supply-chain-check.sh"), "release"],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("release supply-chain provenance/signing evidence failed", output)
+            self.assertIn("release provenance report is required", output)
+            self.assertIn("release signature report is required", output)
+            self.assertNotIn("supply-chain-check passed: phase=release", result.stdout)
+
+    def test_supply_chain_release_accepts_provenance_and_signature_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=fixture, text=True).strip()
+            digest = "sha256:" + ("a" * 64)
+            command = self.supply_chain_report_command()
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["sbom"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            reports_dir = Path(directory) / "release-reports"
+            reports_dir.mkdir()
+            provenance_path = reports_dir / "provenance.json"
+            signature_path = reports_dir / "signature.json"
+            provenance_path.write_text(
+                json.dumps(
+                    {
+                        "report_schema": 1,
+                        "provenance_target": manifest["supply_chain"]["provenance_target"],
+                        "release_provenance_attestation": "produced",
+                        "sbom_format": manifest["supply_chain"]["sbom_format"],
+                        "subject_commit": head,
+                        "builder": "github-actions-oidc",
+                        "source_repository": "example/meeting_assistant",
+                        "artifacts": [{"name": "MeetingAssistantNative.app", "digest": digest}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            signature_path.write_text(
+                json.dumps(
+                    {
+                        "report_schema": 1,
+                        "artifact_signing": manifest["supply_chain"]["artifact_signing"],
+                        "signing_status": "signed",
+                        "subject_commit": head,
+                        "verifier": "cosign",
+                        "signed_artifacts": [
+                            {
+                                "name": "MeetingAssistantNative.app",
+                                "digest": digest,
+                                "signature_type": "keyless-oidc",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["MEETING_ASSISTANT_RELEASE_PROVENANCE_REPORT"] = str(provenance_path)
+            env["MEETING_ASSISTANT_RELEASE_SIGNATURE_REPORT"] = str(signature_path)
+
+            result = subprocess.run(
+                [str(fixture / "scripts/supply-chain-check.sh"), "release"],
+                cwd=fixture,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("release supply-chain provenance/signing evidence passed", result.stdout)
+            self.assertIn("supply-chain-check passed: phase=release", result.stdout)
+
     def test_security_check_runs_registered_security_gates(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)

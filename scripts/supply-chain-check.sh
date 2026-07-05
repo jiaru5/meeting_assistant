@@ -136,4 +136,136 @@ if failures:
 print("supply-chain evidence reports passed.")
 PY
 
+if [ "$phase" = "release" ]; then
+  python3 - "$ROOT_DIR" <<'PY'
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+
+root = Path(sys.argv[1])
+manifest = json.loads((root / "harness/project-manifest.json").read_text(encoding="utf-8"))
+supply_chain = manifest.get("supply_chain", {})
+failures: list[str] = []
+
+
+def resolve_evidence_path(env_name: str, default_relative: str) -> Path:
+    configured = os.environ.get(env_name, "").strip()
+    path = Path(configured) if configured else root / default_relative
+    if not path.is_absolute():
+        path = root / path
+    return path
+
+
+def load_report(path: Path, label: str) -> dict[str, Any] | None:
+    if not path.is_file():
+        failures.append(f"{label} report is required for release supply-chain gate: {path}")
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        failures.append(f"{label} report must be valid JSON: {path}: {exc}")
+        return None
+    if not isinstance(payload, dict):
+        failures.append(f"{label} report must be a JSON object: {path}")
+        return None
+    return payload
+
+
+def current_commit() -> str | None:
+    completed = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.strip()
+
+
+def require_equal(report: dict[str, Any], key: str, expected: Any, label: str) -> None:
+    if report.get(key) != expected:
+        failures.append(f"{label} report must set {key}={expected!r}")
+
+
+def require_sha256_digest(value: Any, label: str) -> None:
+    if not isinstance(value, str) or re.fullmatch(r"sha256:[a-fA-F0-9]{64}", value) is None:
+        failures.append(f"{label} must be a sha256:<64 hex> digest")
+
+
+provenance_path = resolve_evidence_path(
+    "MEETING_ASSISTANT_RELEASE_PROVENANCE_REPORT",
+    ".harness/evidence/release/supply-chain/release-provenance-report.json",
+)
+signature_path = resolve_evidence_path(
+    "MEETING_ASSISTANT_RELEASE_SIGNATURE_REPORT",
+    ".harness/evidence/release/supply-chain/release-signature-report.json",
+)
+
+head = current_commit()
+provenance = load_report(provenance_path, "release provenance")
+signature = load_report(signature_path, "release signature")
+
+if provenance is not None:
+    require_equal(provenance, "report_schema", 1, "release provenance")
+    require_equal(provenance, "provenance_target", supply_chain.get("provenance_target"), "release provenance")
+    require_equal(provenance, "release_provenance_attestation", "produced", "release provenance")
+    require_equal(provenance, "sbom_format", supply_chain.get("sbom_format"), "release provenance")
+    if head is not None:
+        require_equal(provenance, "subject_commit", head, "release provenance")
+    if not isinstance(provenance.get("builder"), str) or not provenance.get("builder"):
+        failures.append("release provenance report must identify builder")
+    if not isinstance(provenance.get("source_repository"), str) or not provenance.get("source_repository"):
+        failures.append("release provenance report must identify source_repository")
+    artifacts = provenance.get("artifacts")
+    if not isinstance(artifacts, list) or not artifacts:
+        failures.append("release provenance report must include at least one artifact")
+    else:
+        for index, artifact in enumerate(artifacts):
+            if not isinstance(artifact, dict):
+                failures.append(f"release provenance artifact #{index} must be an object")
+                continue
+            if not isinstance(artifact.get("name"), str) or not artifact.get("name"):
+                failures.append(f"release provenance artifact #{index} must include name")
+            require_sha256_digest(artifact.get("digest"), f"release provenance artifact #{index} digest")
+
+if signature is not None:
+    require_equal(signature, "report_schema", 1, "release signature")
+    require_equal(signature, "artifact_signing", supply_chain.get("artifact_signing"), "release signature")
+    require_equal(signature, "signing_status", "signed", "release signature")
+    if head is not None:
+        require_equal(signature, "subject_commit", head, "release signature")
+    if not isinstance(signature.get("verifier"), str) or not signature.get("verifier"):
+        failures.append("release signature report must identify verifier")
+    signed_artifacts = signature.get("signed_artifacts")
+    if not isinstance(signed_artifacts, list) or not signed_artifacts:
+        failures.append("release signature report must include at least one signed_artifact")
+    else:
+        for index, artifact in enumerate(signed_artifacts):
+            if not isinstance(artifact, dict):
+                failures.append(f"release signature artifact #{index} must be an object")
+                continue
+            if not isinstance(artifact.get("name"), str) or not artifact.get("name"):
+                failures.append(f"release signature artifact #{index} must include name")
+            require_sha256_digest(artifact.get("digest"), f"release signature artifact #{index} digest")
+            if not isinstance(artifact.get("signature_type"), str) or not artifact.get("signature_type"):
+                failures.append(f"release signature artifact #{index} must include signature_type")
+
+if failures:
+    print("release supply-chain provenance/signing evidence failed:", file=sys.stderr)
+    for failure in failures:
+        print(f" - {failure}", file=sys.stderr)
+    raise SystemExit(1)
+
+print("release supply-chain provenance/signing evidence passed.")
+PY
+fi
+
 echo "supply-chain-check passed: phase=$phase."

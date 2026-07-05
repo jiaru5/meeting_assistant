@@ -58,7 +58,7 @@
 | `agent-workflow-check.sh` | 检查本次 diff 是否同步了必要 spec、测试、验证矩阵和工程规范 |
 | `architecture-check.sh` | 执行每个注册组件的结构和依赖边界测试 |
 | `security-check.sh` | 执行 secret、Action pin 和组件安全扫描 |
-| `supply-chain-check.sh` | 验证依赖/Action 固定，运行组件 SBOM gate，聚合校验组件供应链报告；发布阶段还需完整 release provenance 和签名证据 |
+| `supply-chain-check.sh` | 验证依赖/Action 固定，运行组件 SBOM gate，聚合校验组件供应链报告；`release` 模式还必须看到 release provenance 和签名 evidence report，否则 fail closed |
 | `production-readiness-check.sh` | 阻断非 project、缺少 E2E、生产工件或发布策略的候选版本 |
 | `review-report.sh` | 根据当前 diff 生成交付审查摘要 |
 | `lint.sh` | 运行已接入前端、后端和脚本 lint |
@@ -87,6 +87,8 @@ full-stack E2E 可在 manifest 中声明可选 `pre_start_command`，用于准�
 发布候选路径还使用 `platform/e2e/release-capture-processing-hardening-smoke.sh` 作为 VS-MA-21 provider hardening gate。该 wrapper 运行既有 `capture-processing-smoke.sh`，再由 `platform/e2e/capture_processing_hardening_report.py` 生成结构化 report，声明 `release_gate=release-scope-provider-hardening`，并校验 no-auto-download、path/lock/temp/checksum rollback、provider failure redaction、retry success 和 capture checksum preservation marker 都存在。它同样排在 `product-validation-check.py release` 之后；当前 PV 仍为 `partial` 时不会作为发布放行证据。即使该步骤通过，它也仍保持 `not_release_readiness=true`，不证明真实 ScreenCaptureKit 并发、native UI release-scope 并发、真实 release bundle 或 VS-MA-23 release readiness。
 
 发布候选路径还使用 `platform/e2e/release-security-supply-chain-smoke.sh` 作为 VS-MA-22 security/supply-chain evidence gate。该 wrapper 运行 `./scripts/security-check.sh`、`./scripts/supply-chain-check.sh current` 和 `platform/processing-cli/scripts/release-provider-smoke.sh`，再由 `platform/e2e/release_security_supply_chain_report.py --release-scope` 聚合 component security report、supply-chain report 和 release-provider marker，声明 `release_gate=release-scope-security-supply-chain`。它同样排在 `product-validation-check.py release` 之后；当前 PV 仍为 `partial` 时不会作为发布放行证据。即使该步骤通过，它也仍保持 `not_release_readiness=true`，不证明签名/公证分发包、SLSA/release provenance attestation、所有机器 runtime/model sidecar、真实 ScreenCaptureKit 或 VS-MA-23 release readiness。
+
+`./scripts/supply-chain-check.sh release` 现在额外要求 release provenance/signing evidence：默认读取 `.harness/evidence/release/supply-chain/release-provenance-report.json` 和 `.harness/evidence/release/supply-chain/release-signature-report.json`，也可用 `MEETING_ASSISTANT_RELEASE_PROVENANCE_REPORT` 和 `MEETING_ASSISTANT_RELEASE_SIGNATURE_REPORT` 指向 CI 生成的 report。provenance report 必须绑定当前 commit、manifest 中的 `provenance_target` / `sbom_format`、至少一个 `sha256:` artifact digest、builder 和 source repository；signature report 必须绑定当前 commit、manifest 中的 `artifact_signing`、签名状态、verifier 和至少一个 signed artifact。没有这些 release evidence 时，release supply-chain gate 必须 fail closed；这不影响 `current` 模式和本地 `check.sh`。
 
 已注册的非业务 skeleton 只能承载未来原生录制控制面、本地 processing、dependency-check、artifact contract、transcription adapter、speaker-label fallback 和 export 命令边界。
 
