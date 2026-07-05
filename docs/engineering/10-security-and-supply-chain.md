@@ -40,6 +40,8 @@ Meeting Assistant 当前 native app 和 processing CLI 的 `Dockerfile` 是 rele
 
 当前 native app 和 processing CLI 组件 SBOM 必须显式声明 first-party application 的 `Apache-2.0` license evidence、`packaged-third-party-runtime-components=none` 和 `release-gate-image=validation-only`。这些字段只证明当前 validation image 没有打包第三方 runtime component，并且 SBOM gate 会在许可证或范围声明退化时 fail closed；不等同于完整 release-scope SCA、provenance、签名、公证或模型 sidecar 放行。
 
+Processing CLI release provider smoke 必须对模型 sidecar fail closed：模型 sha256 配置或 sidecar 不匹配实际模型时失败，JSON provenance sidecar 不可解析时失败，hash/license/provenance sidecar 解析后不位于 `~/.local/share/ai-models/whisper.cpp/` 模型根目录时失败。该规则只约束当前本机 release-provider evidence，不等同于完整 SCA、签名、公证或所有开发机 provenance 覆盖。
+
 ## Meeting Assistant MVP 依赖策略
 
 `meeting_assistant` Phase 1 采用允许来源 + 人工安装策略：

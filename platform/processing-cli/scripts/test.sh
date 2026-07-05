@@ -132,11 +132,25 @@ printf '#!/usr/bin/env sh\nexit 0\n' > "$release_home/.local/bin/whisper-cli"
 chmod +x "$release_home/.local/bin/whisper-cli"
 printf 'fake model' > "$release_home/.local/share/ai-models/whisper.cpp/large-v3-turbo/ggml-large-v3-turbo-q5_0.bin"
 printf 'fake wav' > "$release_home/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav"
+release_model_path="$release_home/.local/share/ai-models/whisper.cpp/large-v3-turbo/ggml-large-v3-turbo-q5_0.bin"
+release_license_file="$release_model_path.license.txt"
+release_provenance_file="$release_model_path.provenance.json"
+release_model_hash="$(
+  python3 - "$release_model_path" <<'PY'
+import hashlib
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+digest = hashlib.sha256(path.read_bytes()).hexdigest()
+print(digest)
+PY
+)"
 set +e
 release_smoke_output="$(
   HOME="$release_home" \
     MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$release_home/.local/bin/whisper-cli" \
-    MEETING_ASSISTANT_TRANSCRIPTION_MODEL="$release_home/.local/share/ai-models/whisper.cpp/large-v3-turbo/ggml-large-v3-turbo-q5_0.bin" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL="$release_model_path" \
     MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$release_home/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav" \
     ./scripts/release-provider-smoke.sh 2>&1
 )"
@@ -167,6 +181,92 @@ case "$release_smoke_output" in
   *)
     echo "processing-cli test failed: release provider smoke did not report the model provenance blocker" >&2
     echo "$release_smoke_output" >&2
+    exit 1
+    ;;
+esac
+
+printf '%s  %s\n' "$release_model_hash" "$(basename "$release_model_path")" > "$release_model_path.sha256"
+printf 'Apache-2.0 compatible local fixture license evidence.\n' > "$release_license_file"
+printf '{"source":"local release smoke fixture","model":"large-v3-turbo","sha256":"sha256:%s","license":"Apache-2.0"}\n' "$release_model_hash" > "$release_provenance_file"
+
+set +e
+release_hash_mismatch_output="$(
+  HOME="$release_home" \
+    MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$release_home/.local/bin/whisper-cli" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL="$release_model_path" \
+    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$release_home/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_SHA256="sha256:0000000000000000000000000000000000000000000000000000000000000000" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_LICENSE_FILE="$release_license_file" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_PROVENANCE_FILE="$release_provenance_file" \
+    ./scripts/release-provider-smoke.sh 2>&1
+)"
+release_hash_mismatch_status="$?"
+set -e
+if [ "$release_hash_mismatch_status" -eq 0 ]; then
+  echo "processing-cli test failed: release provider smoke accepted mismatched model sha256 evidence" >&2
+  exit 1
+fi
+case "$release_hash_mismatch_output" in
+  *"configured sha256 does not match the selected model"* ) ;;
+  *)
+    echo "processing-cli test failed: release provider smoke did not report the model sha256 mismatch blocker" >&2
+    echo "$release_hash_mismatch_output" >&2
+    exit 1
+    ;;
+esac
+
+release_invalid_provenance_file="$release_model_path.invalid-provenance.json"
+printf '{not-json\n' > "$release_invalid_provenance_file"
+set +e
+release_invalid_provenance_output="$(
+  HOME="$release_home" \
+    MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$release_home/.local/bin/whisper-cli" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL="$release_model_path" \
+    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$release_home/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_SHA256="sha256:$release_model_hash" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_LICENSE_FILE="$release_license_file" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_PROVENANCE_FILE="$release_invalid_provenance_file" \
+    ./scripts/release-provider-smoke.sh 2>&1
+)"
+release_invalid_provenance_status="$?"
+set -e
+if [ "$release_invalid_provenance_status" -eq 0 ]; then
+  echo "processing-cli test failed: release provider smoke accepted invalid provenance JSON" >&2
+  exit 1
+fi
+case "$release_invalid_provenance_output" in
+  *"JSON sidecar cannot be parsed"* ) ;;
+  *)
+    echo "processing-cli test failed: release provider smoke did not report the invalid provenance JSON blocker" >&2
+    echo "$release_invalid_provenance_output" >&2
+    exit 1
+    ;;
+esac
+
+release_outside_provenance_file="$smoke_tmp/outside-provenance.json"
+printf '{"source":"outside fixture","model":"large-v3-turbo"}\n' > "$release_outside_provenance_file"
+set +e
+release_outside_provenance_output="$(
+  HOME="$release_home" \
+    MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME="$release_home/.local/bin/whisper-cli" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL="$release_model_path" \
+    MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO="$release_home/.local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_SHA256="sha256:$release_model_hash" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_LICENSE_FILE="$release_license_file" \
+    MEETING_ASSISTANT_TRANSCRIPTION_MODEL_PROVENANCE_FILE="$release_outside_provenance_file" \
+    ./scripts/release-provider-smoke.sh 2>&1
+)"
+release_outside_provenance_status="$?"
+set -e
+if [ "$release_outside_provenance_status" -eq 0 ]; then
+  echo "processing-cli test failed: release provider smoke accepted provenance outside model root" >&2
+  exit 1
+fi
+case "$release_outside_provenance_output" in
+  *"model provenance sidecar blocker"* ) ;;
+  *)
+    echo "processing-cli test failed: release provider smoke did not report the provenance root blocker" >&2
+    echo "$release_outside_provenance_output" >&2
     exit 1
     ;;
 esac
