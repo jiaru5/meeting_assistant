@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-report_path="${MEETING_ASSISTANT_RELEASE_BUNDLE_REPORT:-.harness/evidence/release/bundle/release-bundle-report.json}"
+report_path="${MEETING_ASSISTANT_RELEASE_BUNDLE_REPORT:-.harness/release-inputs/bundle/release-bundle-report.json}"
 
 python3 - "$ROOT_DIR" "$report_path" <<'PY'
 from __future__ import annotations

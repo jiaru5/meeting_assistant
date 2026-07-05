@@ -202,11 +202,11 @@ def require_sha256_digest(value: Any, label: str) -> None:
 
 provenance_path = resolve_evidence_path(
     "MEETING_ASSISTANT_RELEASE_PROVENANCE_REPORT",
-    ".harness/evidence/release/supply-chain/release-provenance-report.json",
+    ".harness/release-inputs/supply-chain/release-provenance-report.json",
 )
 signature_path = resolve_evidence_path(
     "MEETING_ASSISTANT_RELEASE_SIGNATURE_REPORT",
-    ".harness/evidence/release/supply-chain/release-signature-report.json",
+    ".harness/release-inputs/supply-chain/release-signature-report.json",
 )
 
 head = current_commit()

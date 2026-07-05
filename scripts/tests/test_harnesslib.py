@@ -476,6 +476,8 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("release-scope-security-supply-chain", dev_commands)
         self.assertIn("release-scope-security-supply-chain", e2e_readme)
         self.assertIn("not_release_readiness=true", e2e_readme)
+        self.assertIn(".harness/release-inputs/supply-chain/release-provenance-report.json", dev_commands)
+        self.assertNotIn(".harness/evidence/release/supply-chain/release-provenance-report.json", dev_commands)
 
     def test_release_preflight_registers_release_bundle_gate_before_supply_chain(self) -> None:
         release_preflight = (ROOT / "scripts/release-preflight.sh").read_text(encoding="utf-8")
@@ -495,6 +497,8 @@ class HarnessValidationTests(unittest.TestCase):
         )
         self.assertIn("release bundle evidence", dev_commands)
         self.assertIn("release-bundle-check.sh", production_readiness)
+        self.assertIn(".harness/release-inputs/bundle/release-bundle-report.json", production_readiness)
+        self.assertNotIn(".harness/evidence/release/bundle/release-bundle-report.json", production_readiness)
 
     def test_product_validation_current_phase_rejects_missing_status(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1076,7 +1080,7 @@ class HarnessValidationTests(unittest.TestCase):
             fixture = self.copy_repo_fixture(directory)
             self.init_git_baseline(fixture)
             head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=fixture, text=True).strip()
-            reports_dir = fixture / ".harness/evidence/release/bundle"
+            reports_dir = fixture / ".harness/release-inputs/bundle"
             reports_dir.mkdir(parents=True)
             bundle_path = reports_dir / "MeetingAssistantNative.zip"
             bundle_bytes = b"release bundle fixture\n"
