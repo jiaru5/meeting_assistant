@@ -4,15 +4,72 @@ import SwiftUI
 
 @main
 struct MeetingAssistantNativeApp: App {
-    private let configuration = NativeControlPlaneFixtureConfiguration.fromLaunchContext()
-    private let windowPlacement = NativeAppWindowPlacement.fromLaunchContext()
+    @NSApplicationDelegateAdaptor(MeetingAssistantNativeAppDelegate.self)
+    private var appDelegate
 
     var body: some Scene {
-        WindowGroup("Meeting Assistant Native") {
-            NativeControlPlaneRootView(configuration: configuration)
-                .background(WindowPlacementView(placement: windowPlacement))
+        Settings {
+            EmptyView()
         }
-        .defaultSize(width: 1180, height: 760)
+    }
+}
+
+private final class MeetingAssistantNativeAppDelegate: NSObject, NSApplicationDelegate {
+    nonisolated(unsafe) private static var retainedWindowController: NSWindowController?
+    private var windowController: NSWindowController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.openMainWindow()
+        }
+    }
+
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication,
+        hasVisibleWindows flag: Bool
+    ) -> Bool {
+        if !flag {
+            openMainWindow()
+        }
+        return true
+    }
+
+    private func openMainWindow() {
+        NSApp.setActivationPolicy(.regular)
+
+        if let window = windowController?.window {
+            show(window: window)
+            return
+        }
+
+        let configuration = NativeControlPlaneFixtureConfiguration.fromLaunchContext()
+        let windowPlacement = NativeAppWindowPlacement.fromLaunchContext()
+        let rootView = NativeControlPlaneRootView(configuration: configuration)
+            .background(WindowPlacementView(placement: windowPlacement))
+        let hostingController = NSHostingController(rootView: rootView)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Meeting Assistant Native"
+        window.contentViewController = hostingController
+        window.isReleasedWhenClosed = false
+        window.setFrameAutosaveName("meeting-assistant-main")
+        window.center()
+
+        let controller = NSWindowController(window: window)
+        windowController = controller
+        Self.retainedWindowController = controller
+        controller.showWindow(nil)
+        show(window: window)
+    }
+
+    private func show(window: NSWindow) {
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
     }
 }
 

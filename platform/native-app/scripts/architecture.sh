@@ -185,6 +185,15 @@ grep -R -q "MA_NATIVE_PROCESSING_RUNTIME" App/MeetingAssistantNativeApp.swift
 grep -R -q "ProcessingCLIDependencyCheckRunner(environment: environment)" App/MeetingAssistantNativeApp.swift
 grep -R -q "usesStaticDependencyFixture" App/MeetingAssistantNativeApp.swift
 grep -R -q "initialReadinessState" App/MeetingAssistantNativeApp.swift
+grep -R -q "NSApplicationDelegateAdaptor(MeetingAssistantNativeAppDelegate.self)" App/MeetingAssistantNativeApp.swift
+grep -R -q "NSHostingController(rootView: rootView)" App/MeetingAssistantNativeApp.swift
+grep -R -q "NSWindow(" App/MeetingAssistantNativeApp.swift
+grep -R -q "window.setFrameAutosaveName(\"meeting-assistant-main\")" App/MeetingAssistantNativeApp.swift
+grep -R -q "window.makeKeyAndOrderFront(nil)" App/MeetingAssistantNativeApp.swift
+if grep -q "WindowGroup(\"Meeting Assistant Native" App/MeetingAssistantNativeApp.swift; then
+  echo "native-app architecture check failed: local-direct app must not create a parallel SwiftUI WindowGroup for the main window." >&2
+  exit 1
+fi
 grep -R -q "autoRefreshPreflightOnAppear" App/MeetingAssistantNativeApp.swift Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -R -q "preflightWorkspaceURL" App/MeetingAssistantNativeApp.swift Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -R -q ".onChange(of: permissionViewModel.state)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
@@ -193,6 +202,10 @@ grep -R -q "processingViewModel.updateReadiness(readiness)" Sources/MeetingAssis
 grep -R -q "await permissionViewModel.refresh(workspaceURL: preflightWorkspaceURL)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -q "release-bundle-create.py" scripts/run-local-app.sh
 grep -q "Contents/MacOS/MeetingAssistantNative" scripts/run-local-app.sh
+grep -q "MA_NATIVE_LOCAL_APP_LAUNCH_MODE" scripts/run-local-app.sh
+grep -q "launchctl setenv" scripts/run-local-app.sh
+grep -q "launchctl unsetenv" scripts/run-local-app.sh
+grep -q "open_args=(-n -W -F" scripts/run-local-app.sh
 grep -q "MEETING_ASSISTANT_CLI_PATH" scripts/run-local-app.sh
 grep -q "platform/e2e/ma-cli-local.sh" scripts/run-local-app.sh
 grep -q "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME" scripts/run-local-app.sh

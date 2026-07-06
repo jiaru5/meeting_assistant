@@ -11,6 +11,7 @@ build_if_missing="${MA_NATIVE_LOCAL_APP_BUILD_IF_MISSING:-1}"
 rebuild="${MA_NATIVE_LOCAL_APP_REBUILD:-0}"
 dry_run="${MA_NATIVE_LOCAL_APP_DRY_RUN:-0}"
 require_real_runtime="${MA_NATIVE_LOCAL_APP_REQUIRE_REAL_RUNTIME:-1}"
+launch_mode="${MA_NATIVE_LOCAL_APP_LAUNCH_MODE:-open}"
 app_args=()
 
 usage() {
@@ -32,6 +33,10 @@ Environment:
   MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME and MEETING_ASSISTANT_TRANSCRIPTION_MODEL
   are required by default so Start Processing uses the explicit local whisper.cpp
   runtime. Set MA_NATIVE_LOCAL_APP_REQUIRE_REAL_RUNTIME=0 for dependency-only runs.
+  MA_NATIVE_LOCAL_APP_LAUNCH_MODE=open uses a fresh LaunchServices launch with
+  scoped launchctl environment, matching normal local app launch while bypassing
+  stale macOS window restoration state. Set it to direct only for low-level
+  executable diagnostics.
 USAGE
 }
 
@@ -176,6 +181,7 @@ echo "MeetingAssistantNative local app:"
 echo "  app: $app_path"
 echo "  cli: $MEETING_ASSISTANT_CLI_PATH"
 echo "  workspace: $MEETING_ASSISTANT_WORKSPACE"
+echo "  launch mode: $launch_mode"
 echo "  processing runtime: ${MA_NATIVE_PROCESSING_RUNTIME:-default}"
 echo "  transcription runtime: ${MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME:-not configured}"
 echo "  transcription model: ${MEETING_ASSISTANT_TRANSCRIPTION_MODEL:-not configured}"
@@ -185,7 +191,77 @@ if is_truthy "$dry_run"; then
   exit 0
 fi
 
+case "$launch_mode" in
+  direct)
+    if [[ ${#app_args[@]} -gt 0 ]]; then
+      exec "$app_binary" "${app_args[@]}"
+    fi
+    exec "$app_binary"
+    ;;
+  open)
+    ;;
+  *)
+    echo "error: MA_NATIVE_LOCAL_APP_LAUNCH_MODE must be open or direct." >&2
+    exit 2
+    ;;
+esac
+
+launch_env_dir="$(mktemp -d)"
+launch_env_names=(
+  MEETING_ASSISTANT_CLI_PATH
+  MEETING_ASSISTANT_WORKSPACE
+  MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME
+  MEETING_ASSISTANT_TRANSCRIPTION_MODEL
+  MEETING_ASSISTANT_FFMPEG_PATH
+  MA_NATIVE_RECORDING_CLIENT
+  MA_NATIVE_PROCESSING_CLIENT
+  MA_NATIVE_TRANSCRIPT_ACTION_CLIENT
+  MA_NATIVE_TRANSCRIPT_ACTION_OS_CLIENT
+  MA_NATIVE_PROCESSING_RUNTIME
+  MA_NATIVE_PROCESSING_LANGUAGE
+)
+launch_unset_names=(
+  MA_NATIVE_APP_XCTEST
+  XCTestConfigurationFilePath
+  XCTestBundlePath
+  XCInjectBundleInto
+)
+
+save_launch_env() {
+  local name="$1"
+  local value
+  value="$(launchctl getenv "$name" 2>/dev/null || true)"
+  if [[ -n "$value" ]]; then
+    printf '%s' "$value" > "$launch_env_dir/$name.value"
+    : > "$launch_env_dir/$name.set"
+  fi
+}
+
+restore_launch_env() {
+  local name
+  for name in "${launch_env_names[@]}" "${launch_unset_names[@]}"; do
+    if [[ -f "$launch_env_dir/$name.set" ]]; then
+      launchctl setenv "$name" "$(cat "$launch_env_dir/$name.value")" >/dev/null
+    else
+      launchctl unsetenv "$name" >/dev/null 2>&1 || true
+    fi
+  done
+  rm -rf "$launch_env_dir"
+}
+
+trap restore_launch_env EXIT INT TERM
+
+for name in "${launch_env_names[@]}"; do
+  save_launch_env "$name"
+  launchctl setenv "$name" "${!name-}" >/dev/null
+done
+for name in "${launch_unset_names[@]}"; do
+  save_launch_env "$name"
+  launchctl unsetenv "$name" >/dev/null 2>&1 || true
+done
+
+open_args=(-n -W -F "$app_path")
 if [[ ${#app_args[@]} -gt 0 ]]; then
-  exec "$app_binary" "${app_args[@]}"
+  open_args+=(--args "${app_args[@]}")
 fi
-exec "$app_binary"
+open "${open_args[@]}"
