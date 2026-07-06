@@ -334,6 +334,7 @@ struct NativeRecordingCommandClientTests {
         #expect(adapter.capabilitySummary.producedArtifactTypes == NativeCaptureArtifactType.allCases)
         #expect(adapter.capabilitySummary.producesCombinedRecordingFile == true)
         #expect(adapter.capabilitySummary.producesSeparateAudioArtifacts == false)
+        #expect(adapter.capabilitySummary.attemptsMixedAudioExtractionFromCombinedRecording == true)
     }
 
     @Test
@@ -422,7 +423,7 @@ struct NativeRecordingCommandClientTests {
     }
 
     @Test
-    func screenCaptureKitCombinedRecordingRegistersPartialAudioDegradation() async throws {
+    func screenCaptureKitCombinedRecordingRegistersPartialAudioDegradationWhenMixedAudioExtractionFails() async throws {
         let workspace = try temporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         let runtime = FakeAppleScreenCaptureKitRuntime(
@@ -463,13 +464,58 @@ struct NativeRecordingCommandClientTests {
         #expect(mixed.captureStatus == "degraded")
         #expect(system.degradationReason?.contains("combined screen_video file") == true)
         #expect(microphone.degradationReason?.contains("combined screen_video file") == true)
-        #expect(mixed.degradationReason?.contains("combined recording file") == true)
+        #expect(mixed.degradationReason?.contains("exportable audio track") == true)
 
         let session = try readSessionJSON(workspace: workspace, sessionID: "session-sck-combined")
         let artifacts = try #require(session["artifacts"] as? [[String: Any]])
         #expect(artifacts.count == 4)
         #expect(artifacts.compactMap { $0["checksum"] as? String }.count == 1)
         #expect(artifacts.compactMap { $0["degradation_reason"] as? String }.count == 3)
+    }
+
+    @Test
+    func screenCaptureKitCombinedRecordingExtractsMixedAudioWhenAvailable() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let runtime = FakeAppleScreenCaptureKitRuntime(
+            stopBehavior: .recordingData(data("combined-screen-audio-file"))
+        )
+        let adapter = AppleScreenCaptureKitNativeCaptureAdapter(
+            runtime: runtime,
+            audioExtractor: FakeAppleScreenCaptureKitMixedAudioExtractor(
+                behavior: .extracted(data("mixed-audio-from-combined-recording"))
+            )
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-sck-mixed-audio",
+            adapter: adapter
+        )
+
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let response = try await client.stopRecording(StopRecordingRequest(sessionID: "session-sck-mixed-audio"))
+
+        #expect(response.ok == true)
+        #expect(response.status == "recorded")
+        let screen = try #require(response.artifacts.first { $0.artifactType == "screen_video" })
+        let system = try #require(response.artifacts.first { $0.artifactType == "system_audio" })
+        let microphone = try #require(response.artifacts.first { $0.artifactType == "microphone_audio" })
+        let mixed = try #require(response.artifacts.first { $0.artifactType == "mixed_audio" })
+        #expect(screen.captureStatus == "available")
+        #expect(system.captureStatus == "degraded")
+        #expect(microphone.captureStatus == "degraded")
+        #expect(mixed.captureStatus == "available")
+        #expect(mixed.format == "m4a")
+        #expect(mixed.path == "artifacts/mixed_audio.m4a")
+        let mixedURL = artifactURL(workspace, "session-sck-mixed-audio", "mixed_audio.m4a")
+        #expect(try Data(contentsOf: mixedURL) == data("mixed-audio-from-combined-recording"))
+        #expect(mixed.checksum == (try checksum(for: mixedURL)))
+
+        let session = try readSessionJSON(workspace: workspace, sessionID: "session-sck-mixed-audio")
+        let artifacts = try #require(session["artifacts"] as? [[String: Any]])
+        #expect(artifacts.count == 4)
+        #expect(artifacts.compactMap { $0["checksum"] as? String }.count == 2)
+        #expect(artifacts.compactMap { $0["degradation_reason"] as? String }.count == 2)
     }
 
     @Test
@@ -1356,6 +1402,28 @@ private struct FakeAppleScreenCaptureKitRuntimeError: Error, LocalizedError, Equ
 
     var errorDescription: String? {
         message
+    }
+}
+
+private struct FakeAppleScreenCaptureKitMixedAudioExtractor: AppleScreenCaptureKitMixedAudioExtracting {
+    enum Behavior: Equatable {
+        case extracted(Data)
+        case failure(String)
+    }
+
+    let behavior: Behavior
+
+    func extractMixedAudio(
+        from combinedRecordingURL: URL,
+        to outputURL: URL
+    ) async throws -> AppleScreenCaptureKitMixedAudioFile {
+        switch behavior {
+        case .extracted(let data):
+            try data.write(to: outputURL)
+            return AppleScreenCaptureKitMixedAudioFile(url: outputURL, format: "m4a")
+        case .failure(let message):
+            throw FakeAppleScreenCaptureKitRuntimeError(message: message)
+        }
     }
 }
 

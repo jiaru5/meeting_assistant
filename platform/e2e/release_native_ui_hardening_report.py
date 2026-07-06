@@ -27,7 +27,7 @@ ADAPTER_SOURCE_RELATIVE_PATH = Path(
 RELEASE_SCOPE_RESIDUAL_RISKS = [
     "does not prove full real capture -> transcript/export/delete same-chain success",
     "does not prove independent system_audio or microphone_audio artifacts",
-    "does not prove a separate mixed_audio artifact from ScreenCaptureKit",
+    "does not prove mixed_audio was extracted from a real ScreenCaptureKit recording in this release-scope gate",
     "does not prove all macOS TCC/display target machines",
     "does not prove release bundle, signing, notarization, SLSA provenance, or VS-MA-23 release readiness",
 ]
@@ -76,6 +76,7 @@ def _adapter_capability_report(source_root: Path | None = None) -> dict[str, Any
     source_text = _read_text(source_path)
     combined_recording = _extract_bool_argument(source_text, "producesCombinedRecordingFile")
     separate_audio = _extract_bool_argument(source_text, "producesSeparateAudioArtifacts")
+    mixed_audio_extraction = _extract_bool_argument(source_text, "attemptsMixedAudioExtractionFromCombinedRecording")
     source_present = source_path.is_file()
     source_contract_ok = (
         source_present
@@ -83,6 +84,7 @@ def _adapter_capability_report(source_root: Path | None = None) -> dict[str, Any
         and "framework: \"ScreenCaptureKit\"" in source_text
         and combined_recording is True
         and separate_audio is False
+        and mixed_audio_extraction is True
     )
     return {
         "adapter_id": "apple_screencapturekit",
@@ -91,6 +93,7 @@ def _adapter_capability_report(source_root: Path | None = None) -> dict[str, Any
         "source_present": source_present,
         "combined_recording_file_supported": combined_recording,
         "separate_audio_artifacts_supported": separate_audio,
+        "mixed_audio_extraction_from_combined_recording_supported": mixed_audio_extraction,
         "source_contract_ok": source_contract_ok,
         "report_update_required_if_contract_changes": True,
     }
@@ -196,6 +199,7 @@ def build_report(
         "real_capture_adapter_capability": adapter_capability,
         "real_capture_combined_recording_file_supported": adapter_capability["combined_recording_file_supported"],
         "real_capture_separate_audio_artifacts_supported": adapter_capability["separate_audio_artifacts_supported"],
+        "real_capture_mixed_audio_extraction_supported": adapter_capability["mixed_audio_extraction_from_combined_recording_supported"],
         "real_capture_independent_audio_artifacts_proven": False,
         "real_capture_mixed_audio_artifact_proven": False,
         "real_capture_to_processing_same_chain_proven": False,

@@ -46,6 +46,9 @@ class NativeCaptureArtifactReportTests(unittest.TestCase):
         directory: str,
         *,
         include_audio_degradation_reason: bool = True,
+        capture_system_audio: bool = False,
+        capture_microphone_audio: bool = False,
+        mixed_audio_available: bool = False,
     ) -> tuple[Path, Path, Path]:
         base = Path(directory)
         workspace = base / "workspace"
@@ -70,19 +73,51 @@ class NativeCaptureArtifactReportTests(unittest.TestCase):
                 "created_at": now,
             }
         ]
-        for artifact_type in ("system_audio", "microphone_audio", "mixed_audio"):
+        for artifact_type, requested in (
+            ("system_audio", capture_system_audio),
+            ("microphone_audio", capture_microphone_audio),
+        ):
             artifact: dict[str, object] = {
                 "id": f"artifact-{artifact_type}",
                 "session_id": session_id,
                 "artifact_type": artifact_type,
                 "path": f"artifacts/{artifact_type}.wav",
                 "format": "wav",
-                "capture_status": "missing",
+                "capture_status": "degraded" if requested else "missing",
                 "created_at": now,
             }
             if include_audio_degradation_reason:
                 artifact["degradation_reason"] = f"{artifact_type} unavailable in screen-only capture smoke"
             artifacts.append(artifact)
+        if mixed_audio_available:
+            mixed_audio = artifacts_dir / "mixed_audio.m4a"
+            mixed_audio.write_bytes(b"synthetic mixed audio bytes\n")
+            artifacts.append(
+                {
+                    "id": "artifact-mixed_audio",
+                    "session_id": session_id,
+                    "artifact_type": "mixed_audio",
+                    "path": "artifacts/mixed_audio.m4a",
+                    "format": "m4a",
+                    "capture_status": "available",
+                    "checksum": sha256_file(mixed_audio),
+                    "created_at": now,
+                }
+            )
+        else:
+            mixed_requested = capture_system_audio or capture_microphone_audio
+            mixed_artifact: dict[str, object] = {
+                "id": "artifact-mixed_audio",
+                "session_id": session_id,
+                "artifact_type": "mixed_audio",
+                "path": "artifacts/mixed_audio.wav",
+                "format": "wav",
+                "capture_status": "degraded" if mixed_requested else "missing",
+                "created_at": now,
+            }
+            if include_audio_degradation_reason:
+                mixed_artifact["degradation_reason"] = "mixed_audio unavailable in native capture smoke"
+            artifacts.append(mixed_artifact)
 
         session = {
             "id": session_id,
@@ -106,8 +141,8 @@ class NativeCaptureArtifactReportTests(unittest.TestCase):
             "adapter": "AppleScreenCaptureKitNativeCaptureAdapter",
             "workspace": str(workspace),
             "session_id": session_id,
-            "capture_system_audio": False,
-            "capture_microphone_audio": False,
+            "capture_system_audio": capture_system_audio,
+            "capture_microphone_audio": capture_microphone_audio,
             "screen_video_path": str(screen_video),
             "screen_video_bytes": screen_video.stat().st_size,
             "screen_video_checksum": checksum,
@@ -175,6 +210,24 @@ class NativeCaptureArtifactReportTests(unittest.TestCase):
             session = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
             artifact_types = {artifact["artifact_type"] for artifact in session["artifacts"]}
             self.assertFalse({"normalized_audio", "transcript_text", "speaker_labels"} & artifact_types)
+
+    def test_build_report_accepts_available_mixed_audio_without_no_audio_processing_path(self) -> None:
+        module = load_report_module()
+        with tempfile.TemporaryDirectory() as directory:
+            summary_path, report_path, _ = self.write_fixture(
+                directory,
+                capture_system_audio=True,
+                mixed_audio_available=True,
+            )
+
+            report = module.build_report(summary_path, report_path=report_path, root=ROOT, python=sys.executable)
+
+            self.assertEqual(report["artifacts"]["system_audio"]["capture_status"], "degraded")
+            self.assertEqual(report["artifacts"]["mixed_audio"]["capture_status"], "available")
+            self.assertTrue(report["artifacts"]["mixed_audio"]["checksum_verified"])
+            self.assertTrue(report["processing_contract"]["skipped"])
+            self.assertIn("mixed_audio was available", report["processing_contract"]["reason"])
+            self.assertFalse(report["processing_contract"]["derived_artifact_pollution"])
 
     def test_build_report_writes_release_scope_gate_without_release_readiness(self) -> None:
         module = load_report_module()

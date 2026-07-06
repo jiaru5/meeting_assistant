@@ -10,6 +10,7 @@ public struct AppleScreenCaptureKitNativeCaptureCapabilitySummary: Equatable, Se
     public let producedArtifactTypes: [NativeCaptureArtifactType]
     public let producesCombinedRecordingFile: Bool
     public let producesSeparateAudioArtifacts: Bool
+    public let attemptsMixedAudioExtractionFromCombinedRecording: Bool
 
     public init(
         adapterID: String,
@@ -17,7 +18,8 @@ public struct AppleScreenCaptureKitNativeCaptureCapabilitySummary: Equatable, Se
         supportedCaptureTargets: [RecordingCaptureTarget],
         producedArtifactTypes: [NativeCaptureArtifactType],
         producesCombinedRecordingFile: Bool,
-        producesSeparateAudioArtifacts: Bool
+        producesSeparateAudioArtifacts: Bool,
+        attemptsMixedAudioExtractionFromCombinedRecording: Bool
     ) {
         self.adapterID = adapterID
         self.framework = framework
@@ -25,6 +27,7 @@ public struct AppleScreenCaptureKitNativeCaptureCapabilitySummary: Equatable, Se
         self.producedArtifactTypes = producedArtifactTypes
         self.producesCombinedRecordingFile = producesCombinedRecordingFile
         self.producesSeparateAudioArtifacts = producesSeparateAudioArtifacts
+        self.attemptsMixedAudioExtractionFromCombinedRecording = attemptsMixedAudioExtractionFromCombinedRecording
     }
 }
 
@@ -45,10 +48,12 @@ public actor AppleScreenCaptureKitNativeCaptureAdapter: NativeCaptureAdapter {
         supportedCaptureTargets: [.screen],
         producedArtifactTypes: NativeCaptureArtifactType.allCases,
         producesCombinedRecordingFile: true,
-        producesSeparateAudioArtifacts: false
+        producesSeparateAudioArtifacts: false,
+        attemptsMixedAudioExtractionFromCombinedRecording: true
     )
 
     private let runtime: any AppleScreenCaptureKitRecordingRuntime
+    private let audioExtractor: any AppleScreenCaptureKitMixedAudioExtracting
     private let temporaryDirectoryProvider: @Sendable () -> URL
     private var activeRecordings: [String: ActiveAppleScreenCaptureKitRecording] = [:]
 
@@ -60,16 +65,19 @@ public actor AppleScreenCaptureKitNativeCaptureAdapter: NativeCaptureAdapter {
                 reason: "ScreenCaptureKit recording output requires macOS 15.0 or newer."
             )
         }
+        self.audioExtractor = AVFoundationAppleScreenCaptureKitMixedAudioExtractor()
         self.temporaryDirectoryProvider = { FileManager.default.temporaryDirectory }
     }
 
     init(
         runtime: any AppleScreenCaptureKitRecordingRuntime,
+        audioExtractor: any AppleScreenCaptureKitMixedAudioExtracting = AVFoundationAppleScreenCaptureKitMixedAudioExtractor(),
         temporaryDirectoryProvider: @escaping @Sendable () -> URL = {
             FileManager.default.temporaryDirectory
         }
     ) {
         self.runtime = runtime
+        self.audioExtractor = audioExtractor
         self.temporaryDirectoryProvider = temporaryDirectoryProvider
     }
 
@@ -125,12 +133,17 @@ public actor AppleScreenCaptureKitNativeCaptureAdapter: NativeCaptureAdapter {
         do {
             let recordingFile = try await runtime.stopRecording(recording.token)
             let recordingData = try recordingData(from: recordingFile.url)
+            let mixedAudioArtifact = await mixedAudioArtifact(
+                from: recordingFile.url,
+                options: recording.options
+            )
             cleanupTemporaryOutput(at: recording.outputURL)
             return NativeCaptureStopResult(
                 artifacts: artifactResults(
                     combinedRecordingData: recordingData,
                     combinedRecordingFormat: recordingFile.format,
-                    options: recording.options
+                    options: recording.options,
+                    mixedAudioArtifact: mixedAudioArtifact
                 )
             )
         } catch {
@@ -173,7 +186,8 @@ public actor AppleScreenCaptureKitNativeCaptureAdapter: NativeCaptureAdapter {
     private func artifactResults(
         combinedRecordingData: Data,
         combinedRecordingFormat: String,
-        options: AppleScreenCaptureKitRecordingOptions
+        options: AppleScreenCaptureKitRecordingOptions,
+        mixedAudioArtifact: NativeCaptureArtifactResult
     ) -> [NativeCaptureArtifactResult] {
         [
             .available(
@@ -191,12 +205,42 @@ public actor AppleScreenCaptureKitNativeCaptureAdapter: NativeCaptureAdapter {
                 wasRequested: options.captureMicrophoneAudio,
                 requestedReason: "ScreenCaptureKit SCRecordingOutput stores any captured microphone audio only inside the combined screen_video file; no separate microphone_audio artifact is produced by this adapter."
             ),
-            requestedAudioArtifact(
-                .mixedAudio,
-                wasRequested: options.captureSystemAudio || options.captureMicrophoneAudio,
-                requestedReason: "ScreenCaptureKit SCRecordingOutput produced only a combined recording file; no separate mixed_audio artifact is produced by this adapter."
-            ),
+            mixedAudioArtifact,
         ]
+    }
+
+    private func mixedAudioArtifact(
+        from combinedRecordingURL: URL,
+        options: AppleScreenCaptureKitRecordingOptions
+    ) async -> NativeCaptureArtifactResult {
+        guard options.captureSystemAudio || options.captureMicrophoneAudio else {
+            return .missing(
+                .mixedAudio,
+                reason: "mixed_audio was not requested for this native capture session."
+            )
+        }
+
+        let mixedAudioURL = combinedRecordingURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("mixed_audio.m4a", isDirectory: false)
+        do {
+            let extracted = try await audioExtractor.extractMixedAudio(
+                from: combinedRecordingURL,
+                to: mixedAudioURL
+            )
+            let data = try recordingData(from: extracted.url)
+            return .available(
+                .mixedAudio,
+                format: extracted.format,
+                data: data
+            )
+        } catch {
+            return .degraded(
+                .mixedAudio,
+                format: "m4a",
+                reason: "ScreenCaptureKit combined recording did not contain an exportable audio track for mixed_audio; no separate mixed_audio artifact was produced by this adapter."
+            )
+        }
     }
 
     private func requestedAudioArtifact(
@@ -223,6 +267,72 @@ public actor AppleScreenCaptureKitNativeCaptureAdapter: NativeCaptureAdapter {
                 reason: "\(artifactType.rawValue) unavailable: \(reason)"
             )
         }
+    }
+}
+
+struct AppleScreenCaptureKitMixedAudioFile: Equatable, Sendable {
+    let url: URL
+    let format: String
+}
+
+protocol AppleScreenCaptureKitMixedAudioExtracting: Sendable {
+    func extractMixedAudio(
+        from combinedRecordingURL: URL,
+        to outputURL: URL
+    ) async throws -> AppleScreenCaptureKitMixedAudioFile
+}
+
+enum AppleScreenCaptureKitMixedAudioExtractionError: Error, LocalizedError, Sendable {
+    case noAudioTrack
+    case exportSessionUnavailable
+    case exportFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .noAudioTrack:
+            return "ScreenCaptureKit combined recording contains no exportable audio track."
+        case .exportSessionUnavailable:
+            return "AVFoundation could not create an audio export session for the combined recording."
+        case .exportFailed:
+            return "AVFoundation audio export failed for the combined recording."
+        }
+    }
+}
+
+struct AVFoundationAppleScreenCaptureKitMixedAudioExtractor: AppleScreenCaptureKitMixedAudioExtracting {
+    func extractMixedAudio(
+        from combinedRecordingURL: URL,
+        to outputURL: URL
+    ) async throws -> AppleScreenCaptureKitMixedAudioFile {
+        let asset = AVURLAsset(url: combinedRecordingURL)
+        let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        guard !audioTracks.isEmpty else {
+            throw AppleScreenCaptureKitMixedAudioExtractionError.noAudioTrack
+        }
+        if FileManager.default.fileExists(atPath: outputURL.path) {
+            try FileManager.default.removeItem(at: outputURL)
+        }
+        guard let exportSession = AVAssetExportSession(
+            asset: asset,
+            presetName: AVAssetExportPresetAppleM4A
+        ) else {
+            throw AppleScreenCaptureKitMixedAudioExtractionError.exportSessionUnavailable
+        }
+        exportSession.outputURL = outputURL
+        exportSession.outputFileType = .m4a
+        await withCheckedContinuation { continuation in
+            exportSession.exportAsynchronously {
+                continuation.resume()
+            }
+        }
+        guard exportSession.status == .completed else {
+            throw AppleScreenCaptureKitMixedAudioExtractionError.exportFailed
+        }
+        let data = try Data(contentsOf: outputURL)
+        guard !data.isEmpty else {
+            throw AppleScreenCaptureKitMixedAudioExtractionError.exportFailed
+        }
+        return AppleScreenCaptureKitMixedAudioFile(url: outputURL, format: "m4a")
     }
 }
 

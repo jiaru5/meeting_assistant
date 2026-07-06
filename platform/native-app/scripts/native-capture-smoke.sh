@@ -255,10 +255,10 @@ struct NativeCaptureSmoke {
             "The smoke validates real ScreenCaptureKit screen_video output plus existing session.json artifact registration only.",
         ]
         if configuration.captureSystemAudio {
-            notes.append("System audio, if captured by ScreenCaptureKit, remains combined inside screen_video and is not asserted as a separate artifact.")
+            notes.append("System audio remains unproven as an independent artifact; mixed_audio may be extracted from the combined recording when an exportable audio track exists.")
         }
         if configuration.captureMicrophoneAudio {
-            notes.append("Microphone capture requires the current permission checker to prove microphone permission; unknown permission fails closed.")
+            notes.append("Microphone capture requires the current permission checker to prove microphone permission; unknown permission fails closed, and independent microphone_audio remains unproven.")
         }
 
         let client = NativeRecordingCommandClient(
@@ -531,21 +531,23 @@ struct NativeCaptureSmoke {
                 errors.append("session.json missing screen_video artifact")
             }
 
-            validateAudioArtifact(
+            validateUnavailableAudioArtifact(
                 type: "system_audio",
                 expectedStatus: captureSystemAudio ? "degraded" : "missing",
                 artifacts: session.artifacts,
                 errors: &errors
             )
-            validateAudioArtifact(
+            validateUnavailableAudioArtifact(
                 type: "microphone_audio",
                 expectedStatus: captureMicrophoneAudio ? "degraded" : "missing",
                 artifacts: session.artifacts,
                 errors: &errors
             )
-            validateAudioArtifact(
+            validateMixedAudioArtifact(
                 type: "mixed_audio",
                 expectedStatus: (captureSystemAudio || captureMicrophoneAudio) ? "degraded" : "missing",
+                allowAvailable: captureSystemAudio || captureMicrophoneAudio,
+                sessionURL: sessionURL,
                 artifacts: session.artifacts,
                 errors: &errors
             )
@@ -564,7 +566,7 @@ struct NativeCaptureSmoke {
         )
     }
 
-    private static func validateAudioArtifact(
+    private static func validateUnavailableAudioArtifact(
         type: String,
         expectedStatus: String,
         artifacts: [SessionArtifactMetadata],
@@ -586,6 +588,57 @@ struct NativeCaptureSmoke {
         if (artifact.degradationReason ?? "").isEmpty {
             errors.append("\(type) \(expectedStatus) artifact must include degradation_reason")
         }
+    }
+
+    private static func validateMixedAudioArtifact(
+        type: String,
+        expectedStatus: String,
+        allowAvailable: Bool,
+        sessionURL: URL,
+        artifacts: [SessionArtifactMetadata],
+        errors: inout [String]
+    ) {
+        guard let artifact = artifacts.first(where: { $0.artifactType == type }) else {
+            errors.append("session.json missing artifact type \(type)")
+            return
+        }
+        if allowAvailable, artifact.captureStatus == "available" {
+            if artifact.checksum?.hasPrefix("sha256:") != true {
+                errors.append("\(type) available artifact must include a sha256: checksum")
+            }
+            if artifact.path.isEmpty || artifact.path.hasPrefix("/") || !artifact.path.hasPrefix("artifacts/") || artifact.path.contains("..") {
+                errors.append("\(type) path must stay under artifacts/")
+                return
+            }
+            let artifactURL = sessionURL.appendingPathComponent(artifact.path, isDirectory: false).standardizedFileURL
+            let artifactsRoot = sessionURL.appendingPathComponent("artifacts", isDirectory: true).standardizedFileURL
+            if !isWithin(artifactURL, root: artifactsRoot) {
+                errors.append("\(type) path escapes artifacts boundary")
+                return
+            }
+            guard FileManager.default.fileExists(atPath: artifactURL.path) else {
+                errors.append("\(type) file was not written at \(artifactURL.path)")
+                return
+            }
+            do {
+                let values = try artifactURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+                if values.isRegularFile != true {
+                    errors.append("\(type) file must be a regular file")
+                }
+                if values.fileSize ?? 0 <= 0 {
+                    errors.append("\(type) file must be non-empty")
+                }
+            } catch {
+                errors.append("\(type) file validation failed: \(error.localizedDescription)")
+            }
+            return
+        }
+        validateUnavailableAudioArtifact(
+            type: type,
+            expectedStatus: expectedStatus,
+            artifacts: artifacts,
+            errors: &errors
+        )
     }
 
     private static func boolEnvironment(

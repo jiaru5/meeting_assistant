@@ -134,6 +134,22 @@ def artifact_report_entry(
     return entry
 
 
+def assert_unavailable_audio_artifact(
+    session_dir: Path,
+    session: dict[str, Any],
+    artifact_type: str,
+    expected_status: str,
+) -> dict[str, Any]:
+    artifact = artifact_by_type(session, artifact_type)
+    if artifact.get("capture_status") != expected_status:
+        fail(f"{artifact_type} expected {expected_status}, got {artifact.get('capture_status')!r}")
+    if artifact.get("checksum"):
+        fail(f"{artifact_type} {expected_status} artifact must not include checksum")
+    if not artifact.get("degradation_reason"):
+        fail(f"{artifact_type} {expected_status} artifact must include degradation_reason")
+    return artifact_report_entry(session_dir, artifact, artifact_type, require_file=False)
+
+
 def assert_original_artifact_contract(
     session_dir: Path,
     session: dict[str, Any],
@@ -176,19 +192,32 @@ def assert_original_artifact_contract(
     expected_status = {
         "system_audio": "degraded" if summary.get("capture_system_audio") else "missing",
         "microphone_audio": "degraded" if summary.get("capture_microphone_audio") else "missing",
-        "mixed_audio": "degraded"
-        if summary.get("capture_system_audio") or summary.get("capture_microphone_audio")
-        else "missing",
     }
     for artifact_type, status in expected_status.items():
-        artifact = artifact_by_type(session, artifact_type)
-        if artifact.get("capture_status") != status:
-            fail(f"{artifact_type} expected {status}, got {artifact.get('capture_status')!r}")
-        if artifact.get("checksum"):
-            fail(f"{artifact_type} {status} artifact must not include checksum")
-        if not artifact.get("degradation_reason"):
-            fail(f"{artifact_type} {status} artifact must include degradation_reason")
-        artifacts[artifact_type] = artifact_report_entry(session_dir, artifact, artifact_type, require_file=False)
+        artifacts[artifact_type] = assert_unavailable_audio_artifact(session_dir, session, artifact_type, status)
+
+    audio_requested = bool(summary.get("capture_system_audio") or summary.get("capture_microphone_audio"))
+    mixed_audio = artifact_by_type(session, "mixed_audio")
+    if audio_requested and mixed_audio.get("capture_status") == "available":
+        mixed_path = artifact_file_path(session_dir, mixed_audio)
+        if not mixed_path.is_file():
+            fail(f"mixed_audio file is missing at {mixed_path}")
+        if mixed_path.stat().st_size <= 0:
+            fail("mixed_audio file must be non-empty")
+        checksum = mixed_audio.get("checksum")
+        if not isinstance(checksum, str) or not checksum.startswith("sha256:"):
+            fail("mixed_audio available artifact must include a sha256 value")
+        if sha256_file(mixed_path) != checksum:
+            fail("mixed_audio checksum does not match file bytes")
+        artifacts["mixed_audio"] = artifact_report_entry(session_dir, mixed_audio, "mixed_audio", require_file=True)
+    else:
+        mixed_expected_status = "degraded" if audio_requested else "missing"
+        artifacts["mixed_audio"] = assert_unavailable_audio_artifact(
+            session_dir,
+            session,
+            "mixed_audio",
+            mixed_expected_status,
+        )
     return artifacts
 
 
@@ -276,7 +305,16 @@ def build_report(
         fail("recorded native session must include ended_at")
 
     artifacts = assert_original_artifact_contract(session_dir, session, summary)
-    processing = run_generate_transcript_fail_closed(workspace, session_id, root=root, python=python)
+    mixed_audio_available = artifacts["mixed_audio"]["capture_status"] == "available"
+    if mixed_audio_available:
+        processing = {
+            "command": "generate_transcript",
+            "skipped": True,
+            "reason": "mixed_audio was available in this native capture run; no-audio artifact_missing processing path is not applicable.",
+            "fail_closed": None,
+        }
+    else:
+        processing = run_generate_transcript_fail_closed(workspace, session_id, root=root, python=python)
     derived_pollution = assert_no_derived_artifact_pollution(load_session(session_dir))
 
     release_gate = "release-scope-native-capture" if release_scope else "partial-evidence-only"
@@ -480,7 +518,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     print(
         "VS-MA-14/15 real native capture artifact e2e marker [non-contract]: "
-        "processing workspace contract consumed native session and no-audio transcript path failed closed."
+        "processing workspace contract consumed native session and original artifact availability was verified."
     )
     print(
         "VS-MA-14/15 real native capture artifact report marker [non-contract]: "

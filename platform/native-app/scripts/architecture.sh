@@ -215,6 +215,10 @@ grep -R -q "MeetingAssistantNativeAppUITests" MeetingAssistantNative.xcodeproj/p
 apple_adapter_file='Sources/MeetingAssistantNative/AppleScreenCaptureKitNativeCaptureAdapter.swift'
 apple_framework_forbidden='(^[[:space:]]*import[[:space:]]+(ScreenCaptureKit|AVFoundation|CoreAudio|CoreMediaIO|ReplayKit|Network)\b|SCStream\b|SCRecordingOutput\b|SCContentFilter\b|SCShareableContent\b|AVCapture|CGDisplayStream|AVAudioEngine|AVAudioRecorder|AudioQueue|AudioUnit|AudioDevice)'
 
+grep -q 'attemptsMixedAudioExtractionFromCombinedRecording: true' "$apple_adapter_file"
+grep -q 'AppleScreenCaptureKitMixedAudioExtracting' "$apple_adapter_file"
+grep -q 'AVAssetExportSession' "$apple_adapter_file"
+
 if grep -R --include '*.swift' -n -E "$apple_framework_forbidden" Sources tests App UITests |
   grep -v -F "$apple_adapter_file"; then
   echo "native-app architecture check failed: Apple capture framework usage is allowed only in AppleScreenCaptureKitNativeCaptureAdapter.swift." >&2

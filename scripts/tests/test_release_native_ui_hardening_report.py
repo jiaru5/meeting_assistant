@@ -75,11 +75,15 @@ class ReleaseNativeUIHardeningReportTests(unittest.TestCase):
             self.assertTrue(report["real_capture_adapter_capability"]["source_contract_ok"])
             self.assertTrue(report["real_capture_combined_recording_file_supported"])
             self.assertFalse(report["real_capture_separate_audio_artifacts_supported"])
+            self.assertTrue(report["real_capture_mixed_audio_extraction_supported"])
             self.assertFalse(report["real_capture_independent_audio_artifacts_proven"])
             self.assertFalse(report["real_capture_mixed_audio_artifact_proven"])
             self.assertFalse(report["real_capture_to_processing_same_chain_proven"])
             self.assertIn("does not prove full real capture -> transcript/export/delete same-chain success", report["release_blockers"])
-            self.assertIn("does not prove a separate mixed_audio artifact from ScreenCaptureKit", report["release_blockers"])
+            self.assertIn(
+                "does not prove mixed_audio was extracted from a real ScreenCaptureKit recording in this release-scope gate",
+                report["release_blockers"],
+            )
 
     def test_build_report_fails_closed_when_marker_is_missing(self) -> None:
         module = load_report_module()
@@ -167,7 +171,8 @@ public actor AppleScreenCaptureKitNativeCaptureAdapter {
         supportedCaptureTargets: [.screen],
         producedArtifactTypes: NativeCaptureArtifactType.allCases,
         producesCombinedRecordingFile: true,
-        producesSeparateAudioArtifacts: true
+        producesSeparateAudioArtifacts: true,
+        attemptsMixedAudioExtractionFromCombinedRecording: true
     )
 }
 """,
