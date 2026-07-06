@@ -111,6 +111,16 @@ def load_json_file(path: Path, label: str) -> dict[str, Any]:
     return payload
 
 
+def require_non_empty_string(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ReportError(f"{label} must be a non-empty string")
+    return value.strip()
+
+
+def validate_sigstore_bundle(path: Path) -> None:
+    load_json_file(path, "Sigstore bundle")
+
+
 def statement_from_dsse(path: Path) -> dict[str, Any]:
     envelope = load_json_file(path, "DSSE SLSA attestation")
     if envelope.get("payloadType") != DSSE_IN_TOTO_PAYLOAD_TYPE:
@@ -200,12 +210,23 @@ def build_reports(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, A
     if not isinstance(artifact_signing, str) or not artifact_signing:
         raise ReportError("project manifest supply_chain.artifact_signing is required")
 
+    builder = require_non_empty_string(args.builder, "builder")
+    source_repository = require_non_empty_string(args.source_repository, "source repository")
+    signing_identity = require_non_empty_string(args.signing_identity, "signing identity")
+    notarization_ticket = require_non_empty_string(args.notarization_ticket, "notarization ticket")
+    certificate_identity = require_non_empty_string(args.certificate_identity, "certificate identity")
+    certificate_issuer = require_non_empty_string(args.certificate_issuer, "certificate issuer")
+    transparency_log_id = require_non_empty_string(args.transparency_log_id, "transparency log id")
+    verifier = require_non_empty_string(args.verifier, "verifier")
+    if args.transparency_log_index < 0:
+        raise ReportError("transparency log index must be non-negative")
+
     archive_path = resolve_path(root, args.archive)
     attestation_path = resolve_path(root, args.attestation)
     sigstore_bundle_path = resolve_path(root, args.sigstore_bundle)
     validate_release_archive(archive_path)
     require_existing_file(attestation_path, "DSSE SLSA attestation")
-    require_existing_file(sigstore_bundle_path, "Sigstore bundle")
+    validate_sigstore_bundle(sigstore_bundle_path)
 
     subject_commit = current_commit(root)
     bundle_digest = sha256_file(archive_path)
@@ -217,8 +238,8 @@ def build_reports(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, A
         "report_schema": 1,
         "release_gate": "release-bundle",
         "subject_commit": subject_commit,
-        "builder": args.builder,
-        "source_repository": args.source_repository,
+        "builder": builder,
+        "source_repository": source_repository,
         "bundle": {
             "name": archive_path.name,
             "path": str(archive_path),
@@ -228,9 +249,9 @@ def build_reports(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, A
             "app_bundle": "MeetingAssistantNative.app",
             "build_configuration": "Release",
             "code_signed": True,
-            "signing_identity": args.signing_identity,
+            "signing_identity": signing_identity,
             "notarized": True,
-            "notarization_ticket": args.notarization_ticket,
+            "notarization_ticket": notarization_ticket,
             "stapled": True,
             "packages_runtime_or_model": False,
             "auto_downloads": False,
@@ -243,8 +264,8 @@ def build_reports(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, A
         "release_provenance_attestation": "produced",
         "sbom_format": sbom_format,
         "subject_commit": subject_commit,
-        "builder": args.builder,
-        "source_repository": args.source_repository,
+        "builder": builder,
+        "source_repository": source_repository,
         "artifacts": [
             {
                 "name": archive_path.name,
@@ -262,16 +283,16 @@ def build_reports(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, A
         "artifact_signing": artifact_signing,
         "signing_status": "signed",
         "subject_commit": subject_commit,
-        "verifier": args.verifier,
+        "verifier": verifier,
         "signed_artifacts": [
             {
                 "name": archive_path.name,
                 "digest": bundle_digest,
                 "signature_type": artifact_signing,
-                "certificate_identity": args.certificate_identity,
-                "certificate_issuer": args.certificate_issuer,
+                "certificate_identity": certificate_identity,
+                "certificate_issuer": certificate_issuer,
                 "transparency_log": {
-                    "log_id": args.transparency_log_id,
+                    "log_id": transparency_log_id,
                     "log_index": args.transparency_log_index,
                 },
                 "signature_bundle": {

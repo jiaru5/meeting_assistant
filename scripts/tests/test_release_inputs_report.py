@@ -237,6 +237,135 @@ class ReleaseInputsReportTests(unittest.TestCase):
             with self.assertRaisesRegex(module.ReportError, "must contain MeetingAssistantNative.app"):
                 module.build_reports(args)
 
+    def test_build_reports_fails_when_sigstore_bundle_is_not_json_object(self) -> None:
+        module = load_report_module()
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            archive = self.write_release_archive(work)
+            digest = "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
+            attestation = work / "release-provenance.dsse.json"
+            sigstore_bundle = work / "release-signature.sigstore-bundle.json"
+            self.write_dsse_attestation(attestation, bundle_name=archive.name, bundle_digest=digest)
+            sigstore_bundle.write_text("not json\n", encoding="utf-8")
+
+            args = module.parse_args(
+                [
+                    "--root",
+                    str(ROOT),
+                    "--archive",
+                    str(archive),
+                    "--attestation",
+                    str(attestation),
+                    "--sigstore-bundle",
+                    str(sigstore_bundle),
+                    "--builder",
+                    "github-actions-oidc",
+                    "--source-repository",
+                    "example/meeting_assistant",
+                    "--signing-identity",
+                    "Developer ID Application: Example",
+                    "--notarization-ticket",
+                    "ticket-id",
+                    "--certificate-identity",
+                    "identity",
+                    "--certificate-issuer",
+                    "issuer",
+                    "--transparency-log-id",
+                    "rekor",
+                    "--transparency-log-index",
+                    "1",
+                ]
+            )
+
+            with self.assertRaisesRegex(module.ReportError, "Sigstore bundle must be valid JSON"):
+                module.build_reports(args)
+
+    def test_build_reports_fails_when_required_identity_field_is_blank(self) -> None:
+        module = load_report_module()
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            archive = self.write_release_archive(work)
+            digest = "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
+            attestation = work / "release-provenance.dsse.json"
+            sigstore_bundle = work / "release-signature.sigstore-bundle.json"
+            self.write_dsse_attestation(attestation, bundle_name=archive.name, bundle_digest=digest)
+            self.write_sigstore_bundle(sigstore_bundle)
+
+            args = module.parse_args(
+                [
+                    "--root",
+                    str(ROOT),
+                    "--archive",
+                    str(archive),
+                    "--attestation",
+                    str(attestation),
+                    "--sigstore-bundle",
+                    str(sigstore_bundle),
+                    "--builder",
+                    " ",
+                    "--source-repository",
+                    "example/meeting_assistant",
+                    "--signing-identity",
+                    "Developer ID Application: Example",
+                    "--notarization-ticket",
+                    "ticket-id",
+                    "--certificate-identity",
+                    "identity",
+                    "--certificate-issuer",
+                    "issuer",
+                    "--transparency-log-id",
+                    "rekor",
+                    "--transparency-log-index",
+                    "1",
+                ]
+            )
+
+            with self.assertRaisesRegex(module.ReportError, "builder must be a non-empty string"):
+                module.build_reports(args)
+
+    def test_build_reports_fails_when_transparency_log_index_is_negative(self) -> None:
+        module = load_report_module()
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            archive = self.write_release_archive(work)
+            digest = "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
+            attestation = work / "release-provenance.dsse.json"
+            sigstore_bundle = work / "release-signature.sigstore-bundle.json"
+            self.write_dsse_attestation(attestation, bundle_name=archive.name, bundle_digest=digest)
+            self.write_sigstore_bundle(sigstore_bundle)
+
+            args = module.parse_args(
+                [
+                    "--root",
+                    str(ROOT),
+                    "--archive",
+                    str(archive),
+                    "--attestation",
+                    str(attestation),
+                    "--sigstore-bundle",
+                    str(sigstore_bundle),
+                    "--builder",
+                    "github-actions-oidc",
+                    "--source-repository",
+                    "example/meeting_assistant",
+                    "--signing-identity",
+                    "Developer ID Application: Example",
+                    "--notarization-ticket",
+                    "ticket-id",
+                    "--certificate-identity",
+                    "identity",
+                    "--certificate-issuer",
+                    "issuer",
+                    "--transparency-log-id",
+                    "rekor",
+                    "--transparency-log-index",
+                    "-1",
+                ]
+            )
+
+            with self.assertRaisesRegex(module.ReportError, "transparency log index must be non-negative"):
+                module.build_reports(args)
+
 
 if __name__ == "__main__":
     unittest.main()
