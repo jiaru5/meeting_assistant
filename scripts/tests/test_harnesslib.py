@@ -749,9 +749,14 @@ class HarnessValidationTests(unittest.TestCase):
         e2e_readme = (ROOT / "platform/e2e/README.md").read_text(encoding="utf-8")
 
         self.assertIn("./platform/e2e/release-native-capture-artifact-smoke.sh", release_preflight)
+        self.assertIn("./platform/e2e/release-native-ui-hardening-smoke.sh", release_preflight)
         self.assertIn("./platform/e2e/release-capture-processing-hardening-smoke.sh", release_preflight)
         self.assertLess(
             release_preflight.index("./platform/e2e/release-native-capture-artifact-smoke.sh"),
+            release_preflight.index("./platform/e2e/release-native-ui-hardening-smoke.sh"),
+        )
+        self.assertLess(
+            release_preflight.index("./platform/e2e/release-native-ui-hardening-smoke.sh"),
             release_preflight.index("./platform/e2e/release-capture-processing-hardening-smoke.sh"),
         )
         self.assertIn("platform/e2e/capture_processing_hardening_report.py", wrapper)
@@ -759,6 +764,31 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("preserving capture-processing-smoke exit code", wrapper)
         self.assertIn("release-scope-provider-hardening", dev_commands)
         self.assertIn("release-scope-provider-hardening", e2e_readme)
+        self.assertIn("not_release_readiness=true", e2e_readme)
+
+    def test_release_preflight_registers_release_scope_native_ui_hardening_gate(self) -> None:
+        release_preflight = (ROOT / "scripts/release-preflight.sh").read_text(encoding="utf-8")
+        wrapper = (ROOT / "platform/e2e/release-native-ui-hardening-smoke.sh").read_text(encoding="utf-8")
+        dev_commands = (ROOT / "docs/engineering/02-dev-commands.md").read_text(encoding="utf-8")
+        e2e_readme = (ROOT / "platform/e2e/README.md").read_text(encoding="utf-8")
+
+        self.assertIn("./platform/e2e/release-native-capture-artifact-smoke.sh", release_preflight)
+        self.assertIn("./platform/e2e/release-native-ui-hardening-smoke.sh", release_preflight)
+        self.assertIn("./platform/e2e/release-capture-processing-hardening-smoke.sh", release_preflight)
+        self.assertLess(
+            release_preflight.index("./platform/e2e/release-native-capture-artifact-smoke.sh"),
+            release_preflight.index("./platform/e2e/release-native-ui-hardening-smoke.sh"),
+        )
+        self.assertLess(
+            release_preflight.index("./platform/e2e/release-native-ui-hardening-smoke.sh"),
+            release_preflight.index("./platform/e2e/release-capture-processing-hardening-smoke.sh"),
+        )
+        self.assertIn("MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1", wrapper)
+        self.assertIn("MA_NATIVE_APP_VSMA21_HARDENING_SMOKE=1", wrapper)
+        self.assertIn("platform/e2e/release_native_ui_hardening_report.py", wrapper)
+        self.assertIn("--release-scope", wrapper)
+        self.assertIn("release-scope-native-ui-hardening", dev_commands)
+        self.assertIn("release-scope-native-ui-hardening", e2e_readme)
         self.assertIn("not_release_readiness=true", e2e_readme)
 
     def test_release_preflight_registers_release_scope_security_supply_chain_gate(self) -> None:
