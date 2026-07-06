@@ -139,6 +139,14 @@ VS-MA-23 opt-in local functional real capture + real runtime app-bundle smoke bo
 4. The smoke must require host-provided `MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME`, `MEETING_ASSISTANT_TRANSCRIPTION_MODEL`, `MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO` and a usable local audio output path; it must not package or auto-download runtime/model/audio assets.
 5. A passing combined smoke is local direct-run functional evidence only. It does not prove Developer ID signing, notarization, App Store distribution, all target-machine TCC/display repeatability, real user Save Panel interaction or final product-validation release readiness.
 
+VS-MA-23 local-direct app run boundary:
+
+1. `scripts/run-local-app.sh` may build or reuse the local-direct Release `MeetingAssistantNative.app` and launch `Contents/MacOS/MeetingAssistantNative` directly so the app inherits the explicit local environment.
+2. The launcher must require user-provided `MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME` and `MEETING_ASSISTANT_TRANSCRIPTION_MODEL` by default, set `MEETING_ASSISTANT_CLI_PATH` to the provider-owned `platform/e2e/ma-cli-local.sh` bridge when not already configured, and pass `MA_NATIVE_PROCESSING_RUNTIME=whisper_cpp` / `MA_NATIVE_PROCESSING_LANGUAGE=zh` without downloading, copying or packaging runtime/model/audio assets.
+3. Non-XCTest app runtime must use `ProcessingCLIDependencyCheckRunner` for the Preflight panel; XCTest and app-bundle fixture paths may keep `StaticDependencyCheckRunner` so deterministic UI smoke remains isolated.
+4. The designed shell must propagate preflight readiness changes to `RecordingControlViewModel` and `ProcessingStateViewModel`, so a successful real `check_dependencies` run can enable the same app session's Start Recording and Start Processing controls.
+5. This launcher is local functional evidence only. It does not prove XCUITest Automation Mode, Developer ID signing, notarization, App Store distribution, all target-machine repeatability, real user Save Panel interaction or final product-validation release readiness.
+
 VS-MA-22 opt-in real runtime native bridge smoke boundary:
 
 1. `ProcessingStateViewModelTests` may exercise `ProcessingCommandProcessRunner` with the real `whisper.cpp` runtime only when `MA_NATIVE_REAL_RUNTIME_BRIDGE_SMOKE=1` is explicitly set.

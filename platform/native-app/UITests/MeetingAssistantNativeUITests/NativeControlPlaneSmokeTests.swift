@@ -1128,6 +1128,9 @@ private enum SwiftUIViewSourceContract {
                 "ProcessingStateView(viewModel: processingViewModel)",
                 "TranscriptReviewView(viewModel: transcriptViewModel)",
                 "TranscriptReviewActionsView(viewModel: transcriptActionViewModel)",
+                ".onChange(of: permissionViewModel.state)",
+                "recordingViewModel.updateReadiness(readiness)",
+                "processingViewModel.updateReadiness(readiness)",
             ],
             file: file,
             line: line
@@ -1144,6 +1147,9 @@ private enum SwiftUIViewSourceContract {
             contains: [
                 "@StateObject private var shellViewModel: DesignedNativeShellViewModel",
                 "_shellViewModel = StateObject(wrappedValue: DesignedNativeShellViewModel())",
+                "let readinessState = configuration.initialReadinessState()",
+                "let dependencyCheckRunner = configuration.makeDependencyCheckRunner()",
+                "runner: dependencyCheckRunner",
                 "DesignedNativeShellView(",
                 "shellViewModel: shellViewModel",
                 "permissionViewModel: permissionViewModel",
@@ -1197,6 +1203,8 @@ private enum SwiftUIViewSourceContract {
                 "return isNativeAppXCTestEnvironment(environment) ? .fake : .process",
                 "ProcessingCommandProcessRunner(environment: environment)",
                 "TranscriptActionProcessRunner(environment: environment)",
+                "usesStaticDependencyFixture",
+                "isNativeAppXCTestEnvironment(environment)",
             ],
             file: file,
             line: line

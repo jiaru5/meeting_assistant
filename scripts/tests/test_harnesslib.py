@@ -969,6 +969,49 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("VS-MA-21 native-app hardening bridge marker", native_tests)
         self.assertIn("MA_NATIVE_VSMA21_HARDENING_BRIDGE_SMOKE=1", dev_commands)
 
+    def test_vs_ma_23_local_direct_app_run_entrypoint_is_documented_and_guarded(self) -> None:
+        script = (ROOT / "platform/native-app/scripts/run-local-app.sh").read_text(encoding="utf-8")
+        app_source = (ROOT / "platform/native-app/App/MeetingAssistantNativeApp.swift").read_text(encoding="utf-8")
+        shell_source = (
+            ROOT / "platform/native-app/Sources/MeetingAssistantNative/DesignedNativeShellView.swift"
+        ).read_text(encoding="utf-8")
+        architecture = (ROOT / "platform/native-app/scripts/architecture.sh").read_text(encoding="utf-8")
+        architecture_doc = (ROOT / "platform/native-app/Tests/ArchitectureTest.md").read_text(encoding="utf-8")
+        dev_commands = (ROOT / "docs/engineering/02-dev-commands.md").read_text(encoding="utf-8")
+        e2e_readme = (ROOT / "platform/e2e/README.md").read_text(encoding="utf-8")
+        matrix = (ROOT / "docs/engineering/06-product-validation-matrix.md").read_text(encoding="utf-8")
+
+        self.assertIn("release-bundle-create.py", script)
+        self.assertIn("--distribution-mode local-direct", script)
+        self.assertIn("Contents/MacOS/MeetingAssistantNative", script)
+        self.assertIn("platform/e2e/ma-cli-local.sh", script)
+        self.assertIn("MEETING_ASSISTANT_CLI_PATH", script)
+        self.assertIn("MEETING_ASSISTANT_WORKSPACE", script)
+        self.assertIn("MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME", script)
+        self.assertIn("MEETING_ASSISTANT_TRANSCRIPTION_MODEL", script)
+        self.assertIn("MA_NATIVE_PROCESSING_RUNTIME", script)
+        self.assertIn("MA_NATIVE_PROCESSING_LANGUAGE", script)
+        self.assertIn("MA_NATIVE_LOCAL_APP_REQUIRE_REAL_RUNTIME", script)
+        self.assertIn("MA_NATIVE_LOCAL_APP_DRY_RUN", script)
+        self.assertIn("${#app_args[@]}", script)
+        self.assertIn("unset MA_NATIVE_APP_XCTEST", script)
+        self.assertNotIn("notarytool", script)
+        self.assertNotIn("stapler", script)
+        self.assertNotIn("cosign", script)
+
+        self.assertIn("ProcessingCLIDependencyCheckRunner(environment: environment)", app_source)
+        self.assertIn("usesStaticDependencyFixture", app_source)
+        self.assertIn("initialReadinessState", app_source)
+        self.assertIn(".onChange(of: permissionViewModel.state)", shell_source)
+        self.assertIn("recordingViewModel.updateReadiness(readiness)", shell_source)
+        self.assertIn("processingViewModel.updateReadiness(readiness)", shell_source)
+
+        self.assertIn("run-local-app.sh", architecture)
+        self.assertIn("VS-MA-23 local-direct app run boundary", architecture_doc)
+        self.assertIn("run-local-app.sh", dev_commands)
+        self.assertIn("run-local-app.sh", e2e_readme)
+        self.assertIn("local-direct app run", matrix)
+
     def test_release_preflight_registers_release_bundle_gate_before_supply_chain(self) -> None:
         release_preflight = (ROOT / "scripts/release-preflight.sh").read_text(encoding="utf-8")
         release_bundle_create = (ROOT / "scripts/release-bundle-create.py").read_text(encoding="utf-8")

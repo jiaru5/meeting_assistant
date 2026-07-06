@@ -12,6 +12,7 @@ grep -q "VS-MA-14/VS-MA-15 controlled native capture artifact registration bound
 grep -q "Apple ScreenCaptureKit native capture adapter exception" tests/ArchitectureTest.md
 grep -q "opt-in real native capture smoke boundary" tests/ArchitectureTest.md
 grep -q "opt-in real native capture app-bundle smoke boundary" tests/ArchitectureTest.md
+grep -q "VS-MA-23 local-direct app run boundary" tests/ArchitectureTest.md
 grep -q "VS-MA-16 native processing state consumer boundary" tests/ArchitectureTest.md
 grep -q "VS-MA-17 read-only transcript review boundary" tests/ArchitectureTest.md
 grep -q "read-only workspace transcript loading boundary" tests/ArchitectureTest.md
@@ -38,6 +39,7 @@ grep -q "ma.sessionArtifact" tests/ArchitectureTest.md
 test -f MeetingAssistantNative.xcodeproj/project.pbxproj
 test -f MeetingAssistantNative.xcodeproj/xcshareddata/xcschemes/MeetingAssistantNative.xcscheme
 test -x scripts/native-capture-smoke.sh
+test -x scripts/run-local-app.sh
 test -f App/MeetingAssistantNativeApp.swift
 test -f Sources/MeetingAssistantNative/DependencyCheckContract.swift
 test -f Sources/MeetingAssistantNative/PermissionDependencyStatusViewModel.swift
@@ -180,6 +182,28 @@ grep -R -q "MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE" UITests/Me
 grep -R -q "MA_NATIVE_APP_MVP_FULL_STACK_SMOKE" UITests/MeetingAssistantNativeAppUITests
 grep -R -q "isExplicitProcessingRuntimeConfigured" App/MeetingAssistantNativeApp.swift
 grep -R -q "MA_NATIVE_PROCESSING_RUNTIME" App/MeetingAssistantNativeApp.swift
+grep -R -q "ProcessingCLIDependencyCheckRunner(environment: environment)" App/MeetingAssistantNativeApp.swift
+grep -R -q "usesStaticDependencyFixture" App/MeetingAssistantNativeApp.swift
+grep -R -q "initialReadinessState" App/MeetingAssistantNativeApp.swift
+grep -R -q ".onChange(of: permissionViewModel.state)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -R -q "recordingViewModel.updateReadiness(readiness)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -R -q "processingViewModel.updateReadiness(readiness)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -q "release-bundle-create.py" scripts/run-local-app.sh
+grep -q "Contents/MacOS/MeetingAssistantNative" scripts/run-local-app.sh
+grep -q "MEETING_ASSISTANT_CLI_PATH" scripts/run-local-app.sh
+grep -q "platform/e2e/ma-cli-local.sh" scripts/run-local-app.sh
+grep -q "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME" scripts/run-local-app.sh
+grep -q "MEETING_ASSISTANT_TRANSCRIPTION_MODEL" scripts/run-local-app.sh
+grep -q "MA_NATIVE_PROCESSING_RUNTIME" scripts/run-local-app.sh
+grep -q "MA_NATIVE_PROCESSING_LANGUAGE" scripts/run-local-app.sh
+grep -q "MA_NATIVE_LOCAL_APP_REQUIRE_REAL_RUNTIME" scripts/run-local-app.sh
+grep -q "MA_NATIVE_LOCAL_APP_DRY_RUN" scripts/run-local-app.sh
+grep -q "local-direct" scripts/run-local-app.sh
+grep -q "unset MA_NATIVE_APP_XCTEST" scripts/run-local-app.sh
+if grep -q "Developer ID\\|notarytool\\|stapler\\|sigstore\\|cosign" scripts/run-local-app.sh; then
+  echo "native-app architecture check failed: run-local-app.sh must not require Developer ID, notarization, stapling or Sigstore." >&2
+  exit 1
+fi
 grep -q "Production/default app runtime may pass an explicitly configured" tests/ArchitectureTest.md
 python3 - <<'PY'
 import sys
@@ -415,6 +439,7 @@ fi
 app_bundle_forbidden='meeting_assistant_cli|ProcessingCLIDependencyCheckRunner|DependencyCheckProcessRunner|native-helper|processing-cli|helper[[:space:]]+tool|AVCapture|CGDisplayStream|SCStream|AVAudioEngine|AVAudioRecorder|generate_transcript|generate_speaker_labels|normalize_audio|import_media|export_transcript|delete_session|URLSession|URLRequest|NWConnection|NWListener|https?://|curl|wget'
 
 if grep -R --include '*.swift' -n -E "$app_bundle_forbidden" App UITests/MeetingAssistantNativeAppUITests |
+  grep -v -E 'App/MeetingAssistantNativeApp.swift:.*ProcessingCLIDependencyCheckRunner' |
   grep -v -E 'MA_NATIVE_APP_REAL_PROCESSING_SMOKE|MA_NATIVE_APP_REAL_ACTION_SMOKE|MA_NATIVE_APP_VSMA21_HARDENING_SMOKE|MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE|MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE|MA_NATIVE_APP_MVP_FULL_STACK_SMOKE|real processing-cli app-bundle smoke|VS-MA-21 app-bundle hardening smoke|real capture same-chain|real capture \+ real runtime|MVP full-stack'; then
   echo "native-app architecture check failed: app-bundle smoke must keep processing command strings inside the native-owned shell fixture or the explicit real-processing CLI shim, and must not call capture frameworks, downloads, network APIs, or raw provider commands." >&2
   exit 1

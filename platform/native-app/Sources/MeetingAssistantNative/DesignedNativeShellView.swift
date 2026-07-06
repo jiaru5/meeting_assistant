@@ -106,6 +106,10 @@ public struct DesignedNativeShellView: View {
         }
         .frame(minWidth: 980, minHeight: 680)
         .accessibilityIdentifier(DesignedNativeShellAccessibilityID.root)
+        .onChange(of: permissionViewModel.state) { _, readiness in
+            recordingViewModel.updateReadiness(readiness)
+            processingViewModel.updateReadiness(readiness)
+        }
     }
 
     private var sidebar: some View {

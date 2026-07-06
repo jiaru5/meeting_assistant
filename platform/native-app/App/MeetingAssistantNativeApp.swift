@@ -25,16 +25,17 @@ private struct NativeControlPlaneRootView: View {
     private let transcriptViewModel: TranscriptReviewViewModel
 
     init(configuration: NativeControlPlaneFixtureConfiguration) {
-        let readinessState = configuration.readinessState
+        let readinessState = configuration.initialReadinessState()
         let recordingWorkspaceURL = configuration.recordingWorkspaceURL()
         let recordingCommandClient = configuration.makeRecordingCommandClient()
+        let dependencyCheckRunner = configuration.makeDependencyCheckRunner()
         let processingCommandClient = configuration.makeProcessingCommandClient()
         let transcriptActionCommandClient = configuration.makeTranscriptActionCommandClient()
         let transcriptActionOSClients = configuration.makeTranscriptActionOSClients()
         _shellViewModel = StateObject(wrappedValue: DesignedNativeShellViewModel())
         _permissionViewModel = StateObject(
             wrappedValue: PermissionDependencyStatusViewModel(
-                runner: StaticDependencyCheckRunner(response: configuration.dependencyResponse),
+                runner: dependencyCheckRunner,
                 initialState: readinessState
             )
         )
@@ -68,6 +69,24 @@ private struct NativeControlPlaneRootView: View {
                 workspaceDir: configuration.workspaceDir
             )
         )
+    }
+
+    func makeDependencyCheckRunner(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> any DependencyCheckRunning {
+        if Self.usesStaticDependencyFixture(environment) {
+            return StaticDependencyCheckRunner(response: dependencyResponse)
+        }
+        return ProcessingCLIDependencyCheckRunner(environment: environment)
+    }
+
+    func initialReadinessState(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> PermissionDependencyStatusState {
+        if Self.usesStaticDependencyFixture(environment) {
+            return readinessState
+        }
+        return .idle
     }
 
     var body: some View {
@@ -292,6 +311,10 @@ private struct NativeControlPlaneFixtureConfiguration {
 
     var readinessState: PermissionDependencyStatusState {
         PermissionDependencyStatusState.from(dependencyResponse)
+    }
+
+    private static func usesStaticDependencyFixture(_ environment: [String: String]) -> Bool {
+        isNativeAppXCTestEnvironment(environment)
     }
 
     func makeRecordingCommandClient(
