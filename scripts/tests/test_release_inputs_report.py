@@ -10,6 +10,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -365,6 +366,126 @@ class ReleaseInputsReportTests(unittest.TestCase):
 
             with self.assertRaisesRegex(module.ReportError, "transparency log index must be non-negative"):
                 module.build_reports(args)
+
+    def test_build_reports_verifies_release_bundle_when_requested(self) -> None:
+        module = load_report_module()
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            archive = self.write_release_archive(work)
+            digest = "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
+            attestation = work / "release-provenance.dsse.json"
+            sigstore_bundle = work / "release-signature.sigstore-bundle.json"
+            signing_identity = "Developer ID Application: Example"
+            self.write_dsse_attestation(attestation, bundle_name=archive.name, bundle_digest=digest)
+            self.write_sigstore_bundle(sigstore_bundle)
+
+            args = module.parse_args(
+                [
+                    "--root",
+                    str(ROOT),
+                    "--archive",
+                    str(archive),
+                    "--attestation",
+                    str(attestation),
+                    "--sigstore-bundle",
+                    str(sigstore_bundle),
+                    "--builder",
+                    "github-actions-oidc",
+                    "--source-repository",
+                    "example/meeting_assistant",
+                    "--signing-identity",
+                    signing_identity,
+                    "--notarization-ticket",
+                    "ticket-id",
+                    "--certificate-identity",
+                    "identity",
+                    "--certificate-issuer",
+                    "issuer",
+                    "--transparency-log-id",
+                    "rekor",
+                    "--transparency-log-index",
+                    "1",
+                    "--verify-release-bundle",
+                ]
+            )
+            commands: list[list[str]] = []
+
+            def fake_run(command, **kwargs):
+                commands.append(command)
+                if command[:4] == ["/usr/bin/codesign", "--verify", "--deep", "--strict"]:
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                if command[:3] == ["/usr/bin/codesign", "-dv", "--verbose=4"]:
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        "",
+                        f"Authority={signing_identity}\nSignature=Developer ID\n",
+                    )
+                if command[:3] == ["/usr/bin/xcrun", "stapler", "validate"]:
+                    return subprocess.CompletedProcess(command, 0, "", "The validate action worked!\n")
+                if command[:4] == ["/usr/sbin/spctl", "-a", "-t", "exec"]:
+                    return subprocess.CompletedProcess(command, 0, "", "accepted\n")
+                if command[:3] == ["git", "-C", str(ROOT)]:
+                    return subprocess.CompletedProcess(command, 0, "f" * 40 + "\n", "")
+                self.fail(f"unexpected command: {command}")
+
+            with mock.patch.object(module.subprocess, "run", side_effect=fake_run):
+                bundle, _, _ = module.build_reports(args)
+
+            self.assertEqual(bundle["bundle"]["digest"], digest)
+            self.assertTrue(any(command[0:1] == ["/usr/sbin/spctl"] for command in commands))
+
+    def test_build_reports_fails_when_verified_release_bundle_is_ad_hoc_signed(self) -> None:
+        module = load_report_module()
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            archive = self.write_release_archive(work)
+            digest = "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
+            attestation = work / "release-provenance.dsse.json"
+            sigstore_bundle = work / "release-signature.sigstore-bundle.json"
+            self.write_dsse_attestation(attestation, bundle_name=archive.name, bundle_digest=digest)
+            self.write_sigstore_bundle(sigstore_bundle)
+
+            args = module.parse_args(
+                [
+                    "--root",
+                    str(ROOT),
+                    "--archive",
+                    str(archive),
+                    "--attestation",
+                    str(attestation),
+                    "--sigstore-bundle",
+                    str(sigstore_bundle),
+                    "--builder",
+                    "github-actions-oidc",
+                    "--source-repository",
+                    "example/meeting_assistant",
+                    "--signing-identity",
+                    "Developer ID Application: Example",
+                    "--notarization-ticket",
+                    "ticket-id",
+                    "--certificate-identity",
+                    "identity",
+                    "--certificate-issuer",
+                    "issuer",
+                    "--transparency-log-id",
+                    "rekor",
+                    "--transparency-log-index",
+                    "1",
+                    "--verify-release-bundle",
+                ]
+            )
+
+            def fake_run(command, **kwargs):
+                if command[:4] == ["/usr/bin/codesign", "--verify", "--deep", "--strict"]:
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                if command[:3] == ["/usr/bin/codesign", "-dv", "--verbose=4"]:
+                    return subprocess.CompletedProcess(command, 0, "", "Signature=adhoc\n")
+                self.fail(f"unexpected command: {command}")
+
+            with mock.patch.object(module.subprocess, "run", side_effect=fake_run):
+                with self.assertRaisesRegex(module.ReportError, "must not be ad-hoc signed"):
+                    module.build_reports(args)
 
 
 if __name__ == "__main__":

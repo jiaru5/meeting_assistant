@@ -9,6 +9,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -98,6 +99,66 @@ def validate_release_archive(archive_path: Path) -> None:
         raise ReportError("release archive must contain exactly one MeetingAssistantNative.app")
     if not expected_info_plists.intersection(archive_names):
         raise ReportError("MeetingAssistantNative.app must include Contents/Info.plist")
+
+
+def extract_release_app(archive_path: Path, destination: Path) -> Path:
+    destination_root = destination.resolve()
+    with zipfile.ZipFile(archive_path) as archive:
+        for member in archive.infolist():
+            target = (destination / member.filename).resolve()
+            if not str(target).startswith(str(destination_root) + "/") and target != destination_root:
+                raise ReportError(f"release archive contains unsafe path: {member.filename}")
+        archive.extractall(destination)
+
+    app_paths = [path for path in destination.rglob("MeetingAssistantNative.app") if path.is_dir()]
+    if not app_paths:
+        raise ReportError("release archive must contain MeetingAssistantNative.app")
+    if len(app_paths) > 1:
+        raise ReportError("release archive must contain exactly one MeetingAssistantNative.app")
+    app_path = app_paths[0]
+    if not (app_path / "Contents" / "Info.plist").is_file():
+        raise ReportError("MeetingAssistantNative.app must include Contents/Info.plist")
+    return app_path
+
+
+def run_release_verifier(command: list[str], label: str) -> str:
+    try:
+        completed = subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise ReportError(f"{label} verifier is not available: {exc.filename}") from exc
+    output = (completed.stdout + completed.stderr).strip()
+    if completed.returncode != 0:
+        detail = output.splitlines()[0] if output else f"exit {completed.returncode}"
+        raise ReportError(f"{label} verification failed: {detail}")
+    return output
+
+
+def verify_release_app(app_path: Path, signing_identity: str) -> None:
+    run_release_verifier(
+        ["/usr/bin/codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app_path)],
+        "codesign",
+    )
+    codesign_details = run_release_verifier(
+        ["/usr/bin/codesign", "-dv", "--verbose=4", str(app_path)],
+        "codesign details",
+    )
+    if "Signature=adhoc" in codesign_details:
+        raise ReportError("release archive app must not be ad-hoc signed")
+    if signing_identity not in codesign_details:
+        raise ReportError("release archive app codesign details must include signing identity")
+    run_release_verifier(["/usr/bin/xcrun", "stapler", "validate", str(app_path)], "stapler")
+    run_release_verifier(["/usr/sbin/spctl", "-a", "-t", "exec", "-vv", str(app_path)], "spctl")
+
+
+def verify_release_archive_artifact(archive_path: Path, signing_identity: str) -> None:
+    with tempfile.TemporaryDirectory(prefix="meeting-assistant-release-inputs-") as directory:
+        app_path = extract_release_app(archive_path, Path(directory))
+        verify_release_app(app_path, signing_identity)
 
 
 def load_json_file(path: Path, label: str) -> dict[str, Any]:
@@ -225,6 +286,8 @@ def build_reports(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, A
     attestation_path = resolve_path(root, args.attestation)
     sigstore_bundle_path = resolve_path(root, args.sigstore_bundle)
     validate_release_archive(archive_path)
+    if args.verify_release_bundle:
+        verify_release_archive_artifact(archive_path, signing_identity)
     require_existing_file(attestation_path, "DSSE SLSA attestation")
     validate_sigstore_bundle(sigstore_bundle_path)
 
@@ -330,6 +393,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--transparency-log-id", required=True)
     parser.add_argument("--transparency-log-index", required=True, type=int)
     parser.add_argument("--verifier", default="sigstore")
+    parser.add_argument(
+        "--verify-release-bundle",
+        action="store_true",
+        help=(
+            "Before writing reports, extract the archive and run codesign, stapler, "
+            "and spctl checks against MeetingAssistantNative.app."
+        ),
+    )
     parser.add_argument("--bundle-report", default=DEFAULT_BUNDLE_REPORT)
     parser.add_argument("--provenance-report", default=DEFAULT_PROVENANCE_REPORT)
     parser.add_argument("--signature-report", default=DEFAULT_SIGNATURE_REPORT)
