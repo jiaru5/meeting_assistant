@@ -317,7 +317,11 @@ private struct NativeControlPlaneFixtureConfiguration {
             )
         case .appleScreenCaptureKit:
             return NativeRecordingCommandClient(
-                permissionChecker: MacOSNativeCapturePermissionChecker(),
+                permissionChecker: MacOSNativeCapturePermissionChecker(
+                    screenRecordingProbe: CoreGraphicsScreenRecordingPermissionProbe(
+                        requestAccessWhenDenied: true
+                    )
+                ),
                 captureAdapter: AppleScreenCaptureKitNativeCaptureAdapter(),
                 sessionIDProvider: { sessionID },
                 requestIDProvider: { command in "app-apple-screencapturekit-\(command.rawValue)" }

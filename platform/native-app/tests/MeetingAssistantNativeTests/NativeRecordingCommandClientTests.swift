@@ -76,6 +76,38 @@ struct NativeRecordingCommandClientTests {
     }
 
     @Test
+    func macOSScreenRecordingRequestCanGrantAccessBeforeStartingAdapter() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter()
+        let checker = MacOSNativeCapturePermissionChecker(
+            screenRecordingProbe: CoreGraphicsScreenRecordingPermissionProbe(
+                preflight: { false },
+                requestAccessWhenDenied: true,
+                requestAccess: { true }
+            ),
+            microphoneStateProvider: { .granted }
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-macos-screen-request-granted",
+            permissionChecker: checker,
+            adapter: adapter
+        )
+
+        let response = try await client.startNativeRecording(
+            startRequest(workspace: workspace, captureMicrophoneAudio: false)
+        )
+
+        #expect(response.ok == true)
+        #expect(response.status == "recording")
+        #expect(await adapter.startContexts.count == 1)
+        #expect(FileManager.default.fileExists(
+            atPath: sessionRoot(workspace, "session-macos-screen-request-granted").path
+        ))
+    }
+
+    @Test
     func macOSMicrophoneUnknownFailsClosedOnlyWhenMicrophoneCaptureIsRequested() async throws {
         let blockedWorkspace = try temporaryWorkspace()
         let allowedWorkspace = try temporaryWorkspace()

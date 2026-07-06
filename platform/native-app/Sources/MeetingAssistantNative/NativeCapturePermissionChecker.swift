@@ -75,15 +75,34 @@ public protocol NativeCapturePermissionChecking: Sendable {
 
 public struct CoreGraphicsScreenRecordingPermissionProbe: Sendable {
     private let preflight: @Sendable () -> Bool
+    private let requestAccess: @Sendable () -> Bool
+    private let requestAccessWhenDenied: Bool
 
-    public init(preflight: @escaping @Sendable () -> Bool = {
-        CGPreflightScreenCaptureAccess()
-    }) {
+    public init(
+        preflight: @escaping @Sendable () -> Bool = {
+            CGPreflightScreenCaptureAccess()
+        },
+        requestAccessWhenDenied: Bool = false,
+        requestAccess: @escaping @Sendable () -> Bool = {
+            CGRequestScreenCaptureAccess()
+        }
+    ) {
         self.preflight = preflight
+        self.requestAccess = requestAccess
+        self.requestAccessWhenDenied = requestAccessWhenDenied
     }
 
     public func state() -> NativeCapturePermissionState {
-        preflight() ? .granted : .denied
+        if preflight() {
+            return .granted
+        }
+        guard requestAccessWhenDenied else {
+            return .denied
+        }
+        if requestAccess() {
+            return .granted
+        }
+        return preflight() ? .granted : .denied
     }
 }
 

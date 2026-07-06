@@ -50,6 +50,8 @@ set_xctestrun_env() {
 
 print_real_capture_permission_help() {
   local app_bundle_path="$1"
+  local log_path="${2:-$real_capture_log}"
+  local rerun_command="${3:-MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1 ./platform/native-app/scripts/test-app-bundle.sh}"
 
   cat >&2 <<EOF
 
@@ -57,13 +59,13 @@ native-app real capture app-bundle XCUITest failed with permission_denied.
 This usually means macOS has not granted Screen Recording / Screen & System Audio Recording permission to the test app bundle.
 DerivedData path: $derived_data_path
 App bundle under test: ${app_bundle_path:-not found under DerivedData}
-Captured xcodebuild log: $real_capture_log
+Captured xcodebuild log: $log_path
 
 To unblock this machine:
   1. Open System Settings > Privacy & Security > Screen Recording / Screen & System Audio Recording.
   2. Enable MeetingAssistantNative for the app bundle built under the DerivedData path above.
   3. Quit and relaunch the app if macOS asks, then rerun:
-     MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1 ./platform/native-app/scripts/test-app-bundle.sh
+     $rerun_command
 
 Optional settings shortcut:
   open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
@@ -222,7 +224,10 @@ if [[ "$real_capture_smoke" == "1" || "$real_capture_smoke" == "true" || "$real_
       print_ui_testing_automation_log_excerpt
     fi
     if grep -q "permission_denied" "$real_capture_log"; then
-      print_real_capture_permission_help "$app_bundle_path"
+      print_real_capture_permission_help \
+        "$app_bundle_path" \
+        "$real_capture_log" \
+        "MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1 ./platform/native-app/scripts/test-app-bundle.sh"
     fi
     exit "$test_status"
   fi
@@ -424,7 +429,10 @@ if [[ "$real_capture_same_chain_smoke" == "1" || "$real_capture_same_chain_smoke
       print_ui_testing_automation_log_excerpt
     fi
     if grep -q "permission_denied" "$real_capture_same_chain_log"; then
-      print_real_capture_permission_help "$app_bundle_path"
+      print_real_capture_permission_help \
+        "$app_bundle_path" \
+        "$real_capture_same_chain_log" \
+        "MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE=1 ./platform/native-app/scripts/test-app-bundle.sh"
     fi
     exit "$test_status"
   fi
