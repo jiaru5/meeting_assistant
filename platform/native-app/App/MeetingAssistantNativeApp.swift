@@ -14,6 +14,7 @@ struct MeetingAssistantNativeApp: App {
     }
 }
 
+@MainActor
 private final class MeetingAssistantNativeAppDelegate: NSObject, NSApplicationDelegate {
     nonisolated(unsafe) private static var retainedWindowController: NSWindowController?
     private var windowController: NSWindowController?
