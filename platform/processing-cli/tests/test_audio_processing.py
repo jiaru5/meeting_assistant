@@ -544,6 +544,38 @@ class AudioProcessingTests(unittest.TestCase):
         self.assertIn("-f", ffmpeg_args)
         self.assertEqual(ffmpeg_args[ffmpeg_args.index("-f") + 1], "wav")
 
+    def test_m4a_audio_source_uses_configured_ffmpeg_path_when_path_is_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.m4a", b"m4a-bytes")])
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            output_fixture = root / "ffmpeg-output.wav"
+            args_path = root / "ffmpeg-args.txt"
+            output_fixture.write_bytes(wav_bytes(b"normalized"))
+            ffmpeg = write_fake_ffmpeg(bin_dir, output_fixture)
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "PATH": "",
+                    "MEETING_ASSISTANT_FFMPEG_PATH": str(ffmpeg),
+                    "MEETING_ASSISTANT_FAKE_FFMPEG_OUTPUT": str(output_fixture),
+                    "MEETING_ASSISTANT_FAKE_FFMPEG_ARGS": str(args_path),
+                },
+                clear=False,
+            ):
+                response = run_audio_normalization("session-1", workspace=workspace)
+
+            normalized_path = session_dir / "artifacts" / "normalized_audio.wav"
+            normalized_bytes = normalized_path.read_bytes()
+            args_written = args_path.exists()
+
+        self.assertTrue(response["ok"])
+        self.assertEqual(normalized_bytes, wav_bytes(b"normalized"))
+        self.assertTrue(args_written)
+
     def test_ffmpeg_success_still_requires_pcm_wav_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -578,7 +610,7 @@ class AudioProcessingTests(unittest.TestCase):
             workspace = Path(tmp)
             session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.mp3", b"mp3-bytes")])
 
-            with mock.patch.dict(os.environ, {"PATH": ""}, clear=False):
+            with mock.patch.dict(os.environ, {"PATH": "", "MEETING_ASSISTANT_FFMPEG_PATH": ""}, clear=False):
                 response = run_audio_normalization("session-1", workspace=workspace)
 
             normalized_exists = (session_dir / "artifacts" / "normalized_audio.wav").exists()

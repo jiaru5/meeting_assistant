@@ -262,8 +262,15 @@ def _copy_wav_normalizer(source: Path, destination: Path) -> None:
     shutil.copyfile(source, destination)
 
 
+def _configured_executable(name: str) -> str | None:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return None
+    return shutil.which(value)
+
+
 def _ffmpeg_normalizer(source: Path, destination: Path) -> None:
-    ffmpeg = shutil.which("ffmpeg")
+    ffmpeg = _configured_executable("MEETING_ASSISTANT_FFMPEG_PATH") or shutil.which("ffmpeg")
     if ffmpeg is None:
         raise ContractError(
             "dependency_missing",

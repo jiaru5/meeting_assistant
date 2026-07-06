@@ -309,6 +309,18 @@ require_env_for_real_runtime_smoke() {
   done
 }
 
+configure_host_ffmpeg_for_app_bundle() {
+  local ffmpeg_path="${MEETING_ASSISTANT_FFMPEG_PATH:-}"
+
+  if [[ -z "$ffmpeg_path" ]]; then
+    ffmpeg_path="$(command -v ffmpeg || true)"
+  fi
+
+  if [[ -n "$ffmpeg_path" ]]; then
+    set_xctestrun_env "$xctestrun_path" "MEETING_ASSISTANT_FFMPEG_PATH" "$ffmpeg_path"
+  fi
+}
+
 if [[ "$real_capture_smoke" == "1" || "$real_capture_smoke" == "true" || "$real_capture_smoke" == "yes" ]]; then
   prepare_xctestrun "real capture"
   reset_xctestrun_smoke_env
@@ -454,6 +466,7 @@ if [[ "$real_capture_same_chain_smoke" == "1" || "$real_capture_same_chain_smoke
   reset_xctestrun_smoke_env
 
   set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE" "1"
+  configure_host_ffmpeg_for_app_bundle
 
   app_bundle_path="$(find "$derived_data_path/Build/Products" -path "*/MeetingAssistantNative.app" -type d -print -quit)"
 

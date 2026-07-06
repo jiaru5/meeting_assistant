@@ -1440,6 +1440,9 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
     ) {
         for _ in 0..<2 {
             tapButton(identifier, in: app, file: file, line: line)
+            if dismissUserNotificationCenterWarningIfPresent() {
+                bringAppToForeground(app, beforeTapping: identifier, file: file, line: line)
+            }
             if waitForElement("ma.recording.status", in: app, contains: expectedStatus, timeout: 12) {
                 return
             }
@@ -1448,6 +1451,18 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             }
         }
         assertElement("ma.recording.status", in: app, contains: expectedStatus, file: file, line: line)
+    }
+
+    private func dismissUserNotificationCenterWarningIfPresent() -> Bool {
+        let notificationCenter = XCUIApplication(bundleIdentifier: "com.apple.UserNotificationCenter")
+        let dialog = notificationCenter.dialogs.firstMatch
+        guard dialog.waitForExistence(timeout: 0.5) else {
+            return false
+        }
+
+        notificationCenter.activate()
+        notificationCenter.typeKey(.escape, modifierFlags: [])
+        return true
     }
 
     private func waitForEnabled(
@@ -1507,6 +1522,27 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        if processingExpectedStatusNeedsLongWait(expectedStatus) {
+            tapProcessingButton(identifier, in: app, file: file, line: line)
+            if waitForElement(
+                "ma.processing.status",
+                in: app,
+                contains: expectedStatus,
+                timeout: processingCompletionTimeout(for: expectedStatus)
+            ) {
+                return
+            }
+
+            XCTFail(
+                "Expected ma.processing.status to contain \(expectedStatus). "
+                    + "Actual status: \(elementDescription("ma.processing.status", in: app)). "
+                    + "Error: \(elementDescription("ma.processing.error", in: app))",
+                file: file,
+                line: line
+            )
+            return
+        }
+
         for attempt in 0..<2 {
             tapProcessingButton(identifier, in: app, file: file, line: line)
             let timeout: TimeInterval = attempt == 0 ? 3 : 7
@@ -1514,7 +1550,26 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
                 return
             }
         }
-        assertElement("ma.processing.status", in: app, contains: expectedStatus, file: file, line: line)
+
+        XCTFail(
+            "Expected ma.processing.status to contain \(expectedStatus). "
+                + "Actual status: \(elementDescription("ma.processing.status", in: app)). "
+                + "Error: \(elementDescription("ma.processing.error", in: app))",
+            file: file,
+            line: line
+        )
+    }
+
+    private func processingExpectedStatusNeedsLongWait(_ expectedStatus: String) -> Bool {
+        expectedStatus == "Processing complete."
+            || expectedStatus == "Processing completed with transcript-only speaker labels."
+    }
+
+    private func processingCompletionTimeout(for expectedStatus: String) -> TimeInterval {
+        if expectedStatus == "Processing completed with transcript-only speaker labels." {
+            return 120
+        }
+        return 60
     }
 
     private func hittableButton(
@@ -2118,6 +2173,29 @@ private final class AppRealCaptureSameChainCLIFixture {
         app.launchEnvironment["MA_NATIVE_APP_XCTEST"] = "1"
         app.launchEnvironment["MEETING_ASSISTANT_CLI_PATH"] = cliURL.path
         app.launchEnvironment["MEETING_ASSISTANT_WORKSPACE"] = workspaceURL.path
+        if let ffmpegPath = Self.hostFFmpegPath() {
+            app.launchEnvironment["MEETING_ASSISTANT_FFMPEG_PATH"] = ffmpegPath
+        }
+    }
+
+    private static func hostFFmpegPath() -> String? {
+        let environment = ProcessInfo.processInfo.environment
+        let configured = environment["MEETING_ASSISTANT_FFMPEG_PATH"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let configured, !configured.isEmpty {
+            return configured
+        }
+
+        let pathCandidates = (environment["PATH"] ?? "")
+            .split(separator: ":")
+            .map { URL(fileURLWithPath: String($0)).appendingPathComponent("ffmpeg").path }
+        let standardCandidates = [
+            "/opt/homebrew/bin/ffmpeg",
+            "/usr/local/bin/ffmpeg",
+            "/usr/bin/ffmpeg",
+        ]
+        return (pathCandidates + standardCandidates)
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
     func sessionMetadata() throws -> [String: Any] {

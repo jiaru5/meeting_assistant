@@ -613,6 +613,11 @@ class HarnessValidationTests(unittest.TestCase):
     def test_vs_stage_release_rejects_partial_prerequisite_vs_rows(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
+            self.write_vs_statuses(
+                fixture,
+                "已达退出口径",
+                {"VS-MA-21": "partial evidence", "VS-MA-23": "未进入 release-scope"},
+            )
 
             result = subprocess.run(
                 [sys.executable, str(fixture / "scripts/vs-stage-check.py"), "release"],
@@ -648,6 +653,11 @@ class HarnessValidationTests(unittest.TestCase):
     def test_release_preflight_fails_closed_on_vs_prerequisites_before_pv(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
+            self.write_vs_statuses(
+                fixture,
+                "已达退出口径",
+                {"VS-MA-21": "partial evidence", "VS-MA-23": "未进入 release-scope"},
+            )
 
             result = subprocess.run(
                 [str(fixture / "scripts/release-preflight.sh")],
@@ -878,6 +888,15 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertLess(
             script.index("reset_xctestrun_smoke_env"),
             script.index('set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE" "1"'),
+        )
+        self.assertIn("configure_host_ffmpeg_for_app_bundle", script)
+        self.assertIn('set_xctestrun_env "$xctestrun_path" "MEETING_ASSISTANT_FFMPEG_PATH" "$ffmpeg_path"', script)
+        same_chain_marker = script.index(
+            'set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE" "1"'
+        )
+        self.assertLess(
+            same_chain_marker,
+            script.index("configure_host_ffmpeg_for_app_bundle", same_chain_marker),
         )
         self.assertIn("vs-ma-21-hardening-app-bundle-smoke.log", script)
         self.assertIn("vs-ma-21-hardening-ui-automation-report.json", script)
