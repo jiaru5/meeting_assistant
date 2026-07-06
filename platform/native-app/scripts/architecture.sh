@@ -139,6 +139,8 @@ grep -q "MA_NATIVE_APP_REUSE_XCTESTRUN" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_REUSE_XCTESTRUN:-auto" scripts/test-app-bundle.sh
 grep -q ".meeting-assistant-xctestrun-inputs.sha256" scripts/test-app-bundle.sh
 grep -q "compute_xctestrun_input_fingerprint" scripts/test-app-bundle.sh
+grep -q "print_app_bundle_identity_diagnostics" scripts/test-app-bundle.sh
+grep -q "App bundle cdhash" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_UI_AUTOMATION_RETRY_ATTEMPTS" scripts/test-app-bundle.sh
 grep -q "reset_xctestrun_smoke_env" scripts/test-app-bundle.sh
 grep -q "run_app_bundle_test_without_building" scripts/test-app-bundle.sh

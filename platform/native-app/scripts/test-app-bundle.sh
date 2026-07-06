@@ -168,6 +168,42 @@ reset_xctestrun_smoke_env() {
   done
 }
 
+print_app_bundle_identity_diagnostics() {
+  local app_bundle_path="$1"
+  local info_plist
+  local bundle_id=""
+  local codesign_details=""
+  local designated_requirement=""
+  local signature=""
+  local team_identifier=""
+  local cdhash=""
+  local spctl_assessment=""
+
+  if [[ -z "$app_bundle_path" || ! -d "$app_bundle_path" ]]; then
+    return 0
+  fi
+
+  info_plist="$app_bundle_path/Contents/Info.plist"
+  if [[ -f "$info_plist" ]]; then
+    bundle_id="$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$info_plist" 2>/dev/null || true)"
+  fi
+  codesign_details="$(codesign -dv "$app_bundle_path" 2>&1 || true)"
+  designated_requirement="$(codesign -dr - "$app_bundle_path" 2>&1 | grep -m 1 "designated =>" || true)"
+  signature="$(printf '%s\n' "$codesign_details" | sed -n 's/^Signature=//p' | head -n 1)"
+  team_identifier="$(printf '%s\n' "$codesign_details" | sed -n 's/^TeamIdentifier=//p' | head -n 1)"
+  cdhash="$(printf '%s\n' "$designated_requirement" | sed -n 's/.*cdhash H"\([^"]*\)".*/\1/p' | head -n 1)"
+  spctl_assessment="$(spctl -a -vv -t exec "$app_bundle_path" 2>&1 | head -n 1 || true)"
+
+  {
+    echo "App bundle identifier: ${bundle_id:-unknown}"
+    echo "App bundle signature: ${signature:-unknown}"
+    echo "App bundle team identifier: ${team_identifier:-unknown}"
+    echo "App bundle cdhash: ${cdhash:-unknown}"
+    echo "App bundle designated requirement: ${designated_requirement:-unknown}"
+    echo "App bundle spctl assessment: ${spctl_assessment:-unknown}"
+  } >&2
+}
+
 print_real_capture_permission_help() {
   local app_bundle_path="$1"
   local log_path="${2:-$real_capture_log}"
@@ -181,9 +217,16 @@ DerivedData path: $derived_data_path
 App bundle under test: ${app_bundle_path:-not found under DerivedData}
 Captured xcodebuild log: $log_path
 
+Current app bundle identity:
+EOF
+
+  print_app_bundle_identity_diagnostics "$app_bundle_path"
+
+  cat >&2 <<EOF
+
 To unblock this machine:
   1. Open System Settings > Privacy & Security > Screen Recording / Screen & System Audio Recording.
-  2. Enable MeetingAssistantNative for the app bundle built under the DerivedData path above.
+  2. Enable MeetingAssistantNative for the exact app bundle path and identity printed above.
   3. Quit and relaunch the app if macOS asks, then rerun:
      $rerun_command
   4. If you granted the exact app bundle above and have not rebuilt since then, rerun without changing the app signature:

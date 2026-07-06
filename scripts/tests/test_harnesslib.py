@@ -879,9 +879,13 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("auto-reusing existing xctestrun", script)
         self.assertIn("MA_NATIVE_APP_REUSE_XCTESTRUN=0", script)
         self.assertIn("fingerprint differs from the current checkout", script)
+        self.assertIn("print_app_bundle_identity_diagnostics", script)
+        self.assertIn("App bundle cdhash", script)
+        self.assertIn("App bundle designated requirement", script)
         self.assertIn("MA_NATIVE_APP_REUSE_XCTESTRUN=auto", dev_commands)
         self.assertIn(".meeting-assistant-xctestrun-inputs.sha256", dev_commands)
         self.assertIn("反复弹 Screen Recording", dev_commands)
+        self.assertIn("cdhash", dev_commands)
         self.assertIn("MA_NATIVE_APP_REUSE_XCTESTRUN=auto", e2e_readme)
         self.assertIn("Debug ad-hoc rebuild", e2e_readme)
 

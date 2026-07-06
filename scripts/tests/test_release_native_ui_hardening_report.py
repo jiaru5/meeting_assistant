@@ -118,6 +118,12 @@ class ReleaseNativeUIHardeningReportTests(unittest.TestCase):
                 + f"DerivedData path: {directory}/DerivedData/AppBundleUITests\n"
                 + f"App bundle under test: {directory}/DerivedData/AppBundleUITests/Build/Products/Debug/MeetingAssistantNative.app\n"
                 + f"Captured xcodebuild log: {directory}/DerivedData/AppBundleUITests/real-capture-app-bundle-smoke.log\n"
+                + "App bundle identifier: local.meeting-assistant.native\n"
+                + "App bundle signature: adhoc\n"
+                + "App bundle team identifier: not set\n"
+                + 'App bundle cdhash: 5833e275c115667687faf663677a3e39fa9e28db\n'
+                + 'App bundle designated requirement: designated => cdhash H"5833e275c115667687faf663677a3e39fa9e28db"\n'
+                + f"App bundle spctl assessment: {directory}/DerivedData/AppBundleUITests/Build/Products/Debug/MeetingAssistantNative.app: rejected\n"
                 + "Test session results, code coverage, and logs:\n"
                 + f"\t{directory}/DerivedData/Xcode/Logs/Test/Test-MeetingAssistantNative.xcresult\n",
                 encoding="utf-8",
@@ -142,6 +148,12 @@ class ReleaseNativeUIHardeningReportTests(unittest.TestCase):
                 report["real_capture_app_bundle_under_test"],
                 f"{directory}/DerivedData/AppBundleUITests/Build/Products/Debug/MeetingAssistantNative.app",
             )
+            self.assertEqual(report["real_capture_app_bundle_identifier"], "local.meeting-assistant.native")
+            self.assertEqual(report["real_capture_app_bundle_signature"], "adhoc")
+            self.assertEqual(report["real_capture_app_bundle_team_identifier"], "not set")
+            self.assertEqual(report["real_capture_app_bundle_cdhash"], "5833e275c115667687faf663677a3e39fa9e28db")
+            self.assertIn("cdhash", report["real_capture_app_bundle_designated_requirement"])
+            self.assertTrue(report["real_capture_app_bundle_spctl_assessment"].endswith(": rejected"))
             self.assertEqual(
                 report["real_capture_xcodebuild_log_path"],
                 f"{directory}/DerivedData/AppBundleUITests/real-capture-app-bundle-smoke.log",

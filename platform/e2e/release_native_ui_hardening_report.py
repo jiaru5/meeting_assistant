@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -70,6 +71,55 @@ def _extract_bool_argument(text: str, label: str) -> bool | None:
     return match.group(1) == "true"
 
 
+def _run_command(args: list[str]) -> str:
+    completed = subprocess.run(args, text=True, capture_output=True, check=False)
+    return (completed.stdout + completed.stderr).strip()
+
+
+def _app_bundle_identity(app_bundle_path: str | None) -> dict[str, str | None]:
+    if not app_bundle_path:
+        return {}
+    bundle_path = Path(app_bundle_path)
+    if not bundle_path.is_dir():
+        return {}
+
+    info_plist = bundle_path / "Contents" / "Info.plist"
+    bundle_id = None
+    if info_plist.is_file():
+        output = _run_command(["/usr/libexec/PlistBuddy", "-c", "Print :CFBundleIdentifier", str(info_plist)])
+        bundle_id = output.splitlines()[0].strip() if output else None
+
+    codesign_details = _run_command(["codesign", "-dv", str(bundle_path)])
+    designated_requirement_output = _run_command(["codesign", "-dr", "-", str(bundle_path)])
+    designated_requirement_value = None
+    for line in designated_requirement_output.splitlines():
+        if "designated =>" in line:
+            designated_requirement_value = line
+            break
+
+    def extract(prefix: str) -> str | None:
+        for line in codesign_details.splitlines():
+            if line.startswith(prefix):
+                return line[len(prefix) :].strip()
+        return None
+
+    cdhash = None
+    if designated_requirement_value:
+        match = re.search(r'cdhash H"([^"]+)"', designated_requirement_value)
+        if match:
+            cdhash = match.group(1)
+
+    spctl_assessment = _run_command(["spctl", "-a", "-vv", "-t", "exec", str(bundle_path)]).splitlines()[:1]
+    return {
+        "identifier": bundle_id,
+        "signature": extract("Signature="),
+        "team_identifier": extract("TeamIdentifier="),
+        "cdhash": cdhash,
+        "designated_requirement": designated_requirement_value,
+        "spctl_assessment": spctl_assessment[0] if spctl_assessment else None,
+    }
+
+
 def _adapter_capability_report(source_root: Path | None = None) -> dict[str, Any]:
     root = source_root if source_root is not None else Path(__file__).resolve().parents[2]
     source_path = root / ADAPTER_SOURCE_RELATIVE_PATH
@@ -117,6 +167,31 @@ def build_report(
     real_capture_app_bundle_under_test = _extract_line_value(real_capture_output, "App bundle under test")
     real_capture_xcodebuild_log_path = _extract_line_value(real_capture_output, "Captured xcodebuild log")
     real_capture_xcresult_path = _extract_xcresult_path(real_capture_output)
+    real_capture_app_bundle_identifier = _extract_line_value(real_capture_output, "App bundle identifier")
+    real_capture_app_bundle_signature = _extract_line_value(real_capture_output, "App bundle signature")
+    real_capture_app_bundle_team_identifier = _extract_line_value(real_capture_output, "App bundle team identifier")
+    real_capture_app_bundle_cdhash = _extract_line_value(real_capture_output, "App bundle cdhash")
+    real_capture_app_bundle_designated_requirement = _extract_line_value(
+        real_capture_output,
+        "App bundle designated requirement",
+    )
+    real_capture_app_bundle_spctl_assessment = _extract_line_value(
+        real_capture_output,
+        "App bundle spctl assessment",
+    )
+    app_bundle_identity = _app_bundle_identity(real_capture_app_bundle_under_test)
+    real_capture_app_bundle_identifier = real_capture_app_bundle_identifier or app_bundle_identity.get("identifier")
+    real_capture_app_bundle_signature = real_capture_app_bundle_signature or app_bundle_identity.get("signature")
+    real_capture_app_bundle_team_identifier = (
+        real_capture_app_bundle_team_identifier or app_bundle_identity.get("team_identifier")
+    )
+    real_capture_app_bundle_cdhash = real_capture_app_bundle_cdhash or app_bundle_identity.get("cdhash")
+    real_capture_app_bundle_designated_requirement = (
+        real_capture_app_bundle_designated_requirement or app_bundle_identity.get("designated_requirement")
+    )
+    real_capture_app_bundle_spctl_assessment = (
+        real_capture_app_bundle_spctl_assessment or app_bundle_identity.get("spctl_assessment")
+    )
     marker_sources = {
         "real_capture_pass_marker": real_capture_output,
         "real_capture_test_name": real_capture_output,
@@ -194,6 +269,12 @@ def build_report(
         "hardening_exit_code": hardening_exit_code,
         "real_capture_derived_data_path": real_capture_derived_data_path,
         "real_capture_app_bundle_under_test": real_capture_app_bundle_under_test,
+        "real_capture_app_bundle_identifier": real_capture_app_bundle_identifier,
+        "real_capture_app_bundle_signature": real_capture_app_bundle_signature,
+        "real_capture_app_bundle_team_identifier": real_capture_app_bundle_team_identifier,
+        "real_capture_app_bundle_cdhash": real_capture_app_bundle_cdhash,
+        "real_capture_app_bundle_designated_requirement": real_capture_app_bundle_designated_requirement,
+        "real_capture_app_bundle_spctl_assessment": real_capture_app_bundle_spctl_assessment,
         "real_capture_xcodebuild_log_path": real_capture_xcodebuild_log_path,
         "real_capture_xcresult_path": real_capture_xcresult_path,
         "real_capture_adapter_capability": adapter_capability,
