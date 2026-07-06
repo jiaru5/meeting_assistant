@@ -262,7 +262,11 @@ struct NativeCaptureSmoke {
         }
 
         let client = NativeRecordingCommandClient(
-            permissionChecker: MacOSNativeCapturePermissionChecker(),
+            permissionChecker: MacOSNativeCapturePermissionChecker(
+                screenRecordingProbe: CoreGraphicsScreenRecordingPermissionProbe(
+                    requestAccessWhenDenied: true
+                )
+            ),
             captureAdapter: AppleScreenCaptureKitNativeCaptureAdapter(),
             sessionStore: RecordingSessionStore(),
             sessionIDProvider: { configuration.sessionID },

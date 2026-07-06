@@ -42,7 +42,7 @@ Apple ScreenCaptureKit native capture adapter exception:
 opt-in real native capture smoke boundary:
 
 1. `scripts/native-capture-smoke.sh` may run real ScreenCaptureKit capture only when invoked explicitly with `MA_NATIVE_CAPTURE_SMOKE=1`; default `scripts/test.sh`, app-bundle tests and Release app execution must not run it implicitly.
-2. The smoke may build a temporary Swift executable that composes only `NativeRecordingCommandClient`, `MacOSNativeCapturePermissionChecker`, `AppleScreenCaptureKitNativeCaptureAdapter` and `RecordingSessionStore`.
+2. The smoke may build a temporary Swift executable that composes only `NativeRecordingCommandClient`, `MacOSNativeCapturePermissionChecker`, `CoreGraphicsScreenRecordingPermissionProbe`, `AppleScreenCaptureKitNativeCaptureAdapter` and `RecordingSessionStore`; the screen recording probe may request Screen Recording access before preserving fail-closed denial.
 3. The smoke may write to `build/native-capture-smoke/` or an explicit `MA_NATIVE_CAPTURE_SMOKE_WORKSPACE`, start a bounded screen recording, stop it, and validate existing `session.json`, `screen_video`, artifact status and `sha256:` checksum fields.
 4. The smoke must not add or change command fields, error codes, exit codes, artifact types, event schema, UI states or app-bundle env hooks.
 5. Permission denied, unknown permission, missing macOS runtime or missing ScreenCaptureKit output must remain fail-closed evidence and must not be reported as `covered` release readiness.

@@ -91,6 +91,8 @@ grep -R -q "producesCombinedRecordingFile" Sources tests
 grep -q "MA_NATIVE_CAPTURE_SMOKE" scripts/native-capture-smoke.sh
 grep -q "NativeRecordingCommandClient" scripts/native-capture-smoke.sh
 grep -q "MacOSNativeCapturePermissionChecker" scripts/native-capture-smoke.sh
+grep -q "CoreGraphicsScreenRecordingPermissionProbe" scripts/native-capture-smoke.sh
+grep -q "requestAccessWhenDenied: true" scripts/native-capture-smoke.sh
 grep -q "AppleScreenCaptureKitNativeCaptureAdapter" scripts/native-capture-smoke.sh
 grep -q "RecordingSessionStore" scripts/native-capture-smoke.sh
 grep -q "session.json" scripts/native-capture-smoke.sh
