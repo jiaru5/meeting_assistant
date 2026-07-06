@@ -18,6 +18,9 @@ real_processing_log="$derived_data_path/real-processing-app-bundle-smoke.log"
 real_action_smoke="${MA_NATIVE_APP_REAL_ACTION_SMOKE:-0}"
 real_action_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testRealProcessingCLITranscriptReviewExportAndDeleteFromLaunchedAppBundleWhenExplicitlyEnabled"
 real_action_log="$derived_data_path/real-action-app-bundle-smoke.log"
+real_action_os_smoke="${MA_NATIVE_APP_REAL_ACTION_OS_SMOKE:-0}"
+real_action_os_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testRealProcessingCLISystemClipboardSavePanelExportAndDeleteFromLaunchedAppBundleWhenExplicitlyEnabled"
+real_action_os_log="$derived_data_path/real-action-os-app-bundle-smoke.log"
 real_runtime_smoke="${MA_NATIVE_APP_REAL_RUNTIME_SMOKE:-0}"
 real_runtime_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testRealWhisperRuntimeTranscriptReviewFromLaunchedAppBundleWhenExplicitlyEnabled"
 real_runtime_log="$derived_data_path/real-runtime-app-bundle-smoke.log"
@@ -101,6 +104,7 @@ reset_xctestrun_smoke_env() {
     MA_NATIVE_APP_REAL_CAPTURE_SMOKE \
     MA_NATIVE_APP_REAL_PROCESSING_SMOKE \
     MA_NATIVE_APP_REAL_ACTION_SMOKE \
+    MA_NATIVE_APP_REAL_ACTION_OS_SMOKE \
     MA_NATIVE_APP_REAL_RUNTIME_SMOKE \
     MA_NATIVE_APP_VSMA21_HARDENING_SMOKE \
     MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE \
@@ -401,6 +405,31 @@ if [[ "$real_action_smoke" == "1" || "$real_action_smoke" == "true" || "$real_ac
   fi
 
   echo "native-app real action app-bundle XCUITest passed."
+  exit 0
+fi
+
+if [[ "$real_action_os_smoke" == "1" || "$real_action_os_smoke" == "true" || "$real_action_os_smoke" == "yes" ]]; then
+  prepare_xctestrun "real action OS"
+  reset_xctestrun_smoke_env
+
+  set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_REAL_ACTION_OS_SMOKE" "1"
+
+  set +e
+  run_app_bundle_test_without_building "real action OS" "$real_action_os_log" "$real_action_os_test"
+  test_status=$?
+  set -e
+
+  if [[ "$test_status" -ne 0 ]]; then
+    echo "native-app real action OS app-bundle XCUITest failed. Captured xcodebuild log: $real_action_os_log" >&2
+    if is_ui_testing_automation_blocked "$real_action_os_log"; then
+      print_ui_testing_automation_help "real action OS" "$real_action_os_log"
+      print_ui_testing_automation_process_diagnostics
+      print_ui_testing_automation_log_excerpt
+    fi
+    exit "$test_status"
+  fi
+
+  echo "native-app real action OS app-bundle XCUITest passed."
   exit 0
 fi
 

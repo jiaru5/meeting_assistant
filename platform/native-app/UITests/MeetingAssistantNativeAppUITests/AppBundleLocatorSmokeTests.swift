@@ -925,6 +925,66 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         XCTAssertFalse(deleteEvent.contains("Fake transcript generated from local audio."))
     }
 
+    func testRealProcessingCLISystemClipboardSavePanelExportAndDeleteFromLaunchedAppBundleWhenExplicitlyEnabled() throws {
+        try XCTSkipUnless(
+            Self.realActionOSCLISmokeEnabled(),
+            "Set MA_NATIVE_APP_REAL_ACTION_OS_SMOKE=1 to run the real OS transcript action app-bundle smoke."
+        )
+
+        let processingFixture = try AppRealProcessingCLIFixture()
+        defer { processingFixture.cleanup() }
+        let processingApp = launchApp(fixture: "ready", realProcessingFixture: processingFixture)
+
+        tapProcessingButton(
+            "ma.processing.startButton",
+            in: processingApp,
+            expectingStatus: "Processing completed with transcript-only speaker labels."
+        )
+
+        let reviewApp = launchApp(
+            workspaceURL: processingFixture.workspaceURL,
+            sessionID: processingFixture.sessionID,
+            realProcessingFixture: processingFixture,
+            transcriptActionOSClientMode: "system",
+            transcriptActionSavePanelDefaultDirectoryURL: processingFixture.exportURL.deletingLastPathComponent()
+        )
+
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Transcript actions are ready.")
+
+        NSPasteboard.general.clearContents()
+        tapTranscriptActionButton("ma.transcriptAction.copyButton", in: reviewApp)
+
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Copy complete.")
+        let pasteboardContent = NSPasteboard.general.string(forType: .string)
+        XCTAssertTrue(
+            pasteboardContent?.contains("Fake transcript generated from local audio.") == true,
+            "Expected real NSPasteboard copy to contain transcript content."
+        )
+
+        tapTranscriptActionButton("ma.transcriptAction.exportButton", in: reviewApp)
+        confirmSavePanelExport(in: reviewApp, expectedFilename: "\(processingFixture.sessionID).md")
+
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Export complete.")
+        assertElement("ma.transcriptAction.success", in: reviewApp, contains: processingFixture.exportURL.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: processingFixture.exportURL.path))
+        XCTAssertTrue(try processingFixture.exportContent().contains("Fake transcript generated from local audio."))
+
+        tapTranscriptActionButton("ma.transcriptAction.deleteButton", in: reviewApp)
+        assertElement("ma.transcriptAction.deletePromptText", in: reviewApp, contains: processingFixture.sessionID)
+        assertElement("ma.transcriptAction.deletePromptText", in: reviewApp, contains: "External exports are retained.")
+        tapTranscriptActionButton("ma.transcriptAction.deleteConfirmButton", in: reviewApp)
+
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Delete complete.")
+        assertElement("ma.transcriptAction.success", in: reviewApp, contains: "Deleted session \(processingFixture.sessionID).")
+        assertElement("ma.transcriptAction.success", in: reviewApp, contains: "Retained 1 external export.")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: processingFixture.sessionRootURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: processingFixture.exportURL.path))
+        let deleteEvent = try processingFixture.deleteEventContent()
+        XCTAssertTrue(deleteEvent.contains("meeting_session.deleted.v1"))
+        XCTAssertTrue(deleteEvent.contains(processingFixture.sessionID))
+        XCTAssertFalse(deleteEvent.contains("Fake transcript generated from local audio."))
+    }
+
     func testRealWhisperRuntimeTranscriptReviewFromLaunchedAppBundleWhenExplicitlyEnabled() throws {
         try XCTSkipUnless(
             Self.realRuntimeCLISmokeEnabled(),
@@ -1125,7 +1185,9 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         realProcessingFixture: AppRealProcessingCLIFixture? = nil,
         realRuntimeProcessingFixture: AppRealRuntimeProcessingCLIFixture? = nil,
         transcriptActionFixture: AppTranscriptActionProcessFixture? = nil,
-        mvpFullStackFixture: AppMVPFullStackCLIFixture? = nil
+        mvpFullStackFixture: AppMVPFullStackCLIFixture? = nil,
+        transcriptActionOSClientMode: String? = nil,
+        transcriptActionSavePanelDefaultDirectoryURL: URL? = nil
     ) -> XCUIApplication {
         dismissSpotlightIfPresent()
         launchedApp?.terminate()
@@ -1170,6 +1232,13 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         }
         if let mvpFullStackFixture {
             mvpFullStackFixture.applyLaunchEnvironment(to: app)
+        }
+        if let transcriptActionOSClientMode {
+            app.launchEnvironment["MA_NATIVE_TRANSCRIPT_ACTION_OS_CLIENT"] = transcriptActionOSClientMode
+        }
+        if let transcriptActionSavePanelDefaultDirectoryURL {
+            app.launchEnvironment["MA_NATIVE_TRANSCRIPT_ACTION_SAVE_PANEL_DEFAULT_DIR"] =
+                transcriptActionSavePanelDefaultDirectoryURL.path
         }
         app.terminate()
         _ = app.wait(for: .notRunning, timeout: 5)
@@ -1504,6 +1573,63 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         clickButton(control, in: app, file: file, line: line)
     }
 
+    private func confirmSavePanelExport(
+        in app: XCUIApplication,
+        expectedFilename: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(10)
+        var filenameField: XCUIElement?
+        var primaryButton: XCUIElement?
+        while Date() < deadline {
+            if filenameField == nil {
+                filenameField = app.textFields.allElementsBoundByIndex.first { field in
+                    guard field.exists else {
+                        return false
+                    }
+                    let value = String(describing: field.value)
+                    return value.contains(expectedFilename)
+                }
+            }
+            if primaryButton == nil {
+                primaryButton = app.buttons.allElementsBoundByIndex.first { button in
+                    guard button.exists && button.isEnabled else {
+                        return false
+                    }
+                    return ["Export", "Save", "导出", "保存", "存储"].contains(button.label)
+                }
+            }
+            if filenameField != nil || primaryButton != nil {
+                break
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+
+        guard filenameField != nil || primaryButton != nil else {
+            XCTFail(
+                "Expected NSSavePanel to appear for \(expectedFilename). "
+                    + "App hierarchy: \(app.debugDescription).",
+                file: file,
+                line: line
+            )
+            return
+        }
+
+        if let filenameField {
+            filenameField.click()
+            filenameField.typeKey(.return, modifierFlags: [])
+            return
+        }
+
+        if let primaryButton, primaryButton.isHittable {
+            primaryButton.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+            return
+        }
+
+        app.typeKey(.return, modifierFlags: [])
+    }
+
     private func tapProcessingButton(
         _ identifier: String,
         in app: XCUIApplication,
@@ -1745,6 +1871,17 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
 
     private static func realActionCLISmokeEnabled() -> Bool {
         switch ProcessInfo.processInfo.environment["MA_NATIVE_APP_REAL_ACTION_SMOKE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() {
+        case "1", "true", "yes":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func realActionOSCLISmokeEnabled() -> Bool {
+        switch ProcessInfo.processInfo.environment["MA_NATIVE_APP_REAL_ACTION_OS_SMOKE"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased() {
         case "1", "true", "yes":

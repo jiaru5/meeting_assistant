@@ -379,9 +379,24 @@ private struct NativeControlPlaneFixtureConfiguration {
         case .system:
             return (
                 TranscriptActionPasteboardClipboard(),
-                TranscriptActionSavePanelDestinationSelector()
+                TranscriptActionSavePanelDestinationSelector(
+                    defaultDirectoryURL: Self.transcriptActionSavePanelDefaultDirectoryURL(environment: environment)
+                )
             )
         }
+    }
+
+    private static func transcriptActionSavePanelDefaultDirectoryURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL? {
+        guard isNativeAppXCTestEnvironment(environment),
+              let rawPath = environment["MA_NATIVE_TRANSCRIPT_ACTION_SAVE_PANEL_DEFAULT_DIR"]?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawPath.isEmpty else {
+            return nil
+        }
+
+        return URL(fileURLWithPath: rawPath, isDirectory: true)
     }
 
     static func fromLaunchContext(
@@ -970,6 +985,18 @@ private enum NativeTranscriptActionOSClientMode {
     case system
 
     static func fromLaunchEnvironment(_ environment: [String: String]) -> NativeTranscriptActionOSClientMode {
+        let rawValue = environment["MA_NATIVE_TRANSCRIPT_ACTION_OS_CLIENT"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        switch rawValue {
+        case .some("deterministic"):
+            return isNativeAppXCTestEnvironment(environment) ? .deterministic : .system
+        case .some("system"):
+            return .system
+        default:
+            break
+        }
+
         if isNativeAppXCTestEnvironment(environment) {
             return .deterministic
         }

@@ -250,7 +250,8 @@ fi
 action_os_boundary_file='Sources/MeetingAssistantNative/TranscriptActionOSClients.swift'
 
 if grep -R --include '*.swift' -n -E 'normalize_audio|URLSession|URLRequest|URLSessionConfiguration|NWConnection|NWListener|WebSocket|https?://|NSPasteboard|API_KEY|SECRET|TOKEN' Sources tests App UITests |
-  grep -v -F "$action_os_boundary_file"; then
+  grep -v -F "$action_os_boundary_file" |
+  grep -v -E 'UITests/MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests.swift:[0-9]+:.*NSPasteboard'; then
   echo "native-app architecture check failed: native-app must not implement processing normalization, external network calls, real pasteboard, or secrets." >&2
   exit 1
 fi
