@@ -49,6 +49,23 @@ def non_pcm_wav_bytes(payload: bytes = b"\x00\x01") -> bytes:
     )
 
 
+def write_fake_ffmpeg(bin_dir: Path, output_fixture: Path) -> Path:
+    ffmpeg = bin_dir / "ffmpeg"
+    ffmpeg.write_text(
+        """#!/bin/sh
+set -eu
+last=""
+for arg in "$@"; do
+  last="$arg"
+done
+/bin/cp "$MEETING_ASSISTANT_FAKE_FFMPEG_OUTPUT" "$last"
+""",
+        encoding="utf-8",
+    )
+    ffmpeg.chmod(0o755)
+    return ffmpeg
+
+
 def create_audio_session(workspace: Path, artifacts: list[tuple[str, str, bytes] | tuple[str, str, bytes, str]]) -> Path:
     create_session(workspace, source_type="native_recording", session_id="session-1")
     session_dir = session_directory(workspace, "session-1")
@@ -481,20 +498,84 @@ class AudioProcessingTests(unittest.TestCase):
         self.assertIn("local-missing-file", log_text)
         self.assertEqual(response["details"]["log_path"], str(session_dir / "logs" / "processing.log"))
 
-    def test_non_wav_source_fails_without_registering_normalized_audio(self) -> None:
+    def test_m4a_audio_source_transcodes_to_normalized_wav_with_ffmpeg(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            workspace = Path(tmp)
-            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.mp3", b"mp3-bytes")])
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.m4a", b"m4a-bytes")])
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            output_fixture = root / "ffmpeg-output.wav"
+            output_fixture.write_bytes(wav_bytes(b"normalized"))
+            write_fake_ffmpeg(bin_dir, output_fixture)
+            original_checksum = sha256_file(session_dir / "artifacts" / "mixed_audio.m4a")
 
-            response = run_audio_normalization("session-1", workspace=workspace)
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "PATH": str(bin_dir),
+                    "MEETING_ASSISTANT_FAKE_FFMPEG_OUTPUT": str(output_fixture),
+                },
+                clear=False,
+            ):
+                response = run_audio_normalization("session-1", workspace=workspace)
+
+            normalized_path = session_dir / "artifacts" / "normalized_audio.wav"
+            normalized_bytes = normalized_path.read_bytes()
+            final_checksum = sha256_file(session_dir / "artifacts" / "mixed_audio.m4a")
+            indexed = artifacts_by_type(session_dir)
+
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["source_artifact_id"], "artifact-mixed_audio")
+        self.assertEqual(normalized_bytes, wav_bytes(b"normalized"))
+        self.assertEqual(indexed["normalized_audio"][0]["format"], "wav")
+        self.assertEqual(indexed["normalized_audio"][0]["path"], str(normalized_path))
+        self.assertEqual(final_checksum, original_checksum)
+
+    def test_ffmpeg_success_still_requires_pcm_wav_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.m4a", b"m4a-bytes")])
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            output_fixture = root / "ffmpeg-output.wav"
+            output_fixture.write_bytes(b"not-a-wav")
+            write_fake_ffmpeg(bin_dir, output_fixture)
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "PATH": str(bin_dir),
+                    "MEETING_ASSISTANT_FAKE_FFMPEG_OUTPUT": str(output_fixture),
+                },
+                clear=False,
+            ):
+                response = run_audio_normalization("session-1", workspace=workspace)
 
             normalized_exists = (session_dir / "artifacts" / "normalized_audio.wav").exists()
             artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
 
         self.assertFalse(response["ok"])
         self.assertEqual(response["code"], "processing_failed")
-        self.assertIn("WAV/PCM", response["message"])
-        self.assertEqual(response["details"]["path"], str(session_dir / "artifacts" / "mixed_audio.mp3"))
+        self.assertFalse(normalized_exists)
+        self.assertNotIn("normalized_audio", artifact_types)
+
+    def test_compressed_audio_source_requires_ffmpeg_without_registering_normalized_audio(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.mp3", b"mp3-bytes")])
+
+            with mock.patch.dict(os.environ, {"PATH": ""}, clear=False):
+                response = run_audio_normalization("session-1", workspace=workspace)
+
+            normalized_exists = (session_dir / "artifacts" / "normalized_audio.wav").exists()
+            artifact_types = {artifact["artifact_type"] for artifact in load_session(session_dir)["artifacts"]}
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "dependency_missing")
+        self.assertIn("FFmpeg", response["message"])
+        self.assertEqual(response["details"]["tool"], "ffmpeg")
         self.assertEqual(response["details"]["log_path"], str(session_dir / "logs" / "processing.log"))
         self.assertFalse(normalized_exists)
         self.assertNotIn("normalized_audio", artifact_types)

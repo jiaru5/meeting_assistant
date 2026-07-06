@@ -189,6 +189,109 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         XCTAssertEqual(artifacts.first { $0["artifact_type"] as? String == "mixed_audio" }?["capture_status"] as? String, "missing")
     }
 
+    func testVSMA21RealScreenCaptureKitProcessingTranscriptActionsSameChainWhenExplicitlyEnabled() throws {
+        try XCTSkipUnless(
+            Self.realCaptureSameChainCLISmokeEnabled(),
+            "Set MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE=1 to run the VS-MA-21 real capture same-chain app-bundle smoke."
+        )
+
+        let fixture = try AppRealCaptureSameChainCLIFixture()
+        defer { fixture.cleanup() }
+        let app = launchApp(fixture: "ready", realCaptureSameChainFixture: fixture)
+
+        tapButton("ma.recording.startButton", in: app)
+
+        assertRecordingStarted(in: app)
+        assertElement("ma.recording.sessionID", in: app, contains: fixture.sessionID)
+        Thread.sleep(forTimeInterval: 3.0)
+        tapRecordingButton(
+            "ma.recording.stopButton",
+            in: app,
+            expectingStatus: "Recording saved."
+        )
+
+        assertElement("ma.recording.status", in: app, contains: "Recording saved.")
+        assertElement("ma.recording.artifact.screen_video.status", in: app, contains: "screen_video: available")
+        assertElement("ma.recording.artifact.system_audio.status", in: app, contains: "system_audio: degraded")
+        assertElement("ma.recording.artifact.microphone_audio.status", in: app, contains: "microphone_audio: missing")
+
+        let recordedSession = try fixture.sessionMetadata()
+        let recordedArtifacts = try XCTUnwrap(recordedSession["artifacts"] as? [[String: Any]])
+        let mixedAudio = try XCTUnwrap(
+            recordedArtifacts.first { $0["artifact_type"] as? String == "mixed_audio" },
+            "Real capture same-chain smoke requires ScreenCaptureKit to register mixed_audio."
+        )
+        XCTAssertEqual(
+            mixedAudio["capture_status"] as? String,
+            "available",
+            "Real capture same-chain smoke requires mixed_audio available; current capture is \(mixedAudio["capture_status"] ?? "<missing>")."
+        )
+        let originalMixedAudioChecksum = try fixture.mixedAudioChecksum()
+
+        tapProcessingButton(
+            "ma.processing.startButton",
+            in: app,
+            expectingStatus: "Processing completed with transcript-only speaker labels."
+        )
+
+        assertElement(
+            "ma.processing.status",
+            in: app,
+            contains: "Processing completed with transcript-only speaker labels."
+        )
+        assertElement("ma.processing.transcriptStatus", in: app, contains: "generated with 1 segment")
+        assertElement("ma.processing.degradation", in: app, contains: "transcript-only fallback")
+        assertDoesNotExist("ma.processing.error", in: app)
+        XCTAssertEqual(try fixture.mixedAudioChecksum(), originalMixedAudioChecksum)
+
+        let processedSession = try fixture.sessionMetadata()
+        let processedArtifacts = try XCTUnwrap(processedSession["artifacts"] as? [[String: Any]])
+        let processedArtifactTypes = Set(processedArtifacts.compactMap { $0["artifact_type"] as? String })
+        XCTAssertTrue(
+            processedArtifactTypes.isSuperset(of: ["screen_video", "mixed_audio", "normalized_audio", "transcript_text", "speaker_labels"])
+        )
+
+        let reviewApp = launchApp(
+            workspaceURL: fixture.workspaceURL,
+            sessionID: fixture.sessionID,
+            realCaptureSameChainFixture: fixture
+        )
+
+        assertElement("ma.transcript.heading", in: reviewApp, contains: "UI smoke recording")
+        assertElement("ma.transcript.summary", in: reviewApp, contains: "Transcript has 1 segment for review.")
+        assertElement(
+            "ma.transcript.text.segment-0001",
+            in: reviewApp,
+            contains: "Fake transcript generated from local audio."
+        )
+        assertElement("ma.transcript.degradation", in: reviewApp, contains: "transcript-only fallback")
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Transcript actions are ready.")
+
+        tapTranscriptActionButton("ma.transcriptAction.copyButton", in: reviewApp)
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Copy complete.")
+
+        tapTranscriptActionButton("ma.transcriptAction.exportButton", in: reviewApp)
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Export complete.")
+        assertElement("ma.transcriptAction.success", in: reviewApp, contains: fixture.exportURL.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.exportURL.path))
+        XCTAssertTrue(try fixture.exportContent().contains("Fake transcript generated from local audio."))
+
+        tapTranscriptActionButton("ma.transcriptAction.deleteButton", in: reviewApp)
+        assertElement("ma.transcriptAction.deletePromptText", in: reviewApp, contains: fixture.sessionID)
+        assertElement("ma.transcriptAction.deletePromptText", in: reviewApp, contains: "External exports are retained.")
+        tapTranscriptActionButton("ma.transcriptAction.deleteConfirmButton", in: reviewApp)
+
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Delete complete.")
+        assertElement("ma.transcriptAction.success", in: reviewApp, contains: "Deleted session \(fixture.sessionID).")
+        assertElement("ma.transcriptAction.success", in: reviewApp, contains: "Retained 1 external export.")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.sessionRootURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.exportURL.path))
+        let deleteEvent = try fixture.deleteEventContent()
+        XCTAssertTrue(deleteEvent.contains("meeting_session.deleted.v1"))
+        XCTAssertTrue(deleteEvent.contains(fixture.sessionID))
+        XCTAssertFalse(deleteEvent.contains("Fake transcript generated from local audio."))
+    }
+
     func testStartFailureFixtureShowsStableErrorLocatorFromLaunchedAppBundle() {
         let app = launchApp(fixture: "start-failure")
 
@@ -1017,6 +1120,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         sessionID: String? = nil,
         recordingFixture: AppControlledRecordingFixture? = nil,
         realCaptureFixture: AppAppleScreenCaptureKitRecordingFixture? = nil,
+        realCaptureSameChainFixture: AppRealCaptureSameChainCLIFixture? = nil,
         processingFixture: AppProcessingProcessFixture? = nil,
         realProcessingFixture: AppRealProcessingCLIFixture? = nil,
         realRuntimeProcessingFixture: AppRealRuntimeProcessingCLIFixture? = nil,
@@ -1048,6 +1152,9 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         }
         if let realCaptureFixture {
             realCaptureFixture.applyLaunchEnvironment(to: app)
+        }
+        if let realCaptureSameChainFixture {
+            realCaptureSameChainFixture.applyLaunchEnvironment(to: app)
         }
         if let processingFixture {
             processingFixture.applyLaunchEnvironment(to: app)
@@ -1613,6 +1720,17 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         }
     }
 
+    private static func realCaptureSameChainCLISmokeEnabled() -> Bool {
+        switch ProcessInfo.processInfo.environment["MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() {
+        case "1", "true", "yes":
+            return true
+        default:
+            return false
+        }
+    }
+
     private static func mvpFullStackCLISmokeEnabled() -> Bool {
         switch ProcessInfo.processInfo.environment["MA_NATIVE_APP_MVP_FULL_STACK_SMOKE"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1887,6 +2005,8 @@ private final class AppAppleScreenCaptureKitRecordingFixture {
     let rootURL: URL
     let workspaceURL: URL
     let sessionID = "session-app-ui-smoke"
+    private let captureSystemAudio: Bool
+    private let captureMicrophoneAudio: Bool
 
     var sessionRootURL: URL {
         workspaceURL
@@ -1894,7 +2014,12 @@ private final class AppAppleScreenCaptureKitRecordingFixture {
             .appendingPathComponent(sessionID, isDirectory: true)
     }
 
-    init() throws {
+    init(
+        captureSystemAudio: Bool = false,
+        captureMicrophoneAudio: Bool = false
+    ) throws {
+        self.captureSystemAudio = captureSystemAudio
+        self.captureMicrophoneAudio = captureMicrophoneAudio
         rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("ma-native-real-capture-app-\(UUID().uuidString)", isDirectory: true)
         workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
@@ -1908,8 +2033,8 @@ private final class AppAppleScreenCaptureKitRecordingFixture {
     func applyLaunchEnvironment(to app: XCUIApplication) {
         app.launchEnvironment["MA_NATIVE_RECORDING_CLIENT"] = "apple_screencapturekit"
         app.launchEnvironment["MA_NATIVE_CAPTURE_SMOKE"] = "1"
-        app.launchEnvironment["MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO"] = "false"
-        app.launchEnvironment["MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO"] = "false"
+        app.launchEnvironment["MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO"] = captureSystemAudio ? "true" : "false"
+        app.launchEnvironment["MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO"] = captureMicrophoneAudio ? "true" : "false"
         app.launchEnvironment["MA_NATIVE_APP_XCTEST"] = "1"
         app.launchEnvironment["MA_NATIVE_RECORDING_WORKSPACE"] = workspaceURL.path
     }
@@ -1922,6 +2047,103 @@ private final class AppAppleScreenCaptureKitRecordingFixture {
 
     func cleanup() {
         try? FileManager.default.removeItem(at: rootURL)
+    }
+}
+
+private final class AppRealCaptureSameChainCLIFixture {
+    private let captureFixture: AppAppleScreenCaptureKitRecordingFixture
+    let cliURL: URL
+
+    var rootURL: URL {
+        captureFixture.rootURL
+    }
+
+    var workspaceURL: URL {
+        captureFixture.workspaceURL
+    }
+
+    var sessionID: String {
+        captureFixture.sessionID
+    }
+
+    var sessionRootURL: URL {
+        captureFixture.sessionRootURL
+    }
+
+    var exportURL: URL {
+        workspaceURL
+            .appendingPathComponent("exports", isDirectory: true)
+            .appendingPathComponent("\(sessionID).md", isDirectory: false)
+    }
+
+    var deleteEventURL: URL {
+        workspaceURL
+            .appendingPathComponent("events", isDirectory: true)
+            .appendingPathComponent("meeting_session.deleted.v1.jsonl", isDirectory: false)
+    }
+
+    init(sourceFile: StaticString = #filePath) throws {
+        captureFixture = try AppAppleScreenCaptureKitRecordingFixture(
+            captureSystemAudio: true,
+            captureMicrophoneAudio: false
+        )
+
+        let nativeAppRootURL = URL(fileURLWithPath: String(describing: sourceFile))
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        cliURL = nativeAppRootURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("e2e", isDirectory: true)
+            .appendingPathComponent("ma-cli-local.sh", isDirectory: false)
+
+        guard FileManager.default.isExecutableFile(atPath: cliURL.path) else {
+            throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: cliURL.path])
+        }
+        try FileManager.default.createDirectory(
+            at: exportURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+    }
+
+    deinit {
+        cleanup()
+    }
+
+    func applyLaunchEnvironment(to app: XCUIApplication) {
+        captureFixture.applyLaunchEnvironment(to: app)
+        app.launchEnvironment["MA_NATIVE_PROCESSING_CLIENT"] = "process"
+        app.launchEnvironment["MA_NATIVE_TRANSCRIPT_ACTION_CLIENT"] = "process"
+        app.launchEnvironment["MA_NATIVE_APP_XCTEST"] = "1"
+        app.launchEnvironment["MEETING_ASSISTANT_CLI_PATH"] = cliURL.path
+        app.launchEnvironment["MEETING_ASSISTANT_WORKSPACE"] = workspaceURL.path
+    }
+
+    func sessionMetadata() throws -> [String: Any] {
+        try captureFixture.sessionMetadata()
+    }
+
+    func mixedAudioChecksum() throws -> String {
+        let session = try sessionMetadata()
+        let artifacts = try XCTUnwrap(session["artifacts"] as? [[String: Any]])
+        let mixedAudio = try XCTUnwrap(artifacts.first { $0["artifact_type"] as? String == "mixed_audio" })
+        let relativePath = try XCTUnwrap(mixedAudio["path"] as? String)
+        let data = try Data(contentsOf: sessionRootURL.appendingPathComponent(relativePath))
+        let digest = SHA256.hash(data: data)
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "sha256:\(hex)"
+    }
+
+    func exportContent() throws -> String {
+        try String(contentsOf: exportURL, encoding: .utf8)
+    }
+
+    func deleteEventContent() throws -> String {
+        try String(contentsOf: deleteEventURL, encoding: .utf8)
+    }
+
+    func cleanup() {
+        captureFixture.cleanup()
     }
 }
 

@@ -20,7 +20,7 @@
 
 1. 固定本轮 app-bundle under test 路径和 `MA_NATIVE_APP_DERIVED_DATA_PATH`，恢复或授予同一个 bundle 的 Screen Recording / Screen & System Audio Recording 权限，然后重跑 `platform/e2e/release-native-ui-hardening-smoke.sh`。
 2. 证明 launched `.app` 真实 ScreenCaptureKit start/stop 至少稳定产出 `screen_video`；请求音频时若 combined recording 中存在可导出的音轨，则 `mixed_audio` 必须登记为 `available` 并校验 checksum；若没有可导出音轨，必须保留 degraded 原因，并决定是否接受 screen-only native capture 或另开 ADR 讨论辅助音频策略。
-3. 补一条真实 same-chain app-bundle smoke：真实 capture 输出在同一 workspace/session 中进入真实 processing provider，再进入 transcript review、copy/export 和 delete confirmation。该链路通过前，不应把 provider-side hardening 或受控 recording fixture 当作 `VS-MA-21` 关闭证据。
+3. 真实 same-chain app-bundle smoke 入口已补：`MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE=1 ./platform/native-app/scripts/test-app-bundle.sh` 要求真实 capture 输出在同一 workspace/session 中进入真实 processing provider，再进入 transcript review、copy/export 和 delete confirmation。2026-07-06 本机运行已进入 test body，但当前阻断在真实 capture `permission_denied`；授权并证明该链路通过前，不应把 provider-side hardening 或受控 recording fixture 当作 `VS-MA-21` 关闭证据。
 4. 在真实 same-chain 通过后，再复用既有 provider/native hardening gate 证明 path conflict、retry、checksum preservation、safe display 和 redaction 发生在同一类真实链路上。
 
 `VS-MA-22` 的关闭目标需要先做阶段边界审计。当前 security/supply-chain current gate、release-provider smoke、runtime/model/audio `.local` 边界、hash/license/provenance fail-closed 已经是 `VS-MA-22` 的核心功能性安全证据；签名/公证 Release bundle、DSSE/SLSA provenance、Sigstore signing 和 all-target sidecar portability 更像 `VS-MA-23` release candidate 的输入产物。如果继续把这些真实 release artifacts 作为 `VS-MA-22` 退出前置，就会形成“没进 VS-MA-23 就要求 VS-MA-23 产物”的循环。后续应先把 `07-development-plan.md`、验证矩阵和 release gate 顺序对齐为：
@@ -29,7 +29,7 @@
 2. `VS-MA-23` 产出并校验真实签名/公证 bundle、bundle-bound provenance/signing、all-target sidecar portability 和最终 `release-preflight`。
 3. 如果产品 owner 明确要求 `VS-MA-22` 就必须产出真实 release bundle，则应承认 `VS-MA-22` 是 release rehearsal 阶段，并直接安排构建签名/公证和 provenance 产物，而不是继续修改 check 文字。
 
-因此当前最近的 `mixed_audio` extraction work 可以作为 `VS-MA-21` 的程序功能子切片保留，但它本身不 close `VS-MA-21`。下一步必须按上面的真实 app-bundle/TCC 和 same-chain 路线执行。
+因此当前最近的 `mixed_audio` extraction、compressed audio normalization 和 same-chain app-bundle entry work 可以作为 `VS-MA-21` 的程序功能子切片保留，但它们本身不 close `VS-MA-21`。下一步必须固定/授权同一个 app bundle 的 TCC 权限后重跑 same-chain 路线，并根据真实 `mixed_audio` 结果决定 screen-only 是否可接受或是否需要音频策略 ADR。
 
 ## 执行顺序
 

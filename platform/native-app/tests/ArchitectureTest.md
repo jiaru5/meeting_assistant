@@ -57,6 +57,14 @@ opt-in real native capture app-bundle smoke boundary:
 5. A passing app-bundle real capture smoke remains `partial` evidence and must not be reported as Release readiness, cross-machine TCC/display proof or independent audio proof. Production default Apple adapter selection must be guarded separately by app-root source-contract and architecture checks.
 6. When the opt-in smoke fails with `permission_denied`, the runner may print TCC Screen Recording / Screen & System Audio Recording remediation details, but it must preserve the failing exit status and must not convert the run into a skip or pass.
 
+VS-MA-21 opt-in real capture same-chain app-bundle smoke boundary:
+
+1. `AppBundleLocatorSmokeTests` may drive a single launched app-bundle smoke with real ScreenCaptureKit recording, provider-owned processing CLI, transcript review and transcript actions only when the test process is explicitly launched with `MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE=1`.
+2. This smoke may request system audio through the existing `capture_system_audio` command field so the Apple adapter can materialize an existing `mixed_audio` artifact from the combined recording; it must not request microphone audio until the native permission checker has a real microphone permission source.
+3. The smoke must use the same workspace/session for Start/Stop, processing, transcript review, copy/export and delete. It must fail if the real capture run does not produce `mixed_audio` as `available`; it must not copy fixture audio into the real capture session.
+4. The launched app must still call provider-owned `platform/e2e/ma-cli-local.sh` through `ProcessingCommandProcessRunner` and `TranscriptActionProcessRunner`; the UI test must not call provider commands directly to create transcript, export or delete results.
+5. A passing same-chain smoke remains explicit opt-in evidence. It does not prove independent `system_audio`/`microphone_audio` artifacts, all target-machine TCC/display repeatability, true user Save Panel interaction, release distribution bundle, or product-validation release readiness.
+
 VS-MA-16 native processing state consumer boundary:
 
 1. This component may express `generate_transcript` and `generate_speaker_labels` through Swift command request/response models, a production `Process` runner, deterministic fake client, processing state view model and SwiftUI status view.

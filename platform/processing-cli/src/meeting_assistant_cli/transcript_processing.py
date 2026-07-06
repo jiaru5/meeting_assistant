@@ -121,6 +121,8 @@ def _record_processing_failure(
 def _normalization_failure_code(code: str) -> str:
     if code in {"artifact_missing", "not_found"}:
         return "artifact_missing"
+    if code == "dependency_missing":
+        return "dependency_missing"
     if code in {"invalid_input", "path_conflict", "permission_denied"}:
         return code
     return "processing_failed"

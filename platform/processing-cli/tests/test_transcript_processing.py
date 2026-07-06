@@ -243,6 +243,23 @@ class TranscriptProcessingTests(unittest.TestCase):
         self.assertIn("local-no-audio", log_text)
         self.assertEqual(response["details"]["log_path"], str(session_dir / "logs" / "processing.log"))
 
+    def test_generate_transcript_preserves_normalization_dependency_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.m4a", b"m4a-bytes")])
+
+            with mock.patch.dict(os.environ, {"PATH": ""}, clear=False):
+                response = run_generate_transcript("session-1", workspace=workspace)
+
+            transcript_exists = (session_dir / "artifacts" / "transcript.json").exists()
+            normalized_exists = (session_dir / "artifacts" / "normalized_audio.wav").exists()
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "dependency_missing")
+        self.assertIn("FFmpeg", response["message"])
+        self.assertFalse(transcript_exists)
+        self.assertFalse(normalized_exists)
+
     def test_invalid_adapter_segments_return_processing_failed_without_artifact(self) -> None:
         def invalid_adapter(audio_path: Path, language: str | None, runtime: str | None) -> list[dict]:
             return [{"segment_id": "bad", "start_ms": 2000, "end_ms": 1000, "text": "bad"}]

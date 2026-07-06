@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import uuid
 import wave
 from datetime import datetime
@@ -34,6 +35,7 @@ from .workspace_contract import (
 
 AUDIO_SOURCE_PRIORITY = ("mixed_audio", "system_audio", "microphone_audio")
 USABLE_CAPTURE_STATUSES = {"available", "degraded"}
+TRANSCODABLE_AUDIO_SUFFIXES = {".m4a", ".mp3"}
 
 
 class AudioSource(NamedTuple):
@@ -255,9 +257,80 @@ def _ensure_wav_pcm(path: Path) -> None:
         )
 
 
-def _copy_normalizer(source: Path, destination: Path) -> None:
+def _copy_wav_normalizer(source: Path, destination: Path) -> None:
     _ensure_wav_pcm(source)
     shutil.copyfile(source, destination)
+
+
+def _ffmpeg_normalizer(source: Path, destination: Path) -> None:
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise ContractError(
+            "dependency_missing",
+            "FFmpeg executable was not found for audio normalization.",
+            tool="ffmpeg",
+        )
+
+    try:
+        result = subprocess.run(
+            [
+                ffmpeg,
+                "-y",
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(source),
+                "-acodec",
+                "pcm_s16le",
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                str(destination),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ContractError(
+            "processing_failed",
+            "Audio normalization timed out.",
+            tool="ffmpeg",
+        ) from exc
+    except OSError as exc:
+        raise ContractError(
+            "dependency_missing",
+            "FFmpeg executable was not available for audio normalization.",
+            tool="ffmpeg",
+        ) from exc
+
+    if result.returncode != 0:
+        raise ContractError(
+            "processing_failed",
+            "Audio normalization failed.",
+            tool="ffmpeg",
+            exit_code=result.returncode,
+        )
+    _ensure_wav_pcm(destination)
+
+
+def _default_normalizer(source: Path, destination: Path) -> None:
+    suffix = source.suffix.lower()
+    if suffix == ".wav":
+        _copy_wav_normalizer(source, destination)
+        return
+    if suffix in TRANSCODABLE_AUDIO_SUFFIXES:
+        _ffmpeg_normalizer(source, destination)
+        return
+    raise ContractError(
+        "processing_failed",
+        "Audio normalization adapter requires WAV/PCM bytes or a supported compressed audio input.",
+        source_format=suffix.removeprefix(".") or "unknown",
+    )
 
 
 def _remove_registered_artifact(session_dir: Path, artifact_id: str) -> None:
@@ -320,7 +393,7 @@ def run_audio_normalization(
                 if temp_path.exists():
                     temp_path.unlink()
 
-                selected_normalizer = normalizer or _copy_normalizer
+                selected_normalizer = normalizer or _default_normalizer
                 try:
                     selected_normalizer(source.path, temp_path)
                 except ContractError as exc:
