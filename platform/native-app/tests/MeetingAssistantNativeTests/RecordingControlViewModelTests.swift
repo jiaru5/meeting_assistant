@@ -121,8 +121,8 @@ struct RecordingControlViewModelTests {
         let startTask = Task {
             await viewModel.start()
         }
-        try? await Task.sleep(nanoseconds: 80_000_000)
 
+        #expect(await waitForRecordingPhase(.failed, in: viewModel))
         #expect(viewModel.state.phase == .failed)
         #expect(viewModel.state.statusText == "Recording failed.")
         #expect(viewModel.state.errorCode == .captureFailed)
@@ -276,6 +276,22 @@ private func dependencyCheck(
         ok: ok,
         message: "\(id) is \(status)."
     )
+}
+
+@MainActor
+private func waitForRecordingPhase(
+    _ phase: RecordingControlPhase,
+    in viewModel: RecordingControlViewModel,
+    attempts: Int = 100,
+    intervalNanoseconds: UInt64 = 10_000_000
+) async -> Bool {
+    for _ in 0..<attempts {
+        if viewModel.state.phase == phase {
+            return true
+        }
+        try? await Task.sleep(nanoseconds: intervalNanoseconds)
+    }
+    return viewModel.state.phase == phase
 }
 
 private actor HangingRecordingCommandClient: RecordingCommandClient {
