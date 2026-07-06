@@ -1002,15 +1002,21 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("ProcessingCLIDependencyCheckRunner(environment: environment)", app_source)
         self.assertIn("usesStaticDependencyFixture", app_source)
         self.assertIn("initialReadinessState", app_source)
+        self.assertIn("autoRefreshPreflightOnAppear", app_source)
+        self.assertIn("preflightWorkspaceURL: preflightWorkspaceURL", app_source)
         self.assertIn(".onChange(of: permissionViewModel.state)", shell_source)
         self.assertIn("recordingViewModel.updateReadiness(readiness)", shell_source)
         self.assertIn("processingViewModel.updateReadiness(readiness)", shell_source)
+        self.assertIn("await permissionViewModel.refresh(workspaceURL: preflightWorkspaceURL)", shell_source)
+        self.assertIn("autoRefreshPreflightIfNeeded", shell_source)
 
         self.assertIn("run-local-app.sh", architecture)
         self.assertIn("VS-MA-23 local-direct app run boundary", architecture_doc)
+        self.assertIn("auto-refresh Preflight once on first shell appearance", architecture_doc)
         self.assertIn("run-local-app.sh", dev_commands)
         self.assertIn("run-local-app.sh", e2e_readme)
         self.assertIn("local-direct app run", matrix)
+        self.assertIn("自动刷新 Preflight", matrix)
 
     def test_release_preflight_registers_release_bundle_gate_before_supply_chain(self) -> None:
         release_preflight = (ROOT / "scripts/release-preflight.sh").read_text(encoding="utf-8")

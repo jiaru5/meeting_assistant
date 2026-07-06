@@ -7,6 +7,9 @@ public struct DesignedNativeShellView: View {
     @ObservedObject private var processingViewModel: ProcessingStateViewModel
     @ObservedObject private var transcriptActionViewModel: TranscriptReviewActionsViewModel
     private let transcriptViewModel: TranscriptReviewViewModel
+    private let preflightWorkspaceURL: URL?
+    private let autoRefreshPreflightOnAppear: Bool
+    @State private var didAutoRefreshPreflight = false
 
     public init(
         shellViewModel: DesignedNativeShellViewModel,
@@ -14,7 +17,9 @@ public struct DesignedNativeShellView: View {
         recordingViewModel: RecordingControlViewModel,
         processingViewModel: ProcessingStateViewModel,
         transcriptViewModel: TranscriptReviewViewModel,
-        transcriptActionViewModel: TranscriptReviewActionsViewModel
+        transcriptActionViewModel: TranscriptReviewActionsViewModel,
+        preflightWorkspaceURL: URL? = nil,
+        autoRefreshPreflightOnAppear: Bool = false
     ) {
         self.shellViewModel = shellViewModel
         self.permissionViewModel = permissionViewModel
@@ -22,6 +27,8 @@ public struct DesignedNativeShellView: View {
         self.processingViewModel = processingViewModel
         self.transcriptViewModel = transcriptViewModel
         self.transcriptActionViewModel = transcriptActionViewModel
+        self.preflightWorkspaceURL = preflightWorkspaceURL
+        self.autoRefreshPreflightOnAppear = autoRefreshPreflightOnAppear
     }
 
     public var body: some View {
@@ -110,6 +117,19 @@ public struct DesignedNativeShellView: View {
             recordingViewModel.updateReadiness(readiness)
             processingViewModel.updateReadiness(readiness)
         }
+        .task {
+            await autoRefreshPreflightIfNeeded()
+        }
+    }
+
+    @MainActor
+    private func autoRefreshPreflightIfNeeded() async {
+        guard autoRefreshPreflightOnAppear, !didAutoRefreshPreflight else {
+            return
+        }
+
+        didAutoRefreshPreflight = true
+        await permissionViewModel.refresh(workspaceURL: preflightWorkspaceURL)
     }
 
     private var sidebar: some View {

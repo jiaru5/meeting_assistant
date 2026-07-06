@@ -145,7 +145,8 @@ VS-MA-23 local-direct app run boundary:
 2. The launcher must require user-provided `MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME` and `MEETING_ASSISTANT_TRANSCRIPTION_MODEL` by default, set `MEETING_ASSISTANT_CLI_PATH` to the provider-owned `platform/e2e/ma-cli-local.sh` bridge when not already configured, and pass `MA_NATIVE_PROCESSING_RUNTIME=whisper_cpp` / `MA_NATIVE_PROCESSING_LANGUAGE=zh` without downloading, copying or packaging runtime/model/audio assets.
 3. Non-XCTest app runtime must use `ProcessingCLIDependencyCheckRunner` for the Preflight panel; XCTest and app-bundle fixture paths may keep `StaticDependencyCheckRunner` so deterministic UI smoke remains isolated.
 4. The designed shell must propagate preflight readiness changes to `RecordingControlViewModel` and `ProcessingStateViewModel`, so a successful real `check_dependencies` run can enable the same app session's Start Recording and Start Processing controls.
-5. This launcher is local functional evidence only. It does not prove XCUITest Automation Mode, Developer ID signing, notarization, App Store distribution, all target-machine repeatability, real user Save Panel interaction or final product-validation release readiness.
+5. Non-XCTest app runtime may auto-refresh Preflight once on first shell appearance using the same workspace URL passed to recording, so the local-direct app can surface missing runtime/model/permission state before the user triggers recording or processing.
+6. This launcher is local functional evidence only. It does not prove XCUITest Automation Mode, Developer ID signing, notarization, App Store distribution, all target-machine repeatability, real user Save Panel interaction or final product-validation release readiness.
 
 VS-MA-22 opt-in real runtime native bridge smoke boundary:
 

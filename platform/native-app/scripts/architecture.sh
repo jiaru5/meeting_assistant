@@ -185,9 +185,12 @@ grep -R -q "MA_NATIVE_PROCESSING_RUNTIME" App/MeetingAssistantNativeApp.swift
 grep -R -q "ProcessingCLIDependencyCheckRunner(environment: environment)" App/MeetingAssistantNativeApp.swift
 grep -R -q "usesStaticDependencyFixture" App/MeetingAssistantNativeApp.swift
 grep -R -q "initialReadinessState" App/MeetingAssistantNativeApp.swift
+grep -R -q "autoRefreshPreflightOnAppear" App/MeetingAssistantNativeApp.swift Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -R -q "preflightWorkspaceURL" App/MeetingAssistantNativeApp.swift Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -R -q ".onChange(of: permissionViewModel.state)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -R -q "recordingViewModel.updateReadiness(readiness)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -R -q "processingViewModel.updateReadiness(readiness)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -R -q "await permissionViewModel.refresh(workspaceURL: preflightWorkspaceURL)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -q "release-bundle-create.py" scripts/run-local-app.sh
 grep -q "Contents/MacOS/MeetingAssistantNative" scripts/run-local-app.sh
 grep -q "MEETING_ASSISTANT_CLI_PATH" scripts/run-local-app.sh
