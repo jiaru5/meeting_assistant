@@ -77,6 +77,6 @@ fi
 echo "VS-MA-20 provider/e2e attribution [non-contract]: processing local command chain passed; this is not release readiness."
 echo "VS-MA-21 provider/e2e hardening [non-contract]: capture-style provider artifact, failure-redaction, retry, and checksum chain passed."
 echo "VS-MA-20 provider/e2e attribution [non-contract]: native read bridge and designed shell app-root smoke passed; this is not release readiness."
-echo "VS-MA-21/22 provider/e2e blocker reminder [non-contract]: product-validation release blockers remain authoritative; VS-MA-23 is not entered until partial PV rows close."
+echo "VS-MA-21/PV provider/e2e blocker reminder [non-contract]: product-validation release blockers remain authoritative; VS-MA-23 is not entered until VS-MA-21 and partial PV rows close."
 
 echo "full-stack e2e smoke passed."

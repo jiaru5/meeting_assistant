@@ -626,7 +626,7 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Release candidate requires VS-MA-14 through VS-MA-22", output)
             self.assertIn("VS-MA-21: partial evidence", output)
-            self.assertIn("VS-MA-22: partial evidence", output)
+            self.assertNotIn("VS-MA-22: partial evidence", output)
             self.assertNotIn("VS-MA-23: 未进入 release-scope", output)
 
     def test_vs_stage_release_passes_after_prerequisite_vs_rows_close(self) -> None:
@@ -661,7 +661,7 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Release candidate requires VS-MA-14 through VS-MA-22", output)
             self.assertIn("VS-MA-21: partial evidence", output)
-            self.assertIn("VS-MA-22: partial evidence", output)
+            self.assertNotIn("VS-MA-22: partial evidence", output)
             self.assertIn("release-preflight failed: VS-MA release prerequisites are not closed", output)
             self.assertNotIn("product validation release failed", output)
             self.assertTrue((fixture / ".harness/evidence/release/production-readiness.meta").is_file())
@@ -700,8 +700,8 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertNotIn("VS-MA-23 provider/e2e release readiness", script)
         self.assertNotIn("VS-MA-23 provider/e2e release-readiness summary", readme)
         self.assertIn("VS-MA-21 provider/e2e hardening", script)
-        self.assertIn("VS-MA-21/22 provider/e2e blocker reminder", script)
-        self.assertIn("VS-MA-23 is not entered until partial PV rows close", script)
+        self.assertIn("VS-MA-21/PV provider/e2e blocker reminder", script)
+        self.assertIn("VS-MA-23 is not entered until VS-MA-21 and partial PV rows close", script)
 
     def test_phase_preflight_exposes_native_capture_opt_in_as_partial_evidence(self) -> None:
         phase_preflight = (ROOT / "scripts/phase-preflight.sh").read_text(encoding="utf-8")
