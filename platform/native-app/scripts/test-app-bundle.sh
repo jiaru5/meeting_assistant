@@ -208,6 +208,114 @@ find_app_bundle_under_test() {
   find "$derived_data_path/Build/Products" -path "*/MeetingAssistantNative.app" -type d -print -quit 2>/dev/null || true
 }
 
+collect_matching_app_bundle_paths() {
+  local app_bundle_path="$1"
+  local info_plist
+  local bundle_id=""
+
+  info_plist="$app_bundle_path/Contents/Info.plist"
+  if [[ -f "$info_plist" ]]; then
+    bundle_id="$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$info_plist" 2>/dev/null || true)"
+  fi
+  if [[ -z "$bundle_id" ]]; then
+    return 0
+  fi
+
+  python3 - "$bundle_id" "$app_bundle_path" "$component_dir" <<'PY'
+import os
+import plistlib
+import sys
+
+bundle_id, app_bundle_path, component_dir = sys.argv[1:4]
+component_dir = os.path.realpath(component_dir)
+repo_root = os.path.realpath(os.path.join(component_dir, "../.."))
+develop_root = os.path.realpath(os.path.join(repo_root, ".."))
+roots = [
+    os.path.join(component_dir, "build", "DerivedData"),
+    os.path.expanduser("~/Library/Developer/Xcode/DerivedData"),
+]
+
+try:
+    for name in os.listdir(develop_root):
+        if name == "meeting_assistant" or name.startswith("meeting_assistant-"):
+            roots.append(os.path.join(develop_root, name, "platform", "native-app", "build", "DerivedData"))
+except OSError:
+    pass
+
+matches = {os.path.realpath(app_bundle_path)}
+for root in roots:
+    if not os.path.isdir(root):
+        continue
+    for dirpath, dirnames, _filenames in os.walk(root):
+        dirnames[:] = [
+            name for name in dirnames
+            if name not in {".git", ".build", "node_modules", "ModuleCache.noindex", "SDKStatCaches.noindex"}
+        ]
+        if "MeetingAssistantNative.app" not in dirnames:
+            continue
+        candidate = os.path.realpath(os.path.join(dirpath, "MeetingAssistantNative.app"))
+        plist_path = os.path.join(candidate, "Contents", "Info.plist")
+        try:
+            with open(plist_path, "rb") as handle:
+                plist = plistlib.load(handle)
+        except Exception:
+            continue
+        if plist.get("CFBundleIdentifier") == bundle_id:
+            matches.add(candidate)
+
+for match in sorted(matches):
+    print(match)
+PY
+}
+
+print_app_bundle_tcc_identity_diagnostics() {
+  local app_bundle_path="$1"
+  local smoke_name="$2"
+  local codesign_details=""
+  local designated_requirement=""
+  local signature=""
+  local team_identifier=""
+  local cdhash=""
+  local matching_paths=""
+  local other_paths=""
+  local other_count="0"
+
+  if [[ -z "$app_bundle_path" || ! -d "$app_bundle_path" ]]; then
+    return 0
+  fi
+
+  codesign_details="$(codesign -dv "$app_bundle_path" 2>&1 || true)"
+  designated_requirement="$(codesign -dr - "$app_bundle_path" 2>&1 | grep -m 1 "designated =>" || true)"
+  signature="$(printf '%s\n' "$codesign_details" | sed -n 's/^Signature=//p' | head -n 1)"
+  team_identifier="$(printf '%s\n' "$codesign_details" | sed -n 's/^TeamIdentifier=//p' | head -n 1)"
+  cdhash="$(printf '%s\n' "$designated_requirement" | sed -n 's/.*cdhash H"\([^"]*\)".*/\1/p' | head -n 1)"
+  matching_paths="$(collect_matching_app_bundle_paths "$app_bundle_path" || true)"
+  other_paths="$(printf '%s\n' "$matching_paths" | grep -F -x -v "$(cd "$(dirname "$app_bundle_path")" && pwd -P)/$(basename "$app_bundle_path")" | sed '/^$/d' || true)"
+  other_count="$(printf '%s\n' "$other_paths" | sed '/^$/d' | wc -l | tr -d ' ')"
+
+  if [[ "$signature" != "adhoc" && -n "$team_identifier" && "$team_identifier" != "not set" && "$other_count" == "0" ]]; then
+    return 0
+  fi
+
+  {
+    echo
+    echo "TCC/app bundle identity diagnostic for ${smoke_name} app-bundle XCUITest:"
+    echo " - app bundle under test: $app_bundle_path"
+    echo " - signature: ${signature:-unknown}"
+    echo " - team identifier: ${team_identifier:-unknown}"
+    echo " - cdhash: ${cdhash:-unknown}"
+    if [[ "$signature" == "adhoc" || -z "$team_identifier" || "$team_identifier" == "not set" ]]; then
+      echo " - current Debug app bundle is not signed with a stable Apple team identity; macOS Screen Recording TCC can bind the grant to this build's path/cdhash, so rebuilding may require a new grant even when System Settings shows another MeetingAssistantNative row."
+      echo " - for same-bundle reruns, prefer MA_NATIVE_APP_REUSE_XCTESTRUN=1; for durable cross-machine evidence, use a stable Apple Development or Developer ID signing identity."
+    fi
+    if [[ "$other_count" != "0" ]]; then
+      echo " - other MeetingAssistantNative.app bundles with the same CFBundleIdentifier were found; System Settings can show the same app name while the grant belongs to a different path:"
+      printf '%s\n' "$other_paths" | sed 's/^/   * /'
+    fi
+    echo " - set MA_NATIVE_APP_TCC_IDENTITY_DIAGNOSTICS=0 to suppress this diagnostic."
+  } >&2
+}
+
 terminate_stale_meeting_assistant_instances() {
   local app_bundle_path="$1"
   local smoke_name="$2"
@@ -448,6 +556,9 @@ run_app_bundle_test_without_building() {
 
   app_bundle_path="$(find_app_bundle_under_test)"
   terminate_stale_meeting_assistant_instances "$app_bundle_path" "$smoke_name"
+  if is_truthy "${MA_NATIVE_APP_TCC_IDENTITY_DIAGNOSTICS:-1}"; then
+    print_app_bundle_tcc_identity_diagnostics "$app_bundle_path" "$smoke_name"
+  fi
 
   : > "$log_path"
 
