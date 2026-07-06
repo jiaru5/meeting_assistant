@@ -103,7 +103,12 @@ class ReleaseNativeUIHardeningReportTests(unittest.TestCase):
             real_capture_output, hardening_output, report_path = self.write_outputs(directory)
             real_capture_output.write_text(
                 real_capture_output.read_text(encoding="utf-8")
-                + "Native capture permissions are denied or unknown. Error code: permission_denied\n",
+                + "Native capture permissions are denied or unknown. Error code: permission_denied\n"
+                + f"DerivedData path: {directory}/DerivedData/AppBundleUITests\n"
+                + f"App bundle under test: {directory}/DerivedData/AppBundleUITests/Build/Products/Debug/MeetingAssistantNative.app\n"
+                + f"Captured xcodebuild log: {directory}/DerivedData/AppBundleUITests/real-capture-app-bundle-smoke.log\n"
+                + "Test session results, code coverage, and logs:\n"
+                + f"\t{directory}/DerivedData/Xcode/Logs/Test/Test-MeetingAssistantNative.xcresult\n",
                 encoding="utf-8",
             )
 
@@ -121,6 +126,21 @@ class ReleaseNativeUIHardeningReportTests(unittest.TestCase):
             self.assertEqual(report["blocker_type"], "real_capture_permission_denied")
             self.assertTrue(report["real_capture_permission_denied"])
             self.assertEqual(report["real_capture_exit_code"], 65)
+            self.assertEqual(report["real_capture_derived_data_path"], f"{directory}/DerivedData/AppBundleUITests")
+            self.assertEqual(
+                report["real_capture_app_bundle_under_test"],
+                f"{directory}/DerivedData/AppBundleUITests/Build/Products/Debug/MeetingAssistantNative.app",
+            )
+            self.assertEqual(
+                report["real_capture_xcodebuild_log_path"],
+                f"{directory}/DerivedData/AppBundleUITests/real-capture-app-bundle-smoke.log",
+            )
+            self.assertEqual(
+                report["real_capture_xcresult_path"],
+                f"{directory}/DerivedData/Xcode/Logs/Test/Test-MeetingAssistantNative.xcresult",
+            )
+            self.assertTrue(report["real_capture_tcc_remediation"])
+            self.assertIn("Screen Recording", report["real_capture_tcc_remediation"][0])
             self.assertIn("real capture app-bundle smoke exited 65", report["findings"])
 
     def test_cli_writes_release_scope_report_and_marker(self) -> None:

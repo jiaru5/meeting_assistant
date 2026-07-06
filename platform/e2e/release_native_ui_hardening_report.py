@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -26,11 +27,35 @@ RELEASE_SCOPE_RESIDUAL_RISKS = [
     "does not prove release bundle, signing, notarization, SLSA provenance, or VS-MA-23 release readiness",
 ]
 
+TCC_REMEDIATION = [
+    "Open System Settings > Privacy & Security > Screen Recording / Screen & System Audio Recording.",
+    "Enable MeetingAssistantNative for the app bundle recorded in real_capture_app_bundle_under_test.",
+    "Quit and relaunch the app if macOS asks, then rerun the same release native UI hardening gate.",
+    'Optional shortcut: open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"',
+]
+
 
 def _read_text(path: Path) -> str:
     if not path.is_file():
         return ""
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def _extract_line_value(text: str, label: str) -> str | None:
+    match = re.search(rf"^{re.escape(label)}:\s*(.+)$", text, re.MULTILINE)
+    if not match:
+        return None
+    value = match.group(1).strip()
+    if not value or value.startswith("not found"):
+        return None
+    return value
+
+
+def _extract_xcresult_path(text: str) -> str | None:
+    match = re.search(r"Test session results, code coverage, and logs:\n\s*(.+?\.xcresult)", text)
+    if not match:
+        return None
+    return match.group(1).strip()
 
 
 def build_report(
@@ -45,6 +70,10 @@ def build_report(
     real_capture_output = _read_text(real_capture_output_path)
     hardening_output = _read_text(hardening_output_path)
     combined_output = real_capture_output + "\n" + hardening_output
+    real_capture_derived_data_path = _extract_line_value(real_capture_output, "DerivedData path")
+    real_capture_app_bundle_under_test = _extract_line_value(real_capture_output, "App bundle under test")
+    real_capture_xcodebuild_log_path = _extract_line_value(real_capture_output, "Captured xcodebuild log")
+    real_capture_xcresult_path = _extract_xcresult_path(real_capture_output)
     marker_sources = {
         "real_capture_pass_marker": real_capture_output,
         "real_capture_test_name": real_capture_output,
@@ -112,10 +141,15 @@ def build_report(
         "hardening_output_path": str(hardening_output_path),
         "real_capture_exit_code": real_capture_exit_code,
         "hardening_exit_code": hardening_exit_code,
+        "real_capture_derived_data_path": real_capture_derived_data_path,
+        "real_capture_app_bundle_under_test": real_capture_app_bundle_under_test,
+        "real_capture_xcodebuild_log_path": real_capture_xcodebuild_log_path,
+        "real_capture_xcresult_path": real_capture_xcresult_path,
         "passed": passed,
         "blocked": not passed,
         "blocker_type": blocker_type,
         "real_capture_permission_denied": real_capture_permission_denied,
+        "real_capture_tcc_remediation": TCC_REMEDIATION if real_capture_permission_denied else [],
         "ui_automation_blocked": ui_automation_blocked,
         "marker_results": marker_results,
         "missing_markers": missing_markers,
