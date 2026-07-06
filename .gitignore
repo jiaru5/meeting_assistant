@@ -6,6 +6,7 @@ __pycache__/
 
 .harness/evidence/
 .harness/release-inputs/
+.harness/release-build/
 
 .env
 .env.*

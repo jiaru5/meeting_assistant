@@ -22,6 +22,7 @@
 | Speaker labeling | 本地 best-effort 匿名 speaker labeling；无可用引擎时降级 transcript-only | confirmed |
 | 纪要生成 | 非 MVP 必需；用户可手动复制 transcript 到 GPT | confirmed |
 | UI 交互面 | 设计化 Swift/SwiftUI native app shell + local helper / processing CLI；原始调试 UI 只作为中间形态 | confirmed |
+| 本机安装候选 | VS-MA-23 当前验证本机直接安装的 Release `.app`，允许 local/ad-hoc signing；Developer ID、notarization、自动更新和商业化分发属于未来产品化分发 | confirmed |
 | 数据存储 | 本地文件和元数据，不要求远程数据库 | confirmed |
 | Cloud/API | MVP 应用不自动调用外部模型 API | confirmed for MVP boundary |
 
@@ -200,7 +201,7 @@ VS-MA-06 的目标是在不破坏 fake adapter 契约的前提下，接入或准
 1. 本地配置不得包含真实 secret。
 2. 会议 workspace 默认使用 `~/Movies/MeetingAssistant/`。
 3. 依赖路径、模型路径和 workspace 路径应可配置。
-4. 产品化发布或商业化分发前必须重新审查签名、公证、自动更新、许可证和数据策略。
+4. 当前 VS-MA-23 只验证本机直接安装的 Release `.app`、本地签名、digest、no-runtime/model/no-meeting-data 和本机门禁；产品化发布或商业化分发前必须重新审查 Developer ID 签名、公证、自动更新、许可证和数据策略。
 
 ## Activation 骨架边界
 

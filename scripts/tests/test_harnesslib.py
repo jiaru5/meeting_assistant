@@ -238,6 +238,13 @@ class HarnessValidationTests(unittest.TestCase):
                         "artifact_type": "macos-app-archive",
                         "archive_format": "zip",
                         "app_bundle": "MeetingAssistantNative.app",
+                        "build_configuration": "Release",
+                        "code_signed": True,
+                        "distribution_mode": "developer-id",
+                        "install_method": "developer-id-zip",
+                        "packages_runtime_or_model": False,
+                        "auto_downloads": False,
+                        "contains_meeting_data": False,
                         "digest": digest,
                     },
                 }
@@ -1492,7 +1499,7 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertIn("must report zero findings", output)
             self.assertNotIn("supply-chain-check passed: phase=current", result.stdout)
 
-    def test_supply_chain_release_fails_without_release_bundle_provenance_signature_and_sidecar_reports(self) -> None:
+    def test_supply_chain_local_direct_release_fails_without_bundle_report(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
             command = self.supply_chain_report_command()
@@ -1505,6 +1512,37 @@ class HarnessValidationTests(unittest.TestCase):
             result = subprocess.run(
                 [str(fixture / "scripts/supply-chain-check.sh"), "release"],
                 cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("release supply-chain local-direct bundle evidence failed", output)
+            self.assertIn("release bundle report is required", output)
+            self.assertNotIn("release provenance report is required", output)
+            self.assertNotIn("release signature report is required", output)
+            self.assertNotIn("release sidecar report is required", output)
+            self.assertNotIn("supply-chain-check passed: phase=release", result.stdout)
+
+    def test_supply_chain_developer_id_release_fails_without_release_bundle_provenance_signature_and_sidecar_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            command = self.supply_chain_report_command()
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["sbom"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            env = os.environ.copy()
+            env["MEETING_ASSISTANT_RELEASE_DISTRIBUTION_MODE"] = "developer-id"
+
+            result = subprocess.run(
+                [str(fixture / "scripts/supply-chain-check.sh"), "release"],
+                cwd=fixture,
+                env=env,
                 capture_output=True,
                 text=True,
                 check=False,
@@ -1555,6 +1593,98 @@ class HarnessValidationTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
             self.assertIn("release supply-chain bundle/provenance/signing/sidecar evidence passed", result.stdout)
+            self.assertIn("supply-chain-check passed: phase=release", result.stdout)
+
+    def test_supply_chain_local_direct_release_accepts_bundle_without_distribution_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=fixture, text=True).strip()
+            command = self.supply_chain_report_command()
+            manifest_path = fixture / "harness/project-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for component in manifest["components"]:
+                component["commands"]["sbom"] = command
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            reports_dir = fixture / ".harness/release-inputs/bundle"
+            reports_dir.mkdir(parents=True)
+            bundle_path = reports_dir / "MeetingAssistantNative-LocalDirect.zip"
+            app_root = reports_dir / "fixture-app" / "MeetingAssistantNative.app"
+            contents = app_root / "Contents"
+            macos = contents / "MacOS"
+            macos.mkdir(parents=True)
+            (contents / "Info.plist").write_text(
+                (
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                    "<plist version=\"1.0\"><dict>"
+                    "<key>CFBundleExecutable</key><string>MeetingAssistantNative</string>"
+                    "<key>CFBundleIdentifier</key><string>local.meeting-assistant.native</string>"
+                    "<key>CFBundleName</key><string>MeetingAssistantNative</string>"
+                    "<key>CFBundlePackageType</key><string>APPL</string>"
+                    "</dict></plist>\n"
+                ),
+                encoding="utf-8",
+            )
+            executable = macos / "MeetingAssistantNative"
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o755)
+            subprocess.run(
+                ["/usr/bin/codesign", "--force", "--deep", "--sign", "-", str(app_root)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(
+                ["/usr/bin/ditto", "-c", "-k", "--keepParent", "--norsrc", str(app_root), str(bundle_path)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            digest = "sha256:" + hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+            report_path = reports_dir / "release-bundle-report.json"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "report_schema": 1,
+                        "release_gate": "release-bundle",
+                        "subject_commit": head,
+                        "builder": "local-release-rehearsal",
+                        "source_repository": "example/meeting_assistant",
+                        "bundle": {
+                            "name": bundle_path.name,
+                            "path": str(bundle_path.relative_to(fixture)),
+                            "digest": digest,
+                            "artifact_type": "macos-app-archive",
+                            "archive_format": "zip",
+                            "app_bundle": "MeetingAssistantNative.app",
+                            "build_configuration": "Release",
+                            "code_signed": True,
+                            "distribution_mode": "local-direct",
+                            "install_method": "direct-local-app",
+                            "signing_identity": "ad-hoc-local",
+                            "notarized": False,
+                            "notarization_ticket": "not-applicable",
+                            "stapled": False,
+                            "packages_runtime_or_model": False,
+                            "auto_downloads": False,
+                            "contains_meeting_data": False,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [str(fixture / "scripts/supply-chain-check.sh"), "release"],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("release supply-chain local-direct bundle evidence passed", result.stdout)
             self.assertIn("supply-chain-check passed: phase=release", result.stdout)
 
     def test_supply_chain_release_rejects_provenance_or_signature_for_different_bundle_digest(self) -> None:
@@ -1846,6 +1976,91 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertIn("release bundle report is required", output)
             self.assertNotIn("release-bundle-check passed", result.stdout)
 
+    def test_release_bundle_check_accepts_local_direct_ad_hoc_zip_archive_report(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=fixture, text=True).strip()
+            reports_dir = fixture / ".harness/release-inputs/bundle"
+            reports_dir.mkdir(parents=True)
+            bundle_path = reports_dir / "MeetingAssistantNative-LocalDirect.zip"
+            app_root = reports_dir / "fixture-app" / "MeetingAssistantNative.app"
+            contents = app_root / "Contents"
+            macos = contents / "MacOS"
+            macos.mkdir(parents=True)
+            (contents / "Info.plist").write_text(
+                (
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                    "<plist version=\"1.0\"><dict>"
+                    "<key>CFBundleExecutable</key><string>MeetingAssistantNative</string>"
+                    "<key>CFBundleIdentifier</key><string>local.meeting-assistant.native</string>"
+                    "<key>CFBundleName</key><string>MeetingAssistantNative</string>"
+                    "<key>CFBundlePackageType</key><string>APPL</string>"
+                    "</dict></plist>\n"
+                ),
+                encoding="utf-8",
+            )
+            executable = macos / "MeetingAssistantNative"
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o755)
+            subprocess.run(
+                ["/usr/bin/codesign", "--force", "--deep", "--sign", "-", str(app_root)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(
+                ["/usr/bin/ditto", "-c", "-k", "--keepParent", "--norsrc", str(app_root), str(bundle_path)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            digest = "sha256:" + hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+            report_path = reports_dir / "release-bundle-report.json"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "report_schema": 1,
+                        "release_gate": "release-bundle",
+                        "subject_commit": head,
+                        "builder": "local-release-rehearsal",
+                        "source_repository": "example/meeting_assistant",
+                        "bundle": {
+                            "name": bundle_path.name,
+                            "path": str(bundle_path.relative_to(fixture)),
+                            "digest": digest,
+                            "artifact_type": "macos-app-archive",
+                            "archive_format": "zip",
+                            "app_bundle": "MeetingAssistantNative.app",
+                            "build_configuration": "Release",
+                            "code_signed": True,
+                            "distribution_mode": "local-direct",
+                            "install_method": "direct-local-app",
+                            "signing_identity": "ad-hoc-local",
+                            "notarized": False,
+                            "notarization_ticket": "not-applicable",
+                            "stapled": False,
+                            "packages_runtime_or_model": False,
+                            "auto_downloads": False,
+                            "contains_meeting_data": False,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [str(fixture / "scripts/release-bundle-check.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("release bundle evidence passed", result.stdout)
+            self.assertIn("release-bundle-check passed", result.stdout)
+
     def test_release_bundle_check_rejects_unsigned_unstapled_zip_archive_report(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)
@@ -1887,6 +2102,8 @@ class HarnessValidationTests(unittest.TestCase):
                             "app_bundle": "MeetingAssistantNative.app",
                             "build_configuration": "Release",
                             "code_signed": True,
+                            "distribution_mode": "developer-id",
+                            "install_method": "developer-id-zip",
                             "signing_identity": "Developer ID Application",
                             "notarized": True,
                             "notarization_ticket": "ticket-id",

@@ -14,6 +14,7 @@ from typing import Any
 
 APP_BUNDLE_NAME = "MeetingAssistantNative.app"
 DEFAULT_IDENTITY_PATTERN = "Developer ID Application:"
+DEFAULT_DISTRIBUTION_MODE = "local-direct"
 DEFAULT_DERIVED_DATA = ".harness/release-build/native-app/DerivedData"
 DEFAULT_NOTARY_ARCHIVE = ".harness/release-build/native-app/MeetingAssistantNative-for-notary.zip"
 DEFAULT_RELEASE_ARCHIVE = ".harness/release-inputs/bundle/MeetingAssistantNative-Release.zip"
@@ -146,6 +147,7 @@ def build_release_app(
     derived_data_path: Path,
     signing_identity: str,
     development_team: str | None,
+    timestamp: bool,
 ) -> Path:
     command = [
         "xcodebuild",
@@ -162,8 +164,9 @@ def build_release_app(
         str(derived_data_path),
         "CODE_SIGN_STYLE=Manual",
         f"CODE_SIGN_IDENTITY={signing_identity}",
-        "OTHER_CODE_SIGN_FLAGS=--timestamp",
     ]
+    if timestamp:
+        command.append("OTHER_CODE_SIGN_FLAGS=--timestamp")
     if development_team is not None and development_team.strip():
         command.append(f"DEVELOPMENT_TEAM={development_team.strip()}")
 
@@ -176,7 +179,11 @@ def build_release_app(
     return app_path
 
 
-def verify_signed_app(app_path: Path, signing_identity: str) -> None:
+def is_ad_hoc_identity(value: str) -> bool:
+    return value.strip().lower() in {"-", "adhoc", "ad-hoc", "ad-hoc-local"}
+
+
+def verify_signed_app(app_path: Path, signing_identity: str, *, allow_ad_hoc: bool) -> str:
     run_command(
         ["/usr/bin/codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app_path)],
         "codesign verify",
@@ -185,17 +192,21 @@ def verify_signed_app(app_path: Path, signing_identity: str) -> None:
         ["/usr/bin/codesign", "-dv", "--verbose=4", str(app_path)],
         "codesign details",
     )
-    if "Signature=adhoc" in codesign_details:
+    is_ad_hoc_signature = "flags=0x2(adhoc)" in codesign_details or "Signature=adhoc" in codesign_details
+    if is_ad_hoc_signature and not allow_ad_hoc:
         raise ReleaseBundleError("release app must not be ad-hoc signed")
-    if signing_identity not in codesign_details:
+    if not is_ad_hoc_identity(signing_identity) and signing_identity not in codesign_details:
         raise ReleaseBundleError("release app codesign details must include the selected signing identity")
+    if is_ad_hoc_signature:
+        return "ad-hoc-local"
+    return signing_identity
 
 
 def create_zip_archive(app_path: Path, archive_path: Path, label: str) -> None:
     archive_path.parent.mkdir(parents=True, exist_ok=True)
     unlink_existing_file(archive_path)
     run_command(
-        ["/usr/bin/ditto", "-c", "-k", "--keepParent", str(app_path), str(archive_path)],
+        ["/usr/bin/ditto", "-c", "-k", "--keepParent", "--norsrc", str(app_path), str(archive_path)],
         label,
     )
     if not archive_path.is_file():
@@ -256,8 +267,11 @@ def build_bundle_report(
     builder: str,
     source_repository_value: str,
     release_archive: Path,
+    distribution_mode: str,
     signing_identity: str,
     notarization_ticket: str,
+    notarized: bool,
+    stapled: bool,
 ) -> dict[str, Any]:
     return {
         "report_schema": 1,
@@ -274,10 +288,12 @@ def build_bundle_report(
             "app_bundle": APP_BUNDLE_NAME,
             "build_configuration": "Release",
             "code_signed": True,
+            "distribution_mode": distribution_mode,
+            "install_method": "direct-local-app" if distribution_mode == "local-direct" else "developer-id-zip",
             "signing_identity": signing_identity,
-            "notarized": True,
+            "notarized": notarized,
             "notarization_ticket": notarization_ticket,
-            "stapled": True,
+            "stapled": stapled,
             "packages_runtime_or_model": False,
             "auto_downloads": False,
             "contains_meeting_data": False,
@@ -292,14 +308,25 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def create_release_bundle(args: argparse.Namespace) -> dict[str, Any]:
     root = resolve_path(repo_root_from_script(), args.root)
-    signing_identity = require_non_empty(args.signing_identity, "release signing identity")
-    identity_pattern = require_non_empty(args.identity_pattern, "release signing identity pattern")
-    notary_profile = require_non_empty(args.notary_profile, "notarytool keychain profile")
+    distribution_mode = require_non_empty(args.distribution_mode, "distribution mode")
+    if distribution_mode not in {"local-direct", "developer-id"}:
+        raise ReleaseBundleError("distribution mode must be 'local-direct' or 'developer-id'")
     builder = require_non_empty(args.builder, "builder")
     source_repo = source_repository(root, args.source_repository)
 
-    require_release_identity(signing_identity, identity_pattern)
-    check_release_credentials(root, signing_identity)
+    if distribution_mode == "developer-id":
+        signing_identity = require_non_empty(args.signing_identity, "release signing identity")
+        identity_pattern = require_non_empty(args.identity_pattern, "release signing identity pattern")
+        notary_profile = require_non_empty(args.notary_profile, "notarytool keychain profile")
+        require_release_identity(signing_identity, identity_pattern)
+        check_release_credentials(root, signing_identity)
+        xcode_signing_identity = signing_identity
+        timestamp = True
+    else:
+        signing_identity = "ad-hoc-local"
+        notary_profile = None
+        xcode_signing_identity = "-"
+        timestamp = False
 
     project = resolve_path(root, args.project)
     derived_data_path = resolve_path(root, args.derived_data_path)
@@ -313,11 +340,26 @@ def create_release_bundle(args: argparse.Namespace) -> dict[str, Any]:
         scheme=args.scheme,
         destination=args.destination,
         derived_data_path=derived_data_path,
-        signing_identity=signing_identity,
+        signing_identity=xcode_signing_identity,
         development_team=args.development_team,
+        timestamp=timestamp,
     )
-    verify_signed_app(app_path, signing_identity)
-    submission_id = notarize_and_staple(app_path, notary_archive, notary_profile)
+    detected_identity = verify_signed_app(
+        app_path,
+        xcode_signing_identity,
+        allow_ad_hoc=(distribution_mode == "local-direct"),
+    )
+    if distribution_mode == "developer-id":
+        if notary_profile is None:
+            raise ReleaseBundleError("notarytool keychain profile is required")
+        submission_id = notarize_and_staple(app_path, notary_archive, notary_profile)
+        notarized = True
+        stapled = True
+    else:
+        signing_identity = detected_identity
+        submission_id = "not-applicable"
+        notarized = False
+        stapled = False
     create_zip_archive(app_path, release_archive, "release archive")
 
     report = build_bundle_report(
@@ -325,8 +367,11 @@ def create_release_bundle(args: argparse.Namespace) -> dict[str, Any]:
         builder=builder,
         source_repository_value=source_repo,
         release_archive=release_archive,
+        distribution_mode=distribution_mode,
         signing_identity=signing_identity,
         notarization_ticket=submission_id,
+        notarized=notarized,
+        stapled=stapled,
     )
     write_json(bundle_report_path, report)
 
@@ -337,18 +382,24 @@ def create_release_bundle(args: argparse.Namespace) -> dict[str, Any]:
 
     print(f"release archive: {release_archive}")
     print(f"release bundle report: {bundle_report_path}")
-    print(
-        "VS-MA-23 release bundle produced [non-bypass]: "
-        "generate DSSE/SLSA and Sigstore inputs, then run release-inputs-report.py and release-preflight.sh"
-    )
+    if distribution_mode == "developer-id":
+        print(
+            "VS-MA-23 developer-id release bundle produced [non-bypass]: "
+            "generate DSSE/SLSA and Sigstore inputs, then run release-inputs-report.py and release-preflight.sh"
+        )
+    else:
+        print(
+            "VS-MA-23 local-direct release bundle produced: "
+            "install the Release app locally; Developer ID, notarization, and Sigstore inputs are future distribution gates"
+        )
     return report
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Build, Developer ID sign, notarize, staple, zip, and report the "
-            "MeetingAssistantNative Release app bundle."
+            "Build, locally sign, zip, and report the MeetingAssistantNative Release app bundle. "
+            "Use --distribution-mode developer-id for signed/notarized distribution rehearsal."
         )
     )
     parser.add_argument("--root", default=str(repo_root_from_script()))
@@ -366,6 +417,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--notary-archive", default=DEFAULT_NOTARY_ARCHIVE)
     parser.add_argument("--output", default=DEFAULT_RELEASE_ARCHIVE)
     parser.add_argument("--report", default=DEFAULT_BUNDLE_REPORT)
+    parser.add_argument(
+        "--distribution-mode",
+        choices=("local-direct", "developer-id"),
+        default=env_default("MEETING_ASSISTANT_RELEASE_DISTRIBUTION_MODE") or DEFAULT_DISTRIBUTION_MODE,
+        help="local-direct builds a local install RC without Developer ID/notary; developer-id keeps the signed/notarized distribution path.",
+    )
     parser.add_argument(
         "--signing-identity",
         default=env_default("MEETING_ASSISTANT_RELEASE_SIGNING_IDENTITY"),

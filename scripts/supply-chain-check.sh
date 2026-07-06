@@ -236,6 +236,13 @@ def require_sha256_digest(value: Any, label: str) -> str | None:
     return value.lower()
 
 
+def normalized_distribution_mode(value: Any, *, label: str) -> str | None:
+    if not isinstance(value, str) or value not in {"local-direct", "developer-id"}:
+        failures.append(f"{label} must set distribution_mode to 'local-direct' or 'developer-id'")
+        return None
+    return value
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -436,9 +443,10 @@ def validate_sidecar_target_smoke_report(
                 failures.append(f"{label} smoke_report smoke must set {key}=True")
 
 
-def validate_release_bundle_report(report: dict[str, Any], head: str | None) -> tuple[str | None, set[str]]:
+def validate_release_bundle_report(report: dict[str, Any], head: str | None) -> tuple[str | None, set[str], str | None]:
     bundle_digest: str | None = None
     bundle_names: set[str] = set()
+    distribution_mode: str | None = None
     require_equal(report, "report_schema", 1, "release bundle")
     require_equal(report, "release_gate", "release-bundle", "release bundle")
     if head is not None:
@@ -449,7 +457,7 @@ def validate_release_bundle_report(report: dict[str, Any], head: str | None) -> 
     bundle = report.get("bundle")
     if not isinstance(bundle, dict):
         failures.append("release bundle report must include a bundle object")
-        return bundle_digest, bundle_names
+        return bundle_digest, bundle_names, distribution_mode
 
     bundle_name = bundle.get("name")
     if isinstance(bundle_name, str) and bundle_name:
@@ -462,8 +470,14 @@ def validate_release_bundle_report(report: dict[str, Any], head: str | None) -> 
     require_equal(bundle, "artifact_type", "macos-app-archive", "release bundle")
     require_equal(bundle, "archive_format", "zip", "release bundle")
     require_equal(bundle, "app_bundle", "MeetingAssistantNative.app", "release bundle")
+    distribution_mode = normalized_distribution_mode(bundle.get("distribution_mode"), label="release bundle")
+    require_equal(bundle, "build_configuration", "Release", "release bundle")
+    require_equal(bundle, "code_signed", True, "release bundle")
+    require_equal(bundle, "packages_runtime_or_model", False, "release bundle")
+    require_equal(bundle, "auto_downloads", False, "release bundle")
+    require_equal(bundle, "contains_meeting_data", False, "release bundle")
     bundle_digest = require_sha256_digest(bundle.get("digest"), "release bundle digest")
-    return bundle_digest, bundle_names
+    return bundle_digest, bundle_names, distribution_mode
 
 
 def find_release_bundle_artifact(artifacts: Any, digest: str, names: set[str]) -> dict[str, Any] | None:
@@ -541,14 +555,42 @@ sidecar_path = resolve_evidence_path(
 
 head = current_commit()
 bundle_report = load_report(bundle_report_path, "release bundle")
-provenance = load_report(provenance_path, "release provenance")
-signature = load_report(signature_path, "release signature")
-sidecar = load_report(sidecar_path, "release sidecar")
 
 release_bundle_digest: str | None = None
 release_bundle_names: set[str] = set()
+distribution_mode = os.environ.get("MEETING_ASSISTANT_RELEASE_DISTRIBUTION_MODE", "").strip() or None
 if bundle_report is not None:
-    release_bundle_digest, release_bundle_names = validate_release_bundle_report(bundle_report, head)
+    release_bundle_digest, release_bundle_names, report_distribution_mode = validate_release_bundle_report(
+        bundle_report,
+        head,
+    )
+    if report_distribution_mode is not None:
+        if distribution_mode is not None and distribution_mode != report_distribution_mode:
+            failures.append(
+                "release bundle report distribution_mode must match "
+                "MEETING_ASSISTANT_RELEASE_DISTRIBUTION_MODE"
+            )
+        distribution_mode = report_distribution_mode
+
+if distribution_mode is None:
+    distribution_mode = "local-direct"
+
+if distribution_mode == "local-direct":
+    if failures:
+        print("release supply-chain local-direct bundle evidence failed:", file=sys.stderr)
+        for failure in failures:
+            print(f" - {failure}", file=sys.stderr)
+        raise SystemExit(1)
+
+    print("release supply-chain local-direct bundle evidence passed.")
+    raise SystemExit(0)
+
+if distribution_mode != "developer-id":
+    failures.append("release supply-chain distribution mode must be 'local-direct' or 'developer-id'")
+
+provenance = load_report(provenance_path, "release provenance")
+signature = load_report(signature_path, "release signature")
+sidecar = load_report(sidecar_path, "release sidecar")
 
 if provenance is not None:
     require_equal(provenance, "report_schema", 1, "release provenance")

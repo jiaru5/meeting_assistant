@@ -75,6 +75,13 @@ def require_non_empty_string(report: dict[str, Any], key: str, label: str) -> No
         failures.append(f"{label} must set non-empty {key}")
 
 
+def normalized_distribution_mode(value: Any) -> str | None:
+    if not isinstance(value, str) or value not in {"local-direct", "developer-id"}:
+        failures.append("release bundle must set distribution_mode to 'local-direct' or 'developer-id'")
+        return None
+    return value
+
+
 def require_sha256_digest(value: Any, label: str) -> str | None:
     if not isinstance(value, str) or re.fullmatch(r"sha256:[a-fA-F0-9]{64}", value) is None:
         failures.append(f"{label} must be a sha256:<64 hex> digest")
@@ -137,13 +144,33 @@ def extract_expected_app(archive_path: Path, expected_app_name: str, destination
     return app_path
 
 
-def verify_release_app(app_path: Path, signing_identity: Any) -> None:
+def is_ad_hoc_identity(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    return value.strip().lower() in {"-", "adhoc", "ad-hoc", "ad-hoc-local"}
+
+
+def verify_codesigned_app(app_path: Path, signing_identity: Any, *, allow_ad_hoc: bool) -> None:
     run_verifier(["/usr/bin/codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app_path)], "codesign")
     codesign_details = run_verifier(["/usr/bin/codesign", "-dv", "--verbose=4", str(app_path)], "codesign details")
-    if "Signature=adhoc" in codesign_details:
+    is_ad_hoc_signature = "flags=0x2(adhoc)" in codesign_details or "Signature=adhoc" in codesign_details
+    if is_ad_hoc_signature and not allow_ad_hoc:
         failures.append("release bundle must not be ad-hoc signed")
-    if isinstance(signing_identity, str) and signing_identity and signing_identity not in codesign_details:
+    if (
+        isinstance(signing_identity, str)
+        and signing_identity
+        and not is_ad_hoc_identity(signing_identity)
+        and signing_identity not in codesign_details
+    ):
         failures.append("release bundle codesign details must include reported signing_identity")
+
+
+def verify_release_app(app_path: Path, signing_identity: Any, *, distribution_mode: str) -> None:
+    if distribution_mode == "local-direct":
+        verify_codesigned_app(app_path, signing_identity, allow_ad_hoc=True)
+        return
+
+    verify_codesigned_app(app_path, signing_identity, allow_ad_hoc=False)
     run_verifier(["/usr/bin/xcrun", "stapler", "validate", str(app_path)], "stapler")
     run_verifier(["/usr/sbin/spctl", "-a", "-t", "exec", "-vv", str(app_path)], "spctl")
 
@@ -171,13 +198,20 @@ if report is not None:
         require_equal(bundle, "app_bundle", "MeetingAssistantNative.app", "release bundle")
         require_equal(bundle, "build_configuration", "Release", "release bundle")
         require_equal(bundle, "code_signed", True, "release bundle")
-        require_equal(bundle, "notarized", True, "release bundle")
-        require_equal(bundle, "stapled", True, "release bundle")
+        distribution_mode = normalized_distribution_mode(bundle.get("distribution_mode"))
+        if distribution_mode == "local-direct":
+            require_equal(bundle, "notarized", False, "local-direct release bundle")
+            require_equal(bundle, "stapled", False, "local-direct release bundle")
+            require_equal(bundle, "notarization_ticket", "not-applicable", "local-direct release bundle")
+            require_equal(bundle, "install_method", "direct-local-app", "local-direct release bundle")
+        elif distribution_mode == "developer-id":
+            require_equal(bundle, "notarized", True, "developer-id release bundle")
+            require_equal(bundle, "stapled", True, "developer-id release bundle")
+            require_non_empty_string(bundle, "notarization_ticket", "developer-id release bundle")
         require_equal(bundle, "packages_runtime_or_model", False, "release bundle")
         require_equal(bundle, "auto_downloads", False, "release bundle")
         require_equal(bundle, "contains_meeting_data", False, "release bundle")
         require_non_empty_string(bundle, "signing_identity", "release bundle")
-        require_non_empty_string(bundle, "notarization_ticket", "release bundle")
         if artifact_path is not None:
             if not artifact_path.is_file():
                 failures.append(f"release bundle artifact must exist as a file: {artifact_path}")
@@ -186,8 +220,12 @@ if report is not None:
             elif expected_digest is not None:
                 with tempfile.TemporaryDirectory(prefix="meeting-assistant-release-bundle-") as directory:
                     app_path = extract_expected_app(artifact_path, str(bundle.get("app_bundle")), Path(directory))
-                    if app_path is not None:
-                        verify_release_app(app_path, bundle.get("signing_identity"))
+                    if app_path is not None and distribution_mode is not None:
+                        verify_release_app(
+                            app_path,
+                            bundle.get("signing_identity"),
+                            distribution_mode=distribution_mode,
+                        )
 
 if failures:
     print("release bundle evidence failed:", file=sys.stderr)

@@ -461,3 +461,28 @@ ADR 记录决策背景、取舍和历史原因。当前可执行规则必须维�
 - 继续让非 XCTest app 默认使用 fake：拒绝，因为会让 designed shell 的录制主操作长期停留在 fixture 层，不能证明 native-first capture 策略。
 - 所有 XCTest 默认也使用 Apple ScreenCaptureKit adapter：拒绝，因为会破坏 deterministic UI、安全失败和 locator 回归测试，并引入本机 TCC/display 状态耦合。
 - 允许 OBS/BlackHole/FFmpeg 等辅助 capture 作为自动 fallback：拒绝，因为当前 MVP 事实源明确 native-first，辅助 capture 进入产品路径前必须先走独立 spec-change、ADR 和负向测试。
+
+## ADR-20260706-01: VS-MA-23 使用本机直接安装 Release App 作为当前候选目标
+
+状态：Accepted
+
+背景：
+- 产品范围已经明确 Phase 1 是个人本地 macOS 工具，不提供团队分发、App Store 分发、商业化分发、签名公证或自动更新。
+- 旧工程门禁把 `VS-MA-23` 默认写成 Developer ID 签名、公证、SLSA/DSSE provenance、Sigstore signing 和 all-target sidecar portability 的发布 rehearsal，超出了当前“本机直接安装”的目标。
+- 用户确认当前不需要发布 App，也不应被 Developer ID 或 App Store 签名要求约束；先解决本机可直接安装使用。
+
+决策：
+- `VS-MA-23` 当前 release candidate 目标改为 `local-direct`：构建 Release `MeetingAssistantNative.app`，以本机 local/ad-hoc signing 方式打包为 zip，校验当前 commit、digest、Release 配置、codesign、no-runtime/model、no-auto-download 和 no-meeting-data。
+- `release-bundle-create.py`、`release-candidate-inputs.py`、`release-bundle-check.sh` 和 `supply-chain-check.sh release` 的默认模式是 `local-direct`。
+- Developer ID 签名、公证、staple、Gatekeeper `spctl`、DSSE/SLSA provenance、Sigstore signing 和 all-target sidecar portability 保留为显式 `developer-id` 分发模式，属于未来产品化/商业化分发准备，不阻塞当前本机安装候选。
+- 该决策不降低产品功能验收：`product-validation-check.py release`、`release-preflight.sh`、真实录制、真实处理、OS 集成、权限 fail-closed、删除和 no-auto-upload/no-auto-download 仍按各自 `PV-MA-*` covered 条件判断。
+
+影响：
+- `08-implementation-guidance.md` 和 `09-acceptance-criteria.md` 明确当前本机安装候选边界。
+- `docs/engineering/02-dev-commands.md`、`10-security-and-supply-chain.md`、`11-production-readiness.md` 和 `07-development-plan.md` 需要把 Developer ID/notary/Sigstore 从默认 `VS-MA-23` 前置条件移到显式 `developer-id` 分发模式。
+- 验证矩阵继续保持未完整 covered 的 `PV-MA-*` 为 `partial`；local-direct bundle 通过不能外推为商业分发 readiness。
+
+备选方案：
+- 继续要求 Developer ID/notarization 作为 VS-MA-23 默认门槛：拒绝，因为与当前 MVP 范围和用户明确目标不一致。
+- 完全取消 bundle/signing 校验：拒绝，因为本机安装候选仍需要可审计的 Release app、digest、commit 绑定和本地 codesign 证据。
+- 直接进入商业化分发准备：拒绝，保留为 `VS-MA-24` 或后续 spec-change。

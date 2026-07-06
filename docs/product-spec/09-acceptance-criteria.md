@@ -51,4 +51,4 @@
 1. `10-open-decisions.md` 没有阻塞发布的问题。
 2. 验证矩阵中发布范围内所有 `PV-MA-*` 行为 `covered`。
 3. `./scripts/release-preflight.sh` 通过。
-4. 依赖许可证、签名/公证、数据保留、删除、备份恢复和事故响应完成审查。
+4. 本机 local-direct 安装候选的依赖许可证、本地签名/digest、数据保留、删除、备份恢复和事故响应完成审查；Developer ID 签名、公证和自动更新只在商业化分发重新纳入范围后适用。

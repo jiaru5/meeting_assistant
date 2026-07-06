@@ -312,6 +312,8 @@ def build_reports(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, A
             "app_bundle": "MeetingAssistantNative.app",
             "build_configuration": "Release",
             "code_signed": True,
+            "distribution_mode": "developer-id",
+            "install_method": "developer-id-zip",
             "signing_identity": signing_identity,
             "notarized": True,
             "notarization_ticket": notarization_ticket,

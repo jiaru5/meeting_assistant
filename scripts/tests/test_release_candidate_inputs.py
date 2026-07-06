@@ -54,6 +54,8 @@ def write_bundle_report(path: Path, archive: Path, *, builder: str, source_repos
                 "app_bundle": "MeetingAssistantNative.app",
                 "build_configuration": "Release",
                 "code_signed": True,
+                "distribution_mode": "developer-id",
+                "install_method": "developer-id-zip",
                 "signing_identity": "Developer ID Application: Meeting Assistant Test (TEAMID1234)",
                 "notarized": True,
                 "notarization_ticket": "notary-submission-id",
@@ -67,7 +69,105 @@ def write_bundle_report(path: Path, archive: Path, *, builder: str, source_repos
 
 
 class ReleaseCandidateInputsTests(unittest.TestCase):
-    def test_release_candidate_inputs_runs_bundle_create_reports_and_gates(self) -> None:
+    def test_release_candidate_inputs_defaults_to_local_direct_bundle_and_gates(self) -> None:
+        module = load_module()
+        commands: list[list[str]] = []
+        envs: list[dict[str, str] | None] = []
+
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            archive = work / "MeetingAssistantNative-Release.zip"
+            bundle_report = work / "bundle/release-bundle-report.json"
+            provenance_report = work / "supply-chain/release-provenance-report.json"
+            signature_report = work / "supply-chain/release-signature-report.json"
+            sidecar_report = work / "supply-chain/release-sidecar-report.json"
+
+            def fake_run_command(command, label, *, cwd=None, env=None):
+                commands.append(command)
+                envs.append(env)
+                if command[:2] == [sys.executable, str(ROOT / "scripts/release-bundle-create.py")]:
+                    self.assertIn("--distribution-mode", command)
+                    self.assertIn("local-direct", command)
+                    self.assertNotIn("--signing-identity", command)
+                    self.assertNotIn("--notary-profile", command)
+                    write_archive(archive)
+                    write_json(
+                        bundle_report,
+                        {
+                            "report_schema": 1,
+                            "release_gate": "release-bundle",
+                            "subject_commit": "a" * 40,
+                            "builder": "local-release-rehearsal",
+                            "source_repository": "example/meeting_assistant",
+                            "bundle": {
+                                "name": archive.name,
+                                "path": str(archive.resolve()),
+                                "digest": "sha256:" + ("1" * 64),
+                                "artifact_type": "macos-app-archive",
+                                "archive_format": "zip",
+                                "app_bundle": "MeetingAssistantNative.app",
+                                "build_configuration": "Release",
+                                "code_signed": True,
+                                "distribution_mode": "local-direct",
+                                "install_method": "direct-local-app",
+                                "signing_identity": "ad-hoc-local",
+                                "notarized": False,
+                                "notarization_ticket": "not-applicable",
+                                "stapled": False,
+                                "packages_runtime_or_model": False,
+                                "auto_downloads": False,
+                                "contains_meeting_data": False,
+                            },
+                        },
+                    )
+                    return "release bundle created\n"
+                if command[:2] == [sys.executable, str(ROOT / "scripts/release-inputs-report.py")]:
+                    raise AssertionError("local-direct mode must not materialize provenance/signature reports")
+                if command == [str(ROOT / "scripts/release-bundle-check.sh")]:
+                    self.assertEqual(env["MEETING_ASSISTANT_RELEASE_DISTRIBUTION_MODE"], "local-direct")
+                    self.assertEqual(env["MEETING_ASSISTANT_RELEASE_BUNDLE_REPORT"], str(bundle_report.resolve()))
+                    return "release-bundle-check passed\n"
+                if command == [str(ROOT / "scripts/supply-chain-check.sh"), "release"]:
+                    self.assertEqual(env["MEETING_ASSISTANT_RELEASE_DISTRIBUTION_MODE"], "local-direct")
+                    return "supply-chain-check passed\n"
+                if command == ["git", "-C", str(ROOT), "rev-parse", "HEAD"]:
+                    return "a" * 40 + "\n"
+                raise AssertionError(f"unexpected command for {label}: {command}")
+
+            args = module.parse_args(
+                [
+                    "--root",
+                    str(ROOT),
+                    "--archive",
+                    str(archive),
+                    "--bundle-report",
+                    str(bundle_report),
+                    "--provenance-report",
+                    str(provenance_report),
+                    "--signature-report",
+                    str(signature_report),
+                    "--sidecar-report",
+                    str(sidecar_report),
+                    "--builder",
+                    "local-release-rehearsal",
+                    "--source-repository",
+                    "example/meeting_assistant",
+                ]
+            )
+            with mock.patch.object(module, "run_command", side_effect=fake_run_command):
+                module.run_release_candidate_inputs(args)
+
+            command_names = [" ".join(command[:2]) for command in commands]
+            self.assertEqual(
+                command_names[:3],
+                [
+                    f"{sys.executable} {ROOT / 'scripts/release-bundle-create.py'}",
+                    str(ROOT / "scripts/release-bundle-check.sh"),
+                    f"{ROOT / 'scripts/supply-chain-check.sh'} release",
+                ],
+            )
+
+    def test_developer_id_release_candidate_inputs_runs_reports_and_gates(self) -> None:
         module = load_module()
         commands: list[list[str]] = []
         envs: list[dict[str, str] | None] = []
@@ -89,6 +189,8 @@ class ReleaseCandidateInputsTests(unittest.TestCase):
                 commands.append(command)
                 envs.append(env)
                 if command[:2] == [sys.executable, str(ROOT / "scripts/release-bundle-create.py")]:
+                    self.assertIn("--distribution-mode", command)
+                    self.assertIn("developer-id", command)
                     self.assertIn("--signing-identity", command)
                     self.assertIn("--notary-profile", command)
                     write_archive(archive)
@@ -130,6 +232,8 @@ class ReleaseCandidateInputsTests(unittest.TestCase):
                     str(ROOT),
                     "--archive",
                     str(archive),
+                    "--distribution-mode",
+                    "developer-id",
                     "--attestation",
                     str(attestation),
                     "--sigstore-bundle",
@@ -174,7 +278,7 @@ class ReleaseCandidateInputsTests(unittest.TestCase):
                 ],
             )
 
-    def test_release_candidate_inputs_requires_attestation_before_bundle_create(self) -> None:
+    def test_developer_id_release_candidate_inputs_requires_attestation_before_bundle_create(self) -> None:
         module = load_module()
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
@@ -184,6 +288,8 @@ class ReleaseCandidateInputsTests(unittest.TestCase):
                 [
                     "--root",
                     str(ROOT),
+                    "--distribution-mode",
+                    "developer-id",
                     "--sigstore-bundle",
                     str(sigstore_bundle),
                     "--source-repository",
@@ -242,6 +348,8 @@ class ReleaseCandidateInputsTests(unittest.TestCase):
                     "--root",
                     str(ROOT),
                     "--skip-bundle-create",
+                    "--distribution-mode",
+                    "developer-id",
                     "--archive",
                     str(archive),
                     "--attestation",

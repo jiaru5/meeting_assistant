@@ -143,6 +143,8 @@ class ReleaseInputsReportTests(unittest.TestCase):
             self.assertEqual(bundle["release_gate"], "release-bundle")
             self.assertEqual(bundle["bundle"]["digest"], digest)
             self.assertEqual(bundle["bundle"]["app_bundle"], "MeetingAssistantNative.app")
+            self.assertEqual(bundle["bundle"]["distribution_mode"], "developer-id")
+            self.assertEqual(bundle["bundle"]["install_method"], "developer-id-zip")
             self.assertFalse(bundle["bundle"]["packages_runtime_or_model"])
             self.assertEqual(provenance["artifacts"][0]["digest"], digest)
             self.assertEqual(provenance["attestation"]["digest"], "sha256:" + hashlib.sha256(attestation.read_bytes()).hexdigest())

@@ -38,7 +38,7 @@ Playwright 只在后续引入 Web UI 时作为 Web mocked/full-stack E2E 工具�
 
 native-app 的默认组件 `test` gate 优先服务本地快速反馈：Swift Testing 覆盖 view model、契约 decode、状态机和文件边界，XCTest-hosted SwiftUI smoke 覆盖关键 locator/source contract。真实 app-bundle XCUITest 仍是 native UI 关键状态证据，但执行入口拆为显式命令 `./platform/native-app/scripts/test-app-bundle.sh`，或通过 `MA_NATIVE_APP_RUN_XCUITEST=1 ./platform/native-app/scripts/test.sh` 纳入同一次组件测试。验证矩阵和交付说明必须区分默认 fast gate 与 app-bundle UI smoke；只有运行 app-bundle 入口后，才能把 `.app` 启动、窗口定位和 `XCUIApplication()` locator 作为本轮证据。
 
-真实 OS clipboard/save-panel 证据不进入默认 fast gate。需要证明 copy/export/delete action 穿过系统 `NSPasteboard`、`NSSavePanel` 和 process-backed `export_transcript` / `delete_session` 时，显式运行 `MA_NATIVE_APP_REAL_ACTION_OS_SMOKE=1 ./platform/native-app/scripts/test-app-bundle.sh`，并在交付中记录该命令、日志和限制；该 opt-in gate 只能作为 PV closure/release-candidate 输入，不能替代签名/公证 release bundle、跨机器 UI Automation/TCC 可重复性或最终 `release-preflight`。
+真实 OS clipboard/save-panel 证据不进入默认 fast gate。需要证明 copy/export/delete action 穿过系统 `NSPasteboard`、`NSSavePanel` 和 process-backed `export_transcript` / `delete_session` 时，显式运行 `MA_NATIVE_APP_REAL_ACTION_OS_SMOKE=1 ./platform/native-app/scripts/test-app-bundle.sh`，并在交付中记录该命令、日志和限制；该 opt-in gate 只能作为 PV closure/release-candidate 输入，不能替代 local-direct release bundle、跨机器 UI Automation/TCC 可重复性、最终 `release-preflight`，也不能替代未来显式 developer-id 商业分发门禁。
 
 `platform/native-app/Sources/`、`platform/native-app/Tests/`、`platform/native-app/UITests/`、`platform/processing-cli/src/`、`platform/processing-cli/tests/` 和 `platform/e2e/` 是当前产品行为和产品验证的主要代码表面。修改这些路径时，工程门禁必须要求同步检查 `06-product-validation-matrix.md`，并运行对应组件测试、架构检查和 local full-stack smoke。Local full-stack smoke 必须优先使用已缓存或预加载的本地 smoke 镜像，不得在 E2E 执行阶段隐式依赖公网 registry 拉取。
 

@@ -15,6 +15,7 @@ DEFAULT_BUNDLE_REPORT = ".harness/release-inputs/bundle/release-bundle-report.js
 DEFAULT_PROVENANCE_REPORT = ".harness/release-inputs/supply-chain/release-provenance-report.json"
 DEFAULT_SIGNATURE_REPORT = ".harness/release-inputs/supply-chain/release-signature-report.json"
 DEFAULT_SIDECAR_REPORT = ".harness/release-inputs/supply-chain/release-sidecar-report.json"
+DEFAULT_DISTRIBUTION_MODE = "local-direct"
 
 
 class ReleaseCandidateInputsError(Exception):
@@ -127,6 +128,7 @@ def load_bundle_defaults(report_path: Path) -> dict[str, str]:
         ("path", "archive"),
         ("signing_identity", "signing identity"),
         ("notarization_ticket", "notarization ticket"),
+        ("distribution_mode", "distribution mode"),
     ):
         value = bundle.get(key)
         if isinstance(value, str) and value.strip():
@@ -156,6 +158,8 @@ def run_release_bundle_create(
         builder,
         "--source-repository",
         source_repo,
+        "--distribution-mode",
+        args.distribution_mode,
     ]
     for option, value in (
         ("--signing-identity", args.signing_identity),
@@ -226,12 +230,14 @@ def run_release_inputs_report(
 
 def release_env(
     *,
+    distribution_mode: str,
     bundle_report_path: Path,
     provenance_report_path: Path,
     signature_report_path: Path,
     sidecar_report_path: Path,
 ) -> dict[str, str]:
     env = os.environ.copy()
+    env["MEETING_ASSISTANT_RELEASE_DISTRIBUTION_MODE"] = distribution_mode
     env["MEETING_ASSISTANT_RELEASE_BUNDLE_REPORT"] = str(bundle_report_path)
     env["MEETING_ASSISTANT_RELEASE_PROVENANCE_REPORT"] = str(provenance_report_path)
     env["MEETING_ASSISTANT_RELEASE_SIGNATURE_REPORT"] = str(signature_report_path)
@@ -246,12 +252,19 @@ def run_release_candidate_inputs(args: argparse.Namespace) -> None:
     provenance_report_path = resolve_path(root, args.provenance_report)
     signature_report_path = resolve_path(root, args.signature_report)
     sidecar_report_path = resolve_path(root, args.sidecar_report)
-    attestation_path = resolve_path(root, require_non_empty(args.attestation, "DSSE/SLSA attestation"))
-    sigstore_bundle_path = resolve_path(root, require_non_empty(args.sigstore_bundle, "Sigstore bundle"))
-    require_existing_file(attestation_path, "DSSE/SLSA attestation")
-    require_existing_file(sigstore_bundle_path, "Sigstore bundle")
-    if args.transparency_log_index < 0:
-        raise ReleaseCandidateInputsError("transparency log index must be non-negative")
+    distribution_mode = require_non_empty(args.distribution_mode, "distribution mode")
+    if distribution_mode not in {"local-direct", "developer-id"}:
+        raise ReleaseCandidateInputsError("distribution mode must be 'local-direct' or 'developer-id'")
+
+    attestation_path: Path | None = None
+    sigstore_bundle_path: Path | None = None
+    if distribution_mode == "developer-id":
+        attestation_path = resolve_path(root, require_non_empty(args.attestation, "DSSE/SLSA attestation"))
+        sigstore_bundle_path = resolve_path(root, require_non_empty(args.sigstore_bundle, "Sigstore bundle"))
+        require_existing_file(attestation_path, "DSSE/SLSA attestation")
+        require_existing_file(sigstore_bundle_path, "Sigstore bundle")
+        if args.transparency_log_index < 0:
+            raise ReleaseCandidateInputsError("transparency log index must be non-negative")
 
     if not args.skip_bundle_create:
         source_repo = source_repository(root, args.source_repository)
@@ -266,6 +279,11 @@ def run_release_candidate_inputs(args: argparse.Namespace) -> None:
         )
 
     bundle_defaults = load_bundle_defaults(bundle_report_path)
+    report_distribution_mode = bundle_defaults.get("distribution mode")
+    if report_distribution_mode and report_distribution_mode != distribution_mode:
+        raise ReleaseCandidateInputsError(
+            f"release bundle report distribution_mode={report_distribution_mode!r} does not match {distribution_mode!r}"
+        )
     if args.skip_bundle_create:
         builder = args.builder or bundle_defaults.get("builder") or "local-release-rehearsal"
         source_repo = (
@@ -275,7 +293,7 @@ def run_release_candidate_inputs(args: argparse.Namespace) -> None:
         )
     else:
         builder = args.builder or bundle_defaults.get("builder") or "local-release-rehearsal"
-        source_repo = args.source_repository or bundle_defaults.get("source repository") or source_repo
+    source_repo = args.source_repository or bundle_defaults.get("source repository") or source_repo
     archive_from_report = bundle_defaults.get("archive")
     if archive_from_report:
         archive_path = resolve_path(root, archive_from_report)
@@ -285,22 +303,26 @@ def run_release_candidate_inputs(args: argparse.Namespace) -> None:
     builder = args.builder or bundle_defaults.get("builder") or builder
     source_repo = args.source_repository or bundle_defaults.get("source repository") or source_repo
 
-    run_release_inputs_report(
-        root,
-        args,
-        archive_path=archive_path,
-        attestation_path=attestation_path,
-        sigstore_bundle_path=sigstore_bundle_path,
-        bundle_report_path=bundle_report_path,
-        provenance_report_path=provenance_report_path,
-        signature_report_path=signature_report_path,
-        builder=require_non_empty(builder, "builder"),
-        source_repo=require_non_empty(source_repo, "source repository"),
-        signing_identity=require_non_empty(signing_identity, "signing identity"),
-        notarization_ticket=require_non_empty(notarization_ticket, "notarization ticket"),
-    )
+    if distribution_mode == "developer-id":
+        if attestation_path is None or sigstore_bundle_path is None:
+            raise ReleaseCandidateInputsError("developer-id release inputs require DSSE/SLSA and Sigstore paths")
+        run_release_inputs_report(
+            root,
+            args,
+            archive_path=archive_path,
+            attestation_path=attestation_path,
+            sigstore_bundle_path=sigstore_bundle_path,
+            bundle_report_path=bundle_report_path,
+            provenance_report_path=provenance_report_path,
+            signature_report_path=signature_report_path,
+            builder=require_non_empty(builder, "builder"),
+            source_repo=require_non_empty(source_repo, "source repository"),
+            signing_identity=require_non_empty(signing_identity, "signing identity"),
+            notarization_ticket=require_non_empty(notarization_ticket, "notarization ticket"),
+        )
 
     env = release_env(
+        distribution_mode=distribution_mode,
         bundle_report_path=bundle_report_path,
         provenance_report_path=provenance_report_path,
         signature_report_path=signature_report_path,
@@ -314,19 +336,26 @@ def run_release_candidate_inputs(args: argparse.Namespace) -> None:
     print(f"release candidate inputs verified for commit {current_commit(root)}")
     print(f"release archive: {archive_path}")
     print(f"release bundle report: {bundle_report_path}")
-    print(f"release provenance report: {provenance_report_path}")
-    print(f"release signature report: {signature_report_path}")
-    print(
-        "VS-MA-23 release candidate inputs verified [non-bypass]: "
-        "PV release and release-preflight still remain authoritative final gates"
-    )
+    if distribution_mode == "developer-id":
+        print(f"release provenance report: {provenance_report_path}")
+        print(f"release signature report: {signature_report_path}")
+        print(
+            "VS-MA-23 developer-id release candidate inputs verified [non-bypass]: "
+            "PV release and release-preflight still remain authoritative final gates"
+        )
+    else:
+        print(
+            "VS-MA-23 local-direct release candidate inputs verified: "
+            "PV release and release-preflight still remain authoritative final gates"
+        )
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Orchestrate VS-MA-23 release candidate inputs from a signed/notarized "
-            "bundle, DSSE/SLSA attestation, Sigstore bundle, and sidecar report."
+            "Orchestrate VS-MA-23 release candidate inputs. The default local-direct "
+            "mode verifies a locally installable Release app; developer-id mode verifies "
+            "signed/notarized distribution inputs plus DSSE/Sigstore/sidecar evidence."
         )
     )
     parser.add_argument("--root", default=str(repo_root_from_script()))
@@ -337,12 +366,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--attestation",
         default=env_default("MEETING_ASSISTANT_RELEASE_ATTESTATION"),
-        help="DSSE in-toto SLSA provenance v1 attestation for the release archive.",
+        help="DSSE in-toto SLSA provenance v1 attestation for developer-id distribution mode.",
     )
     parser.add_argument(
         "--sigstore-bundle",
         default=env_default("MEETING_ASSISTANT_RELEASE_SIGSTORE_BUNDLE"),
-        help="Sigstore bundle JSON for the release archive.",
+        help="Sigstore bundle JSON for developer-id distribution mode.",
+    )
+    parser.add_argument(
+        "--distribution-mode",
+        choices=("local-direct", "developer-id"),
+        default=env_default("MEETING_ASSISTANT_RELEASE_DISTRIBUTION_MODE") or DEFAULT_DISTRIBUTION_MODE,
     )
     parser.add_argument("--bundle-report", default=DEFAULT_BUNDLE_REPORT)
     parser.add_argument("--provenance-report", default=DEFAULT_PROVENANCE_REPORT)
@@ -351,7 +385,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--skip-bundle-create",
         action="store_true",
-        help="Use an existing signed/notarized archive and bundle report instead of running release-bundle-create.py.",
+        help="Use an existing archive and bundle report instead of running release-bundle-create.py.",
     )
     parser.add_argument(
         "--run-release-preflight",
