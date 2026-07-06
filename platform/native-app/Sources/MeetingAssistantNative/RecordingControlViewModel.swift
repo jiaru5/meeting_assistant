@@ -120,6 +120,9 @@ public final class RecordingControlViewModel: ObservableObject {
     private let workspaceURL: URL?
     private let captureSystemAudio: Bool
     private let captureMicrophoneAudio: Bool
+    private let startTimeoutNanoseconds: UInt64
+    private var activeStartAttemptID: UUID?
+    private var startTimeoutTask: Task<Void, Never>?
 
     public init(
         commandClient: any RecordingCaptureControlling = FakeRecordingCommandClient(),
@@ -128,7 +131,8 @@ public final class RecordingControlViewModel: ObservableObject {
         captureTarget: RecordingCaptureTarget = .screen,
         workspaceURL: URL? = nil,
         captureSystemAudio: Bool = true,
-        captureMicrophoneAudio: Bool = true
+        captureMicrophoneAudio: Bool = true,
+        startTimeoutNanoseconds: UInt64 = 15_000_000_000
     ) {
         self.commandClient = commandClient
         self.canStartRecording = readinessState.canStartRecording
@@ -137,6 +141,7 @@ public final class RecordingControlViewModel: ObservableObject {
         self.workspaceURL = workspaceURL
         self.captureSystemAudio = captureSystemAudio
         self.captureMicrophoneAudio = captureMicrophoneAudio
+        self.startTimeoutNanoseconds = startTimeoutNanoseconds
         self.state = readinessState.canStartRecording ? .ready : .idle
     }
 
@@ -198,6 +203,12 @@ public final class RecordingControlViewModel: ObservableObject {
             savedSummary: nil,
             warnings: []
         )
+        let attemptID = UUID()
+        activeStartAttemptID = attemptID
+        armStartTimeout(for: attemptID)
+        defer {
+            clearStartAttemptIfCurrent(attemptID)
+        }
 
         do {
             let response = try await commandClient.startNativeRecording(
@@ -209,10 +220,19 @@ public final class RecordingControlViewModel: ObservableObject {
                     captureMicrophoneAudio: captureMicrophoneAudio
                 )
             )
+            guard activeStartAttemptID == attemptID else {
+                return
+            }
             try handleStartResponse(response)
         } catch let failure as RecordingCommandFailure {
+            guard activeStartAttemptID == attemptID else {
+                return
+            }
             fail(code: failure.code, message: failure.message, sessionID: nil)
         } catch {
+            guard activeStartAttemptID == attemptID else {
+                return
+            }
             fail(code: nil, message: error.localizedDescription, sessionID: nil)
         }
     }
@@ -312,6 +332,41 @@ public final class RecordingControlViewModel: ObservableObject {
             errorMessage: message,
             savedSummary: nil,
             warnings: []
+        )
+    }
+
+    private func armStartTimeout(for attemptID: UUID) {
+        startTimeoutTask?.cancel()
+        let timeout = startTimeoutNanoseconds
+        startTimeoutTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: timeout)
+            } catch {
+                return
+            }
+            self?.failStartIfStillPending(attemptID)
+        }
+    }
+
+    private func clearStartAttemptIfCurrent(_ attemptID: UUID) {
+        guard activeStartAttemptID == attemptID else {
+            return
+        }
+        activeStartAttemptID = nil
+        startTimeoutTask?.cancel()
+        startTimeoutTask = nil
+    }
+
+    private func failStartIfStillPending(_ attemptID: UUID) {
+        guard activeStartAttemptID == attemptID, state.phase == .starting else {
+            return
+        }
+        activeStartAttemptID = nil
+        startTimeoutTask = nil
+        fail(
+            code: .captureFailed,
+            message: "Native recording did not start before timeout. Check macOS Screen Recording permission prompts and try again.",
+            sessionID: nil
         )
     }
 }

@@ -1357,7 +1357,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        if waitForElement("ma.recording.status", in: app, contains: "Recording in progress.", timeout: 8) {
+        if waitForElement("ma.recording.status", in: app, contains: "Recording in progress.", timeout: 18) {
             return
         }
 
@@ -1542,16 +1542,17 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         file: StaticString,
         line: UInt
     ) {
-        if waitUntilHittable(control, timeout: 1) {
-            control.click()
+        if isVisibleEnabled(control, in: app) {
+            // Coordinate clicks avoid XCTest treating unrelated notification dialogs as blockers.
+            control.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
             return
         }
-        if isVisibleEnabled(control, in: app) {
+        if waitUntilHittable(control, timeout: 1) {
             control.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
             return
         }
         waitForHittable(control, file: file, line: line)
-        control.click()
+        control.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
     }
 
     private func waitUntilHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {

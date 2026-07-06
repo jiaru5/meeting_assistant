@@ -89,6 +89,31 @@ struct RecordingControlViewModelTests {
 
     @Test
     @MainActor
+    func startTimeoutMovesIntoFailedWhenCommandDoesNotReturn() async {
+        let client = HangingRecordingCommandClient()
+        let viewModel = RecordingControlViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState(),
+            startTimeoutNanoseconds: 20_000_000
+        )
+
+        let startTask = Task {
+            await viewModel.start()
+        }
+        try? await Task.sleep(nanoseconds: 80_000_000)
+
+        #expect(viewModel.state.phase == .failed)
+        #expect(viewModel.state.statusText == "Recording failed.")
+        #expect(viewModel.state.errorCode == .captureFailed)
+        #expect(viewModel.state.errorMessage?.contains("did not start before timeout") == true)
+        #expect(await client.startRequests.count == 1)
+
+        startTask.cancel()
+        _ = await startTask.result
+    }
+
+    @Test
+    @MainActor
     func stopFailureMovesIntoFailedAndKeepsSession() async {
         let client = FakeRecordingCommandClient(
             script: .stopFailure(
@@ -230,4 +255,18 @@ private func dependencyCheck(
         ok: ok,
         message: "\(id) is \(status)."
     )
+}
+
+private actor HangingRecordingCommandClient: RecordingCommandClient {
+    private(set) var startRequests: [StartNativeRecordingRequest] = []
+
+    func startNativeRecording(_ request: StartNativeRecordingRequest) async throws -> RecordingCommandResponse {
+        startRequests.append(request)
+        try await Task.sleep(nanoseconds: 10_000_000_000)
+        return .successfulStart(sessionID: "session-hanging-recording")
+    }
+
+    func stopRecording(_ request: StopRecordingRequest) async throws -> RecordingCommandResponse {
+        .successfulStop(sessionID: request.sessionID)
+    }
 }
