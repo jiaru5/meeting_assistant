@@ -131,21 +131,22 @@ public actor AppleScreenCaptureKitNativeCaptureAdapter: NativeCaptureAdapter {
         }
 
         do {
-            let recordingFile = try await runtime.stopRecording(recording.token)
-            let recordingData = try recordingData(from: recordingFile.url)
+            let recordingFiles = try await runtime.stopRecording(recording.token)
+            let recordingData = try recordingData(from: recordingFiles.combinedRecording.url)
             let mixedAudioArtifact = await mixedAudioArtifact(
-                from: recordingFile.url,
+                from: recordingFiles.combinedRecording.url,
                 options: recording.options
             )
-            cleanupTemporaryOutput(at: recording.outputURL)
-            return NativeCaptureStopResult(
-                artifacts: artifactResults(
-                    combinedRecordingData: recordingData,
-                    combinedRecordingFormat: recordingFile.format,
-                    options: recording.options,
-                    mixedAudioArtifact: mixedAudioArtifact
-                )
+            let artifacts = artifactResults(
+                combinedRecordingData: recordingData,
+                combinedRecordingFormat: recordingFiles.combinedRecording.format,
+                systemAudioFile: recordingFiles.systemAudio,
+                microphoneAudioFile: recordingFiles.microphoneAudio,
+                options: recording.options,
+                mixedAudioArtifact: mixedAudioArtifact
             )
+            cleanupTemporaryOutput(at: recording.outputURL)
+            return NativeCaptureStopResult(artifacts: artifacts)
         } catch {
             cleanupTemporaryOutput(at: recording.outputURL)
             throw NativeCaptureAdapterFailure.stopFailed(
@@ -186,6 +187,8 @@ public actor AppleScreenCaptureKitNativeCaptureAdapter: NativeCaptureAdapter {
     private func artifactResults(
         combinedRecordingData: Data,
         combinedRecordingFormat: String,
+        systemAudioFile: AppleScreenCaptureKitRecordingFile?,
+        microphoneAudioFile: AppleScreenCaptureKitRecordingFile?,
         options: AppleScreenCaptureKitRecordingOptions,
         mixedAudioArtifact: NativeCaptureArtifactResult
     ) -> [NativeCaptureArtifactResult] {
@@ -195,18 +198,55 @@ public actor AppleScreenCaptureKitNativeCaptureAdapter: NativeCaptureAdapter {
                 format: combinedRecordingFormat,
                 data: combinedRecordingData
             ),
-            requestedAudioArtifact(
+            audioArtifact(
                 .systemAudio,
+                recordingFile: systemAudioFile,
                 wasRequested: options.captureSystemAudio,
                 requestedReason: "ScreenCaptureKit SCRecordingOutput stores any captured system audio only inside the combined screen_video file; no separate system_audio artifact is produced by this adapter."
             ),
-            requestedAudioArtifact(
+            audioArtifact(
                 .microphoneAudio,
+                recordingFile: microphoneAudioFile,
                 wasRequested: options.captureMicrophoneAudio,
                 requestedReason: "ScreenCaptureKit SCRecordingOutput stores any captured microphone audio only inside the combined screen_video file; no separate microphone_audio artifact is produced by this adapter."
             ),
             mixedAudioArtifact,
         ]
+    }
+
+    private func audioArtifact(
+        _ artifactType: NativeCaptureArtifactType,
+        recordingFile: AppleScreenCaptureKitRecordingFile?,
+        wasRequested: Bool,
+        requestedReason: String
+    ) -> NativeCaptureArtifactResult {
+        guard wasRequested else {
+            return requestedAudioArtifact(
+                artifactType,
+                wasRequested: false,
+                requestedReason: requestedReason
+            )
+        }
+        guard let recordingFile else {
+            return requestedAudioArtifact(
+                artifactType,
+                wasRequested: wasRequested,
+                requestedReason: requestedReason
+            )
+        }
+        do {
+            return .available(
+                artifactType,
+                format: recordingFile.format,
+                data: try recordingData(from: recordingFile.url)
+            )
+        } catch {
+            return .degraded(
+                artifactType,
+                format: recordingFile.format,
+                reason: "\(artifactType.rawValue) was produced by ScreenCaptureKit but could not be read: \(error.localizedDescription)"
+            )
+        }
     }
 
     private func mixedAudioArtifact(
@@ -355,6 +395,22 @@ struct AppleScreenCaptureKitRecordingFile: Equatable, Sendable {
     let format: String
 }
 
+struct AppleScreenCaptureKitRecordingFiles: Equatable, Sendable {
+    let combinedRecording: AppleScreenCaptureKitRecordingFile
+    let systemAudio: AppleScreenCaptureKitRecordingFile?
+    let microphoneAudio: AppleScreenCaptureKitRecordingFile?
+
+    init(
+        combinedRecording: AppleScreenCaptureKitRecordingFile,
+        systemAudio: AppleScreenCaptureKitRecordingFile? = nil,
+        microphoneAudio: AppleScreenCaptureKitRecordingFile? = nil
+    ) {
+        self.combinedRecording = combinedRecording
+        self.systemAudio = systemAudio
+        self.microphoneAudio = microphoneAudio
+    }
+}
+
 protocol AppleScreenCaptureKitRecordingRuntime: Sendable {
     func startRecording(
         context: NativeCaptureStartContext,
@@ -364,7 +420,7 @@ protocol AppleScreenCaptureKitRecordingRuntime: Sendable {
 
     func stopRecording(
         _ token: AppleScreenCaptureKitRecordingToken
-    ) async throws -> AppleScreenCaptureKitRecordingFile
+    ) async throws -> AppleScreenCaptureKitRecordingFiles
 }
 
 private struct ActiveAppleScreenCaptureKitRecording: Sendable {
@@ -400,7 +456,7 @@ private struct UnavailableAppleScreenCaptureKitRecordingRuntime: AppleScreenCapt
 
     func stopRecording(
         _ token: AppleScreenCaptureKitRecordingToken
-    ) async throws -> AppleScreenCaptureKitRecordingFile {
+    ) async throws -> AppleScreenCaptureKitRecordingFiles {
         throw AppleScreenCaptureKitRuntimeError.unavailable(reason)
     }
 }
@@ -494,7 +550,7 @@ private actor DefaultAppleScreenCaptureKitRecordingRuntime: AppleScreenCaptureKi
 
     func stopRecording(
         _ token: AppleScreenCaptureKitRecordingToken
-    ) async throws -> AppleScreenCaptureKitRecordingFile {
+    ) async throws -> AppleScreenCaptureKitRecordingFiles {
         guard let session = recordings.removeValue(forKey: token) else {
             throw AppleScreenCaptureKitRuntimeError.unknownRecording(token)
         }
@@ -505,7 +561,9 @@ private actor DefaultAppleScreenCaptureKitRecordingRuntime: AppleScreenCaptureKi
             try session.streamDelegate.throwIfFailed()
             try session.recordingDelegate.throwIfFailed()
             try? await session.stream.stopCapture()
-            return AppleScreenCaptureKitRecordingFile(url: session.outputURL, format: "mp4")
+            return AppleScreenCaptureKitRecordingFiles(
+                combinedRecording: AppleScreenCaptureKitRecordingFile(url: session.outputURL, format: "mp4")
+            )
         } catch {
             try? await session.stream.stopCapture()
             throw error

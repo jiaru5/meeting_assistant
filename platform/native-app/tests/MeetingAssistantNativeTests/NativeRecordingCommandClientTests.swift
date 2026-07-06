@@ -616,6 +616,114 @@ struct NativeRecordingCommandClientTests {
     }
 
     @Test
+    func screenCaptureKitRegistersIndependentAudioArtifactsWhenRuntimeProducesThem() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let runtime = FakeAppleScreenCaptureKitRuntime(
+            stopBehavior: .recordingFiles(
+                combined: data("combined-screen-video"),
+                systemAudio: data("independent-system-audio"),
+                microphoneAudio: data("independent-microphone-audio")
+            )
+        )
+        let adapter = AppleScreenCaptureKitNativeCaptureAdapter(
+            runtime: runtime,
+            audioExtractor: FakeAppleScreenCaptureKitMixedAudioExtractor(
+                behavior: .extracted(data("mixed-audio-from-combined-recording"))
+            )
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-sck-independent-audio",
+            adapter: adapter
+        )
+
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+        let response = try await client.stopRecording(
+            StopRecordingRequest(sessionID: "session-sck-independent-audio")
+        )
+
+        #expect(response.ok == true)
+        #expect(response.status == "recorded")
+        let system = try #require(response.artifacts.first { $0.artifactType == "system_audio" })
+        let microphone = try #require(response.artifacts.first { $0.artifactType == "microphone_audio" })
+        let mixed = try #require(response.artifacts.first { $0.artifactType == "mixed_audio" })
+        #expect(system.captureStatus == "available")
+        #expect(system.format == "m4a")
+        #expect(system.path == "artifacts/system_audio.m4a")
+        #expect(microphone.captureStatus == "available")
+        #expect(microphone.format == "m4a")
+        #expect(microphone.path == "artifacts/microphone_audio.m4a")
+        #expect(mixed.captureStatus == "available")
+
+        let systemURL = artifactURL(workspace, "session-sck-independent-audio", "system_audio.m4a")
+        let microphoneURL = artifactURL(workspace, "session-sck-independent-audio", "microphone_audio.m4a")
+        #expect(try Data(contentsOf: systemURL) == data("independent-system-audio"))
+        #expect(try Data(contentsOf: microphoneURL) == data("independent-microphone-audio"))
+        #expect(system.checksum == (try checksum(for: systemURL)))
+        #expect(microphone.checksum == (try checksum(for: microphoneURL)))
+
+        let session = try readSessionJSON(workspace: workspace, sessionID: "session-sck-independent-audio")
+        let artifacts = try #require(session["artifacts"] as? [[String: Any]])
+        #expect(artifacts.count == 4)
+        #expect(artifacts.compactMap { $0["checksum"] as? String }.count == 4)
+        #expect(artifacts.compactMap { $0["degradation_reason"] as? String }.isEmpty)
+    }
+
+    @Test
+    func screenCaptureKitDoesNotRegisterUnrequestedIndependentAudioFiles() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let runtime = FakeAppleScreenCaptureKitRuntime(
+            stopBehavior: .recordingFiles(
+                combined: data("combined-screen-video"),
+                systemAudio: data("unrequested-system-audio"),
+                microphoneAudio: data("unrequested-microphone-audio")
+            )
+        )
+        let adapter = AppleScreenCaptureKitNativeCaptureAdapter(runtime: runtime)
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-sck-unrequested-audio",
+            adapter: adapter
+        )
+
+        _ = try await client.startNativeRecording(
+            startRequest(
+                workspace: workspace,
+                captureSystemAudio: false,
+                captureMicrophoneAudio: false
+            )
+        )
+        let response = try await client.stopRecording(
+            StopRecordingRequest(sessionID: "session-sck-unrequested-audio")
+        )
+
+        #expect(response.ok == true)
+        #expect(response.status == "recorded")
+        let system = try #require(response.artifacts.first { $0.artifactType == "system_audio" })
+        let microphone = try #require(response.artifacts.first { $0.artifactType == "microphone_audio" })
+        #expect(system.captureStatus == "missing")
+        #expect(system.degradationReason == "system_audio was not requested for this native capture session.")
+        #expect(system.checksum == nil)
+        #expect(microphone.captureStatus == "missing")
+        #expect(microphone.degradationReason == "microphone_audio was not requested for this native capture session.")
+        #expect(microphone.checksum == nil)
+        #expect(!FileManager.default.fileExists(
+            atPath: artifactURL(workspace, "session-sck-unrequested-audio", "system_audio.m4a").path
+        ))
+        #expect(!FileManager.default.fileExists(
+            atPath: artifactURL(workspace, "session-sck-unrequested-audio", "microphone_audio.m4a").path
+        ))
+
+        let session = try readSessionJSON(workspace: workspace, sessionID: "session-sck-unrequested-audio")
+        let artifacts = try #require(session["artifacts"] as? [[String: Any]])
+        #expect(artifacts.count == 4)
+        #expect(artifacts.compactMap { $0["checksum"] as? String }.count == 1)
+        #expect(artifacts.compactMap { $0["degradation_reason"] as? String }.count == 3)
+    }
+
+    @Test
     func screenCaptureKitNoAvailableMediaFailsClosedThroughRecordingClient() async throws {
         let workspace = try temporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
@@ -1427,6 +1535,7 @@ private actor FakeAppleScreenCaptureKitRuntime: AppleScreenCaptureKitRecordingRu
 
     enum StopBehavior: Equatable {
         case recordingData(Data)
+        case recordingFiles(combined: Data, systemAudio: Data?, microphoneAudio: Data?)
         case missingRecordingFile
         case emptyRecordingFile
         case failure(String)
@@ -1474,14 +1583,32 @@ private actor FakeAppleScreenCaptureKitRuntime: AppleScreenCaptureKitRecordingRu
 
     func stopRecording(
         _ token: AppleScreenCaptureKitRecordingToken
-    ) async throws -> AppleScreenCaptureKitRecordingFile {
+    ) async throws -> AppleScreenCaptureKitRecordingFiles {
         guard let outputURL = outputURLs.removeValue(forKey: token) else {
             throw FakeAppleScreenCaptureKitRuntimeError(message: "unknown fake recording token")
         }
 
+        var systemAudioFile: AppleScreenCaptureKitRecordingFile?
+        var microphoneAudioFile: AppleScreenCaptureKitRecordingFile?
         switch stopBehavior {
         case .recordingData(let data):
             try data.write(to: outputURL)
+        case .recordingFiles(let combined, let systemAudio, let microphoneAudio):
+            try combined.write(to: outputURL)
+            if let systemAudio {
+                let systemURL = outputURL
+                    .deletingLastPathComponent()
+                    .appendingPathComponent("system_audio.m4a", isDirectory: false)
+                try systemAudio.write(to: systemURL)
+                systemAudioFile = AppleScreenCaptureKitRecordingFile(url: systemURL, format: "m4a")
+            }
+            if let microphoneAudio {
+                let microphoneURL = outputURL
+                    .deletingLastPathComponent()
+                    .appendingPathComponent("microphone_audio.m4a", isDirectory: false)
+                try microphoneAudio.write(to: microphoneURL)
+                microphoneAudioFile = AppleScreenCaptureKitRecordingFile(url: microphoneURL, format: "m4a")
+            }
         case .missingRecordingFile:
             break
         case .emptyRecordingFile:
@@ -1490,7 +1617,11 @@ private actor FakeAppleScreenCaptureKitRuntime: AppleScreenCaptureKitRecordingRu
             throw FakeAppleScreenCaptureKitRuntimeError(message: message)
         }
 
-        return AppleScreenCaptureKitRecordingFile(url: outputURL, format: "mp4")
+        return AppleScreenCaptureKitRecordingFiles(
+            combinedRecording: AppleScreenCaptureKitRecordingFile(url: outputURL, format: "mp4"),
+            systemAudio: systemAudioFile,
+            microphoneAudio: microphoneAudioFile
+        )
     }
 }
 
