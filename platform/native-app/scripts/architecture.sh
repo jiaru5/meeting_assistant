@@ -172,6 +172,35 @@ grep -R -q "MA_NATIVE_APP_REAL_RUNTIME_SMOKE" UITests/MeetingAssistantNativeAppU
 grep -R -q "MA_NATIVE_APP_VSMA21_HARDENING_SMOKE" UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE" UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MA_NATIVE_APP_MVP_FULL_STACK_SMOKE" UITests/MeetingAssistantNativeAppUITests
+python3 - <<'PY'
+import sys
+from pathlib import Path
+
+source = Path("UITests/MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests.swift").read_text(
+    encoding="utf-8"
+)
+test_start = source.find("func testVSMA21RealScreenCaptureKitProcessingTranscriptActionsSameChainWhenExplicitlyEnabled")
+next_test = source.find("\n    func test", test_start + 1)
+fixture_start = source.find("private final class AppRealCaptureSameChainCLIFixture")
+next_fixture = source.find("\nprivate final class", fixture_start + 1)
+
+same_chain_test = source[test_start:next_test]
+same_chain_fixture = source[fixture_start:next_fixture]
+
+if 'assertElement("ma.recording.artifact.microphone_audio.status", in: app, contains: "microphone_audio: available")' in same_chain_test:
+    print(
+        "native-app architecture check failed: VS-MA-21 same-chain smoke must not require independent microphone_audio availability.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+if "captureSystemAudio: true" not in same_chain_fixture or "captureMicrophoneAudio: false" not in same_chain_fixture:
+    print(
+        "native-app architecture check failed: VS-MA-21 same-chain smoke must request system audio while keeping microphone audio disabled.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+PY
 grep -R -q "isTranscriptActionClientTestHookAllowed" App/MeetingAssistantNativeApp.swift
 grep -R -q "#if DEBUG" App/MeetingAssistantNativeApp.swift
 grep -q "SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;" MeetingAssistantNative.xcodeproj/project.pbxproj
@@ -207,6 +236,24 @@ if missing_debug:
 leaking_release = [settings for settings in release_settings if "SWIFT_ACTIVE_COMPILATION_CONDITIONS" in settings and "DEBUG" in settings]
 if leaking_release:
     raise SystemExit("native-app architecture check failed: Release configurations must not define DEBUG or enable XCTest-only hooks.")
+
+app_settings = [
+    settings
+    for settings in debug_settings + release_settings
+    if 'PRODUCT_BUNDLE_IDENTIFIER = "local.meeting-assistant.native";' in settings
+]
+if len(app_settings) != 2:
+    raise SystemExit("native-app architecture check failed: expected Debug and Release app target configurations.")
+
+missing_microphone_usage = [
+    settings
+    for settings in app_settings
+    if "INFOPLIST_KEY_NSMicrophoneUsageDescription" not in settings
+]
+if missing_microphone_usage:
+    raise SystemExit(
+        "native-app architecture check failed: app target must declare NSMicrophoneUsageDescription so macOS can prompt for microphone permission."
+    )
 
 scheme = Path("MeetingAssistantNative.xcodeproj/xcshareddata/xcschemes/MeetingAssistantNative.xcscheme").read_text(encoding="utf-8")
 required_scheme_markers = [

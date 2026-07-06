@@ -369,6 +369,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Meeting Assistant Native";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Meeting Assistant Native records microphone audio only when local meeting recording requests microphone capture.";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 0.1.0;
@@ -391,6 +392,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Meeting Assistant Native";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Meeting Assistant Native records microphone audio only when local meeting recording requests microphone capture.";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 0.1.0;

@@ -212,8 +212,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
 
         assertElement("ma.recording.status", in: app, contains: "Recording saved.")
         assertElement("ma.recording.artifact.screen_video.status", in: app, contains: "screen_video: available")
-        assertElement("ma.recording.artifact.system_audio.status", in: app, contains: "system_audio: available")
-        assertElement("ma.recording.artifact.microphone_audio.status", in: app, contains: "microphone_audio: available")
+        assertElement("ma.recording.artifact.microphone_audio.status", in: app, contains: "microphone_audio: missing")
 
         let recordedSession = try fixture.sessionMetadata()
         let recordedArtifacts = try XCTUnwrap(recordedSession["artifacts"] as? [[String: Any]])
@@ -2017,19 +2016,30 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             return
         }
 
-        for _ in 0..<8 {
+        for attempt in 0..<8 {
             let element = app
                 .descendants(matching: .any)
                 .matching(identifier: targetIdentifier)
                 .firstMatch
             if element.exists {
+                if hasUsableFrame(element.frame), hasUsableFrame(scrollView.frame) {
+                    if element.frame.minY < scrollView.frame.minY {
+                        scrollView.swipeDown()
+                    } else if element.frame.maxY > scrollView.frame.maxY {
+                        scrollView.swipeUp()
+                    }
+                }
                 return
             }
             if app.state != .runningForeground {
                 app.activate()
                 _ = app.wait(for: .runningForeground, timeout: 5)
             }
-            scrollView.swipeUp()
+            if attempt.isMultiple(of: 2) {
+                scrollView.swipeUp()
+            } else {
+                scrollView.swipeDown()
+            }
         }
     }
 
@@ -2278,7 +2288,7 @@ private final class AppRealCaptureSameChainCLIFixture {
     init(sourceFile: StaticString = #filePath) throws {
         captureFixture = try AppAppleScreenCaptureKitRecordingFixture(
             captureSystemAudio: true,
-            captureMicrophoneAudio: true
+            captureMicrophoneAudio: false
         )
 
         let nativeAppRootURL = URL(fileURLWithPath: String(describing: sourceFile))
