@@ -83,8 +83,29 @@ struct RecordingControlViewModelTests {
         #expect(viewModel.state.phase == .failed)
         #expect(viewModel.state.sessionID == nil)
         #expect(viewModel.state.errorCode == .permissionDenied)
-        #expect(viewModel.state.errorMessage == "Screen Recording permission is missing.")
+        #expect(viewModel.state.errorMessage?.contains("Screen Recording permission is missing.") == true)
+        #expect(viewModel.state.errorMessage?.contains("System Settings > Privacy & Security") == true)
         #expect(await client.startRequests.count == 1)
+    }
+
+    @Test
+    @MainActor
+    func permissionFailureShowsDetailsAndRepairHint() async {
+        let client = PermissionDeniedRecordingCommandClient(
+            details: ["Screen Recording permission is denied."]
+        )
+        let viewModel = RecordingControlViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState()
+        )
+
+        await viewModel.start()
+
+        #expect(viewModel.state.phase == .failed)
+        #expect(viewModel.state.errorCode == .permissionDenied)
+        #expect(viewModel.state.errorMessage?.contains("Native capture permissions are denied or unknown.") == true)
+        #expect(viewModel.state.errorMessage?.contains("Screen Recording permission is denied.") == true)
+        #expect(viewModel.state.errorMessage?.contains("System Settings > Privacy & Security") == true)
     }
 
     @Test
@@ -268,5 +289,32 @@ private actor HangingRecordingCommandClient: RecordingCommandClient {
 
     func stopRecording(_ request: StopRecordingRequest) async throws -> RecordingCommandResponse {
         .successfulStop(sessionID: request.sessionID)
+    }
+}
+
+private actor PermissionDeniedRecordingCommandClient: RecordingCommandClient {
+    private let details: [String]
+
+    init(details: [String]) {
+        self.details = details
+    }
+
+    func startNativeRecording(_ request: StartNativeRecordingRequest) async throws -> RecordingCommandResponse {
+        .failure(
+            command: .startNativeRecording,
+            code: .permissionDenied,
+            message: "Native capture permissions are denied or unknown.",
+            details: details
+        )
+    }
+
+    func stopRecording(_ request: StopRecordingRequest) async throws -> RecordingCommandResponse {
+        .failure(
+            command: .stopRecording,
+            sessionID: request.sessionID,
+            code: .permissionDenied,
+            message: "Native capture permissions are denied or unknown.",
+            details: details
+        )
     }
 }

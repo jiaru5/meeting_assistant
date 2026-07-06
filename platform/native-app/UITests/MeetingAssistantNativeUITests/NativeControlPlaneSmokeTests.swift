@@ -182,7 +182,8 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         XCTAssertEqual(viewModel.state.statusText, "Recording failed.")
         XCTAssertEqual(viewModel.state.sessionID, nil)
         XCTAssertEqual(viewModel.state.errorCode, .permissionDenied)
-        XCTAssertEqual(viewModel.state.errorMessage, "Screen Recording permission is missing.")
+        XCTAssertTrue(viewModel.state.errorMessage?.contains("Screen Recording permission is missing.") == true)
+        XCTAssertTrue(viewModel.state.errorMessage?.contains("System Settings > Privacy & Security") == true)
         XCTAssertEqual(
             hostedReadinessStatusText(for: viewModel.state.phase),
             "Recording command failed."

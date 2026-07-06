@@ -120,7 +120,8 @@ struct RecordingStateMachineTests {
         #expect(viewModel.state.phase == .failed)
         #expect(viewModel.state.sessionID == nil)
         #expect(viewModel.state.errorCode == .permissionDenied)
-        #expect(viewModel.state.errorMessage == "Screen recording permission is denied.")
+        #expect(viewModel.state.errorMessage?.contains("Screen recording permission is denied.") == true)
+        #expect(viewModel.state.errorMessage?.contains("System Settings > Privacy & Security") == true)
         #expect(viewModel.state.canStop == false)
     }
 

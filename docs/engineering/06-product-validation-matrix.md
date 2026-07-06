@@ -431,6 +431,14 @@
 |---|---|---|---|
 | 本轮 `develop` VS-MA-21 native recording start timeout | `PV-MA-001`、`PV-MA-002`; `TDG-MA-004`、`TDG-MA-005`、`TDG-MA-006` | `RecordingControlViewModel` 现在在 start command 长时间不返回时通过 watchdog 将 UI 从 `Starting recording...` 落到 `Recording failed.`，并显示 `capture_failed` 与可执行提示，避免 macOS 权限请求或 ScreenCaptureKit start 阻塞时让用户停在不可解释的 starting 状态。新增 `RecordingControlViewModelTests.startTimeoutMovesIntoFailedWhenCommandDoesNotReturn` 覆盖 command 不返回时的失败态；`AppBundleLocatorSmokeTests.assertRecordingStarted` 等待窗口覆盖该 watchdog，以便 same-chain app-bundle smoke 记录真实 failure state 而不是提前报 `<missing>`。2026-07-06 本机复跑 `MA_NATIVE_APP_XCODE_DESTINATION='platform=macOS,arch=arm64' MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE=1 ./platform/native-app/scripts/test-app-bundle.sh`，点击 `ma.recording.startButton` 后进入可见失败：`ma.recording.status` 为 `Recording failed.`，`ma.recording.error` 为 `Native capture permissions are denied or unknown. Error code: permission_denied`；同轮 `./platform/native-app/scripts/test.sh` 通过 151 个测试。 | 证明 native app 录制启动阻塞不会再停留在不可解释的 pending UI，并且 same-chain smoke 能推进到明确 TCC blocker；仍不证明本机已授权 app bundle、真实 `mixed_audio`、真实 capture -> transcript/export/delete 同链路、独立系统/麦克风音频产物、跨机器 TCC/display 可重复、release bundle、发布范围 `PV-MA-*` covered 或 `VS-MA-23` readiness。 |
 
+## 2026-07-06 VS-MA-21 native recording permission repair hint evidence 回填
+
+本节补充真实 native app 录制权限失败时的用户可执行修复提示。该回填不新增产品事实，不改变 command、artifact、event、error code、Release hook、真实 capture 策略或发布范围；所有相关 `PV-MA-*` 和 `VS-MA-21` 继续保持 `partial` 口径。
+
+| 来源 | 影响矩阵行 | 追加证据 | 状态影响 |
+|---|---|---|---|
+| 本轮 `develop` VS-MA-21 native recording permission repair hint | `PV-MA-001`、`PV-MA-002`; `TDG-MA-004`、`TDG-MA-006`、`TDG-MA-007` | `RecordingControlViewModel` 现在在 `permission_denied` 的 start/stop failure 中保留原始 message，追加 provider details，并展示 `System Settings > Privacy & Security` 修复路径，避免 same-chain app-bundle smoke 或真实用户只看到泛化权限失败。`RecordingControlViewModelTests.permissionFailureShowsDetailsAndRepairHint` 覆盖 provider detail 与修复提示；既有 start failure、recording state machine 和 hosted SwiftUI smoke 断言同步改为验证原始错误与修复提示都可见。 | 证明权限失败的 native UI surface 能给用户明确的本机修复动作，并能保留 `permission_denied` 诊断细节；仍不证明本机已授权 app bundle、真实 `mixed_audio`、真实 capture -> transcript/export/delete 同链路、跨机器 TCC/display 可重复、release bundle、发布范围 `PV-MA-*` covered 或 `VS-MA-23` readiness。 |
+
 ## 2026-07-06 VS-MA-21 native app Screen Recording request evidence 回填
 
 本节补充真实 native app 录制路径的 macOS Screen Recording 授权请求能力。该回填不新增产品事实，不改变 command、artifact、event、error code、exit code、Release hook、真实 capture 策略或发布范围；所有相关 `PV-MA-*` 和 `VS-MA-21` 继续保持 `partial` 口径。

@@ -228,7 +228,7 @@ public final class RecordingControlViewModel: ObservableObject {
             guard activeStartAttemptID == attemptID else {
                 return
             }
-            fail(code: failure.code, message: failure.message, sessionID: nil)
+            fail(code: failure.code, message: visibleFailureMessage(for: failure), sessionID: nil)
         } catch {
             guard activeStartAttemptID == attemptID else {
                 return
@@ -259,7 +259,7 @@ public final class RecordingControlViewModel: ObservableObject {
             )
             try handleStopResponse(response, existingSessionID: sessionID)
         } catch let failure as RecordingCommandFailure {
-            fail(code: failure.code, message: failure.message, sessionID: sessionID)
+            fail(code: failure.code, message: visibleFailureMessage(for: failure), sessionID: sessionID)
         } catch {
             fail(code: nil, message: error.localizedDescription, sessionID: sessionID)
         }
@@ -333,6 +333,17 @@ public final class RecordingControlViewModel: ObservableObject {
             savedSummary: nil,
             warnings: []
         )
+    }
+
+    private func visibleFailureMessage(for failure: RecordingCommandFailure) -> String {
+        guard failure.code == .permissionDenied else {
+            return failure.message
+        }
+        let details = failure.details
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && !failure.message.contains($0) }
+        let repairHint = "Open System Settings > Privacy & Security and grant the missing Screen Recording / Screen & System Audio Recording or Microphone permission, then relaunch and retry."
+        return ([failure.message] + details + [repairHint]).joined(separator: " ")
     }
 
     private func armStartTimeout(for attemptID: UUID) {
