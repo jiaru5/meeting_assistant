@@ -52,14 +52,21 @@ def non_pcm_wav_bytes(payload: bytes = b"\x00\x01") -> bytes:
 def write_fake_ffmpeg(bin_dir: Path, output_fixture: Path) -> Path:
     ffmpeg = bin_dir / "ffmpeg"
     ffmpeg.write_text(
-        """#!/bin/sh
-set -eu
-last=""
-for arg in "$@"; do
-  last="$arg"
-done
-/bin/cp "$MEETING_ASSISTANT_FAKE_FFMPEG_OUTPUT" "$last"
-""",
+        "\n".join(
+            [
+                "#!/bin/sh",
+                "set -eu",
+                'last=""',
+                'for arg in "$@"; do',
+                '  last="$arg"',
+                "done",
+                'if [ -n "${MEETING_ASSISTANT_FAKE_FFMPEG_ARGS:-}" ]; then',
+                '  printf "%s\\n" "$@" > "$MEETING_ASSISTANT_FAKE_FFMPEG_ARGS"',
+                "fi",
+                '/bin/cp "$MEETING_ASSISTANT_FAKE_FFMPEG_OUTPUT" "$last"',
+            ]
+        )
+        + "\n",
         encoding="utf-8",
     )
     ffmpeg.chmod(0o755)
@@ -506,6 +513,7 @@ class AudioProcessingTests(unittest.TestCase):
             bin_dir = root / "bin"
             bin_dir.mkdir()
             output_fixture = root / "ffmpeg-output.wav"
+            args_path = root / "ffmpeg-args.txt"
             output_fixture.write_bytes(wav_bytes(b"normalized"))
             write_fake_ffmpeg(bin_dir, output_fixture)
             original_checksum = sha256_file(session_dir / "artifacts" / "mixed_audio.m4a")
@@ -515,6 +523,7 @@ class AudioProcessingTests(unittest.TestCase):
                 {
                     "PATH": str(bin_dir),
                     "MEETING_ASSISTANT_FAKE_FFMPEG_OUTPUT": str(output_fixture),
+                    "MEETING_ASSISTANT_FAKE_FFMPEG_ARGS": str(args_path),
                 },
                 clear=False,
             ):
@@ -524,6 +533,7 @@ class AudioProcessingTests(unittest.TestCase):
             normalized_bytes = normalized_path.read_bytes()
             final_checksum = sha256_file(session_dir / "artifacts" / "mixed_audio.m4a")
             indexed = artifacts_by_type(session_dir)
+            ffmpeg_args = args_path.read_text(encoding="utf-8").splitlines()
 
         self.assertTrue(response["ok"])
         self.assertEqual(response["source_artifact_id"], "artifact-mixed_audio")
@@ -531,6 +541,8 @@ class AudioProcessingTests(unittest.TestCase):
         self.assertEqual(indexed["normalized_audio"][0]["format"], "wav")
         self.assertEqual(indexed["normalized_audio"][0]["path"], str(normalized_path))
         self.assertEqual(final_checksum, original_checksum)
+        self.assertIn("-f", ffmpeg_args)
+        self.assertEqual(ffmpeg_args[ffmpeg_args.index("-f") + 1], "wav")
 
     def test_ffmpeg_success_still_requires_pcm_wav_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

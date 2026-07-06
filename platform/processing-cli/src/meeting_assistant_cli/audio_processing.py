@@ -288,6 +288,8 @@ def _ffmpeg_normalizer(source: Path, destination: Path) -> None:
                 "1",
                 "-ar",
                 "16000",
+                "-f",
+                "wav",
                 str(destination),
             ],
             capture_output=True,
