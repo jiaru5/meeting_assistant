@@ -863,6 +863,28 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("real-runtime-diagnostics", script)
         self.assertIn("native_app_bundle_ui_automation_report.py", script)
 
+    def test_app_bundle_xctestrun_reuse_defaults_to_fingerprinted_auto_mode(self) -> None:
+        script = (ROOT / "platform/native-app/scripts/test-app-bundle.sh").read_text(encoding="utf-8")
+        dev_commands = (ROOT / "docs/engineering/02-dev-commands.md").read_text(encoding="utf-8")
+        e2e_readme = (ROOT / "platform/e2e/README.md").read_text(encoding="utf-8")
+
+        self.assertIn('reuse_xctestrun="${MA_NATIVE_APP_REUSE_XCTESTRUN:-auto}"', script)
+        self.assertIn(".meeting-assistant-xctestrun-inputs.sha256", script)
+        self.assertIn("compute_xctestrun_input_fingerprint", script)
+        self.assertIn("platform/native-app/App", script)
+        self.assertIn("platform/native-app/Sources", script)
+        self.assertIn("platform/native-app/UITests", script)
+        self.assertIn("platform/native-app/MeetingAssistantNative.xcodeproj/project.pbxproj", script)
+        self.assertIn('printf \'destination=%s\\n\' "$destination"', script)
+        self.assertIn("auto-reusing existing xctestrun", script)
+        self.assertIn("MA_NATIVE_APP_REUSE_XCTESTRUN=0", script)
+        self.assertIn("fingerprint differs from the current checkout", script)
+        self.assertIn("MA_NATIVE_APP_REUSE_XCTESTRUN=auto", dev_commands)
+        self.assertIn(".meeting-assistant-xctestrun-inputs.sha256", dev_commands)
+        self.assertIn("反复弹 Screen Recording", dev_commands)
+        self.assertIn("MA_NATIVE_APP_REUSE_XCTESTRUN=auto", e2e_readme)
+        self.assertIn("Debug ad-hoc rebuild", e2e_readme)
+
     def test_vs_ma_21_app_bundle_hardening_smoke_is_documented_and_explicit(self) -> None:
         script = (ROOT / "platform/native-app/scripts/test-app-bundle.sh").read_text(encoding="utf-8")
         fast_gate_script = (ROOT / "platform/native-app/scripts/test.sh").read_text(encoding="utf-8")

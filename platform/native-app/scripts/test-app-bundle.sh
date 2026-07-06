@@ -6,7 +6,8 @@ cd "$component_dir"
 
 derived_data_path="${MA_NATIVE_APP_DERIVED_DATA_PATH:-$component_dir/build/DerivedData/AppBundleUITests}"
 destination="${MA_NATIVE_APP_XCODE_DESTINATION:-platform=macOS}"
-reuse_xctestrun="${MA_NATIVE_APP_REUSE_XCTESTRUN:-0}"
+reuse_xctestrun="${MA_NATIVE_APP_REUSE_XCTESTRUN:-auto}"
+xctestrun_fingerprint_path="$derived_data_path/.meeting-assistant-xctestrun-inputs.sha256"
 ui_automation_retry_attempts="${MA_NATIVE_APP_UI_AUTOMATION_RETRY_ATTEMPTS:-1}"
 ui_automation_retry_delay_seconds="${MA_NATIVE_APP_UI_AUTOMATION_RETRY_DELAY_SECONDS:-5}"
 real_capture_smoke="${MA_NATIVE_APP_REAL_CAPTURE_SMOKE:-0}"
@@ -54,18 +55,68 @@ find_xctestrun_path() {
   find "$derived_data_path/Build/Products" -maxdepth 1 -name "*.xctestrun" -print -quit 2>/dev/null || true
 }
 
+compute_xctestrun_input_fingerprint() {
+  local root_dir
+  local relative_path
+
+  root_dir="$(cd "$component_dir/../.." && pwd)"
+  if ! command -v git >/dev/null 2>&1 || ! command -v shasum >/dev/null 2>&1; then
+    return 1
+  fi
+
+  (
+    printf 'destination=%s\n' "$destination"
+    xcodebuild -version 2>/dev/null | sed 's/^/xcodebuild=/' || true
+    git -C "$root_dir" ls-files -z -- \
+      "platform/native-app/App" \
+      "platform/native-app/Sources" \
+      "platform/native-app/UITests" \
+      "platform/native-app/MeetingAssistantNative.xcodeproj/project.pbxproj" \
+      "platform/native-app/MeetingAssistantNative.xcodeproj/xcshareddata" \
+      | while IFS= read -r -d '' relative_path; do
+          printf 'path=%s\n' "$relative_path"
+          shasum -a 256 "$root_dir/$relative_path"
+        done
+  ) | shasum -a 256 | awk '{print $1}'
+}
+
 prepare_xctestrun() {
   local smoke_name="$1"
+  local current_fingerprint=""
+  local saved_fingerprint=""
 
-  if is_truthy "$reuse_xctestrun"; then
-    xctestrun_path="$(find_xctestrun_path)"
+  xctestrun_path="$(find_xctestrun_path)"
+  current_fingerprint="$(compute_xctestrun_input_fingerprint || true)"
+
+  if [[ "$reuse_xctestrun" == "auto" ]]; then
+    if [[ -n "$xctestrun_path" && -n "$current_fingerprint" && -f "$xctestrun_fingerprint_path" ]]; then
+      saved_fingerprint="$(<"$xctestrun_fingerprint_path")"
+      if [[ "$saved_fingerprint" == "$current_fingerprint" ]]; then
+        echo "native-app $smoke_name app-bundle XCUITest auto-reusing existing xctestrun: $xctestrun_path" >&2
+        echo "Set MA_NATIVE_APP_REUSE_XCTESTRUN=0 to force rebuild-for-testing." >&2
+        return 0
+      fi
+      echo "native-app $smoke_name app-bundle XCUITest inputs changed; rebuilding xctestrun for current app/test sources." >&2
+    elif [[ -n "$xctestrun_path" ]]; then
+      echo "native-app $smoke_name app-bundle XCUITest cannot prove existing xctestrun fingerprint; rebuilding once and recording a reuse fingerprint." >&2
+    fi
+  elif is_truthy "$reuse_xctestrun"; then
     if [[ -z "$xctestrun_path" ]]; then
       echo "error: MA_NATIVE_APP_REUSE_XCTESTRUN=1 was set but no .xctestrun file exists under $derived_data_path/Build/Products" >&2
       echo "Run the same app-bundle smoke once without MA_NATIVE_APP_REUSE_XCTESTRUN before granting or reusing the exact app bundle." >&2
       exit 1
     fi
+    if [[ -n "$current_fingerprint" && -f "$xctestrun_fingerprint_path" ]]; then
+      saved_fingerprint="$(<"$xctestrun_fingerprint_path")"
+      if [[ "$saved_fingerprint" != "$current_fingerprint" ]]; then
+        echo "warning: MA_NATIVE_APP_REUSE_XCTESTRUN=1 is reusing an xctestrun whose app/test input fingerprint differs from the current checkout." >&2
+      fi
+    fi
     echo "native-app $smoke_name app-bundle XCUITest reusing existing xctestrun: $xctestrun_path" >&2
     return 0
+  elif [[ "$reuse_xctestrun" != "0" && "$reuse_xctestrun" != "false" && "$reuse_xctestrun" != "FALSE" && "$reuse_xctestrun" != "no" && "$reuse_xctestrun" != "NO" ]]; then
+    echo "error: MA_NATIVE_APP_REUSE_XCTESTRUN must be auto, 0, 1, true, false, yes, or no." >&2
+    exit 2
   fi
 
   xcodebuild build-for-testing \
@@ -79,6 +130,9 @@ prepare_xctestrun() {
   if [[ -z "$xctestrun_path" ]]; then
     echo "error: build-for-testing did not produce an .xctestrun file under $derived_data_path/Build/Products" >&2
     exit 1
+  fi
+  if [[ -n "$current_fingerprint" ]]; then
+    printf '%s\n' "$current_fingerprint" >"$xctestrun_fingerprint_path"
   fi
 }
 
