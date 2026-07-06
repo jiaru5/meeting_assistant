@@ -268,6 +268,8 @@
 
 2026-07-06 08:25 CST 本机复跑同一命令，real capture app-bundle stage 进入 test body 后仍以 `permission_denied` 失败，VS-MA-21 hardening app-bundle stage 继续通过；report `platform/e2e/build/release-native-ui-hardening/reports/release-native-ui-hardening-report-20260706T002358Z-51739.json` 声明 `passed=false`、`blocked=true`、`blocker_type=real_capture_permission_denied`、`real_capture_exit_code=65`、`hardening_exit_code=0`。`release_native_ui_hardening_report.py` 同步补充 `real_capture_derived_data_path`、`real_capture_app_bundle_under_test`、`real_capture_xcodebuild_log_path`、`real_capture_xcresult_path` 和 `real_capture_tcc_remediation` 字段，用于授权本次 app bundle 后复跑；该补充只增强 blocker 可诊断性，不提升 `PV-MA-009` 或 `VS-MA-21` 状态。
 
+2026-07-06 09:10 CST 补充：`release_native_ui_hardening_report.py` 会解析 `AppleScreenCaptureKitNativeCaptureAdapter.swift` 的 capability summary，并在 report 中写入 `real_capture_adapter_capability`、`real_capture_combined_recording_file_supported=true`、`real_capture_separate_audio_artifacts_supported=false`、`real_capture_independent_audio_artifacts_proven=false`、`real_capture_mixed_audio_artifact_proven=false` 和 `real_capture_to_processing_same_chain_proven=false`。如果该 source contract 缺失，或从 combined-only 变为独立音频支持但 report 未同步更新，report 会以 `adapter_capability_contract_changed` fail closed。该补充只防止 TCC 放行后的 real capture 证据被误读为独立 audio artifact、`mixed_audio` 或真实 capture -> transcript/export/delete 同链路通过；`VS-MA-21` 仍为 `partial evidence`。
+
 ## 2026-07-05 VS-MA-21/22 full-stack marker attribution guard 回填
 
 本节补充 full-stack smoke 证据归属的防误读回归。该回填不新增产品事实，不改变 command、artifact、event、error code、exit code、Release hook、真实 capture 策略或发布范围；所有涉及 `PV-MA-*`、`SEC-MA-*` 和 `TDG-MA-*` 继续保持 `partial` 口径，不能声明 VS-MA-23、release candidate、PV release readiness 或 release preflight 已进入。

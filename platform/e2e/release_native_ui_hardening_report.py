@@ -20,9 +20,14 @@ EXPECTED_MARKERS = {
     "hardening_completed_state": "Processing complete.",
 }
 
+ADAPTER_SOURCE_RELATIVE_PATH = Path(
+    "platform/native-app/Sources/MeetingAssistantNative/AppleScreenCaptureKitNativeCaptureAdapter.swift"
+)
+
 RELEASE_SCOPE_RESIDUAL_RISKS = [
     "does not prove full real capture -> transcript/export/delete same-chain success",
     "does not prove independent system_audio or microphone_audio artifacts",
+    "does not prove a separate mixed_audio artifact from ScreenCaptureKit",
     "does not prove all macOS TCC/display target machines",
     "does not prove release bundle, signing, notarization, SLSA provenance, or VS-MA-23 release readiness",
 ]
@@ -58,6 +63,39 @@ def _extract_xcresult_path(text: str) -> str | None:
     return match.group(1).strip()
 
 
+def _extract_bool_argument(text: str, label: str) -> bool | None:
+    match = re.search(rf"{re.escape(label)}:\s*(true|false)", text)
+    if not match:
+        return None
+    return match.group(1) == "true"
+
+
+def _adapter_capability_report(source_root: Path | None = None) -> dict[str, Any]:
+    root = source_root if source_root is not None else Path(__file__).resolve().parents[2]
+    source_path = root / ADAPTER_SOURCE_RELATIVE_PATH
+    source_text = _read_text(source_path)
+    combined_recording = _extract_bool_argument(source_text, "producesCombinedRecordingFile")
+    separate_audio = _extract_bool_argument(source_text, "producesSeparateAudioArtifacts")
+    source_present = source_path.is_file()
+    source_contract_ok = (
+        source_present
+        and 'public static let identity = "apple_screencapturekit"' in source_text
+        and "framework: \"ScreenCaptureKit\"" in source_text
+        and combined_recording is True
+        and separate_audio is False
+    )
+    return {
+        "adapter_id": "apple_screencapturekit",
+        "framework": "ScreenCaptureKit",
+        "source_path": str(ADAPTER_SOURCE_RELATIVE_PATH),
+        "source_present": source_present,
+        "combined_recording_file_supported": combined_recording,
+        "separate_audio_artifacts_supported": separate_audio,
+        "source_contract_ok": source_contract_ok,
+        "report_update_required_if_contract_changes": True,
+    }
+
+
 def build_report(
     real_capture_output_path: Path,
     hardening_output_path: Path,
@@ -66,10 +104,12 @@ def build_report(
     real_capture_exit_code: int = 0,
     hardening_exit_code: int = 0,
     release_scope: bool = False,
+    source_root: Path | None = None,
 ) -> dict[str, Any]:
     real_capture_output = _read_text(real_capture_output_path)
     hardening_output = _read_text(hardening_output_path)
     combined_output = real_capture_output + "\n" + hardening_output
+    adapter_capability = _adapter_capability_report(source_root)
     real_capture_derived_data_path = _extract_line_value(real_capture_output, "DerivedData path")
     real_capture_app_bundle_under_test = _extract_line_value(real_capture_output, "App bundle under test")
     real_capture_xcodebuild_log_path = _extract_line_value(real_capture_output, "Captured xcodebuild log")
@@ -99,11 +139,13 @@ def build_report(
     )
     missing_markers = [key for key, present in marker_results.items() if not present]
     traceback_seen = "Traceback" in combined_output
+    adapter_capability_contract_ok = bool(adapter_capability["source_contract_ok"])
     passed = (
         real_capture_exit_code == 0
         and hardening_exit_code == 0
         and not missing_markers
         and not traceback_seen
+        and adapter_capability_contract_ok
     )
     release_gate = "release-scope-native-ui-hardening" if release_scope else "partial-evidence-only"
     findings: list[str] = []
@@ -115,6 +157,10 @@ def build_report(
         findings.append(f"missing expected markers: {', '.join(missing_markers)}")
     if traceback_seen:
         findings.append("smoke output contained a traceback")
+    if not adapter_capability_contract_ok:
+        findings.append(
+            "ScreenCaptureKit adapter capability source contract changed or could not be verified; update the release native UI hardening report before using this evidence"
+        )
     blocker_type = "none"
     if not passed:
         if real_capture_permission_denied:
@@ -125,6 +171,8 @@ def build_report(
             blocker_type = "real_capture_app_bundle_failed"
         elif hardening_exit_code != 0:
             blocker_type = "hardening_app_bundle_failed"
+        elif not adapter_capability_contract_ok:
+            blocker_type = "adapter_capability_contract_changed"
         else:
             blocker_type = "marker_validation_failed"
 
@@ -145,6 +193,12 @@ def build_report(
         "real_capture_app_bundle_under_test": real_capture_app_bundle_under_test,
         "real_capture_xcodebuild_log_path": real_capture_xcodebuild_log_path,
         "real_capture_xcresult_path": real_capture_xcresult_path,
+        "real_capture_adapter_capability": adapter_capability,
+        "real_capture_combined_recording_file_supported": adapter_capability["combined_recording_file_supported"],
+        "real_capture_separate_audio_artifacts_supported": adapter_capability["separate_audio_artifacts_supported"],
+        "real_capture_independent_audio_artifacts_proven": False,
+        "real_capture_mixed_audio_artifact_proven": False,
+        "real_capture_to_processing_same_chain_proven": False,
         "passed": passed,
         "blocked": not passed,
         "blocker_type": blocker_type,
