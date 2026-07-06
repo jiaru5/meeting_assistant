@@ -5,6 +5,7 @@ __pycache__/
 *.py[cod]
 
 .harness/evidence/
+.harness/release-inputs/
 
 .env
 .env.*
