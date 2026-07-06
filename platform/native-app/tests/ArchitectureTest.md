@@ -131,6 +131,14 @@ VS-MA-22 opt-in real runtime app-bundle smoke boundary:
 4. Production/default app runtime must not enable this hook, must not automatically choose a runtime from environment alone, and must not download models or audio fixtures.
 5. A passing real runtime app-bundle smoke remains partial evidence for native-to-provider runtime integration; it does not prove real ScreenCaptureKit output, true user Save Panel interaction, release distribution bundle, all developer machines, or product-validation release readiness.
 
+VS-MA-23 opt-in local functional real capture + real runtime app-bundle smoke boundary:
+
+1. `AppBundleLocatorSmokeTests` may run the combined local functional smoke only when the test process is explicitly launched with `MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE=1`.
+2. The smoke may play the configured mixed-language WAV through `/usr/bin/afplay` while the launched app records with ScreenCaptureKit system audio enabled; it must not copy fixture audio into the real capture session or mutate `session.json` directly.
+3. The launched app must use the same workspace/session for real Start/Stop, `mixed_audio` registration, provider-owned `platform/e2e/ma-cli-local.sh` processing with `whisper_cpp`, transcript review, copy/export and delete.
+4. The smoke must require host-provided `MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME`, `MEETING_ASSISTANT_TRANSCRIPTION_MODEL`, `MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO` and a usable local audio output path; it must not package or auto-download runtime/model/audio assets.
+5. A passing combined smoke is local direct-run functional evidence only. It does not prove Developer ID signing, notarization, App Store distribution, all target-machine TCC/display repeatability, real user Save Panel interaction or final product-validation release readiness.
+
 VS-MA-22 opt-in real runtime native bridge smoke boundary:
 
 1. `ProcessingStateViewModelTests` may exercise `ProcessingCommandProcessRunner` with the real `whisper.cpp` runtime only when `MA_NATIVE_REAL_RUNTIME_BRIDGE_SMOKE=1` is explicitly set.

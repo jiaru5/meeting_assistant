@@ -134,6 +134,7 @@ grep -q "MA_NATIVE_APP_REAL_ACTION_SMOKE" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_REAL_RUNTIME_SMOKE" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_VSMA21_HARDENING_SMOKE" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE" scripts/test-app-bundle.sh
+grep -q "MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_MVP_FULL_STACK_SMOKE" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_REUSE_XCTESTRUN" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_REUSE_XCTESTRUN:-auto" scripts/test-app-bundle.sh
@@ -157,6 +158,7 @@ grep -q "real-runtime-app-bundle-smoke.log" scripts/test-app-bundle.sh
 grep -q "vs-ma-21-hardening-app-bundle-smoke.log" scripts/test-app-bundle.sh
 grep -q "vs-ma-21-hardening-ui-automation-report.json" scripts/test-app-bundle.sh
 grep -q "real-capture-same-chain-app-bundle-smoke.log" scripts/test-app-bundle.sh
+grep -q "real-capture-real-runtime-same-chain-app-bundle-smoke.log" scripts/test-app-bundle.sh
 grep -q "mvp-full-stack-app-bundle-smoke.log" scripts/test-app-bundle.sh
 grep -R -q "MA_NATIVE_PROCESSING_CLIENT" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "AppRealProcessingCLIFixture" UITests/MeetingAssistantNativeAppUITests
@@ -171,6 +173,7 @@ grep -R -q "MA_NATIVE_APP_REAL_ACTION_SMOKE" UITests/MeetingAssistantNativeAppUI
 grep -R -q "MA_NATIVE_APP_REAL_RUNTIME_SMOKE" UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MA_NATIVE_APP_VSMA21_HARDENING_SMOKE" UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE" UITests/MeetingAssistantNativeAppUITests
+grep -R -q "MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE" UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MA_NATIVE_APP_MVP_FULL_STACK_SMOKE" UITests/MeetingAssistantNativeAppUITests
 python3 - <<'PY'
 import sys
@@ -406,7 +409,7 @@ fi
 app_bundle_forbidden='meeting_assistant_cli|ProcessingCLIDependencyCheckRunner|DependencyCheckProcessRunner|native-helper|processing-cli|helper[[:space:]]+tool|AVCapture|CGDisplayStream|SCStream|AVAudioEngine|AVAudioRecorder|generate_transcript|generate_speaker_labels|normalize_audio|import_media|export_transcript|delete_session|URLSession|URLRequest|NWConnection|NWListener|https?://|curl|wget'
 
 if grep -R --include '*.swift' -n -E "$app_bundle_forbidden" App UITests/MeetingAssistantNativeAppUITests |
-  grep -v -E 'MA_NATIVE_APP_REAL_PROCESSING_SMOKE|MA_NATIVE_APP_REAL_ACTION_SMOKE|MA_NATIVE_APP_VSMA21_HARDENING_SMOKE|MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE|MA_NATIVE_APP_MVP_FULL_STACK_SMOKE|real processing-cli app-bundle smoke|VS-MA-21 app-bundle hardening smoke|real capture same-chain|MVP full-stack'; then
+  grep -v -E 'MA_NATIVE_APP_REAL_PROCESSING_SMOKE|MA_NATIVE_APP_REAL_ACTION_SMOKE|MA_NATIVE_APP_VSMA21_HARDENING_SMOKE|MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE|MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE|MA_NATIVE_APP_MVP_FULL_STACK_SMOKE|real processing-cli app-bundle smoke|VS-MA-21 app-bundle hardening smoke|real capture same-chain|real capture \+ real runtime|MVP full-stack'; then
   echo "native-app architecture check failed: app-bundle smoke must keep processing command strings inside the native-owned shell fixture or the explicit real-processing CLI shim, and must not call capture frameworks, downloads, network APIs, or raw provider commands." >&2
   exit 1
 fi

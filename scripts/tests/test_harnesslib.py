@@ -936,6 +936,16 @@ class HarnessValidationTests(unittest.TestCase):
             same_chain_marker,
             script.index("configure_host_ffmpeg_for_app_bundle", same_chain_marker),
         )
+        self.assertIn("MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE", script)
+        self.assertIn(
+            "testVSMA23RealScreenCaptureKitWhisperRuntimeTranscriptActionsSameChainWhenExplicitlyEnabled",
+            script,
+        )
+        self.assertIn("real-capture-real-runtime-same-chain-app-bundle-smoke.log", script)
+        self.assertIn("MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE", app_bundle_tests)
+        self.assertIn("startSmokeAudioPlayback", app_bundle_tests)
+        self.assertIn("MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME", app_bundle_tests)
+        self.assertIn("MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE=1", dev_commands)
         self.assertIn("vs-ma-21-hardening-app-bundle-smoke.log", script)
         self.assertIn("vs-ma-21-hardening-ui-automation-report.json", script)
         self.assertIn('write_ui_testing_automation_blocker_report "VS-MA-21 hardening"', script)

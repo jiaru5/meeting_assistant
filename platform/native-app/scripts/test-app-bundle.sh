@@ -34,6 +34,9 @@ vs_ma21_hardening_ui_automation_report="$derived_data_path/reports/ui-automation
 real_capture_same_chain_smoke="${MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE:-0}"
 real_capture_same_chain_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testVSMA21RealScreenCaptureKitProcessingTranscriptActionsSameChainWhenExplicitlyEnabled"
 real_capture_same_chain_log="$derived_data_path/real-capture-same-chain-app-bundle-smoke.log"
+real_capture_real_runtime_same_chain_smoke="${MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE:-0}"
+real_capture_real_runtime_same_chain_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testVSMA23RealScreenCaptureKitWhisperRuntimeTranscriptActionsSameChainWhenExplicitlyEnabled"
+real_capture_real_runtime_same_chain_log="$derived_data_path/real-capture-real-runtime-same-chain-app-bundle-smoke.log"
 mvp_full_stack_smoke="${MA_NATIVE_APP_MVP_FULL_STACK_SMOKE:-0}"
 mvp_full_stack_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testMVPFullStackDesignedShellRecordingProcessingTranscriptActionsWhenExplicitlyEnabled"
 mvp_full_stack_log="$derived_data_path/mvp-full-stack-app-bundle-smoke.log"
@@ -162,6 +165,7 @@ reset_xctestrun_smoke_env() {
     MA_NATIVE_APP_REAL_RUNTIME_SMOKE \
     MA_NATIVE_APP_VSMA21_HARDENING_SMOKE \
     MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE \
+    MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE \
     MA_NATIVE_APP_MVP_FULL_STACK_SMOKE
   do
     set_xctestrun_env "$xctestrun_path" "$key" "0"
@@ -840,6 +844,41 @@ if [[ "$real_capture_same_chain_smoke" == "1" || "$real_capture_same_chain_smoke
   fi
 
   echo "native-app real capture same-chain app-bundle XCUITest passed."
+  exit 0
+fi
+
+if [[ "$real_capture_real_runtime_same_chain_smoke" == "1" || "$real_capture_real_runtime_same_chain_smoke" == "true" || "$real_capture_real_runtime_same_chain_smoke" == "yes" ]]; then
+  prepare_xctestrun "real capture real-runtime same-chain"
+  reset_xctestrun_smoke_env
+
+  set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE" "1"
+  configure_host_ffmpeg_for_app_bundle
+  require_env_for_real_runtime_smoke
+
+  app_bundle_path="$(find "$derived_data_path/Build/Products" -path "*/MeetingAssistantNative.app" -type d -print -quit)"
+
+  set +e
+  run_app_bundle_test_without_building "real capture real-runtime same-chain" "$real_capture_real_runtime_same_chain_log" "$real_capture_real_runtime_same_chain_test"
+  test_status=$?
+  set -e
+
+  if [[ "$test_status" -ne 0 ]]; then
+    echo "native-app real capture real-runtime same-chain app-bundle XCUITest failed. Captured xcodebuild log: $real_capture_real_runtime_same_chain_log" >&2
+    if is_ui_testing_automation_blocked "$real_capture_real_runtime_same_chain_log"; then
+      print_ui_testing_automation_help "real capture real-runtime same-chain" "$real_capture_real_runtime_same_chain_log"
+      print_ui_testing_automation_process_diagnostics
+      print_ui_testing_automation_log_excerpt
+    fi
+    if grep -q "permission_denied" "$real_capture_real_runtime_same_chain_log"; then
+      print_real_capture_permission_help \
+        "$app_bundle_path" \
+        "$real_capture_real_runtime_same_chain_log" \
+        "MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE=1 ./platform/native-app/scripts/test-app-bundle.sh"
+    fi
+    exit "$test_status"
+  fi
+
+  echo "native-app real capture real-runtime same-chain app-bundle XCUITest passed."
   exit 0
 fi
 

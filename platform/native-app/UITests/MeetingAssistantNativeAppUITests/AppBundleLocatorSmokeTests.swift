@@ -291,6 +291,119 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         XCTAssertFalse(deleteEvent.contains("Fake transcript generated from local audio."))
     }
 
+    func testVSMA23RealScreenCaptureKitWhisperRuntimeTranscriptActionsSameChainWhenExplicitlyEnabled() throws {
+        try XCTSkipUnless(
+            Self.realCaptureRealRuntimeSameChainCLISmokeEnabled(),
+            "Set MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE=1 to run the VS-MA-23 real capture + real runtime app-bundle smoke."
+        )
+
+        let fixture = try AppRealCaptureSameChainCLIFixture(realRuntime: true)
+        defer { fixture.cleanup() }
+        let app = launchApp(fixture: "ready", realCaptureSameChainFixture: fixture)
+
+        tapButton("ma.recording.startButton", in: app)
+
+        assertRecordingStarted(in: app)
+        assertElement("ma.recording.sessionID", in: app, contains: fixture.sessionID)
+        Thread.sleep(forTimeInterval: 1.0)
+        let playback = try fixture.startSmokeAudioPlayback()
+        defer { fixture.terminateSmokeAudioPlayback(playback) }
+        try fixture.waitForSmokeAudioPlayback(playback, timeout: 15)
+        Thread.sleep(forTimeInterval: 1.0)
+        tapRecordingButton(
+            "ma.recording.stopButton",
+            in: app,
+            expectingStatus: "Recording saved."
+        )
+
+        assertElement("ma.recording.status", in: app, contains: "Recording saved.")
+        assertElement("ma.recording.artifact.screen_video.status", in: app, contains: "screen_video: available")
+        assertElement("ma.recording.artifact.microphone_audio.status", in: app, contains: "microphone_audio: missing")
+
+        let recordedSession = try fixture.sessionMetadata()
+        let recordedArtifacts = try XCTUnwrap(recordedSession["artifacts"] as? [[String: Any]])
+        let mixedAudio = try XCTUnwrap(
+            recordedArtifacts.first { $0["artifact_type"] as? String == "mixed_audio" },
+            "Real capture + real runtime same-chain smoke requires ScreenCaptureKit to register mixed_audio."
+        )
+        XCTAssertEqual(
+            mixedAudio["capture_status"] as? String,
+            "available",
+            "Real capture + real runtime same-chain smoke requires mixed_audio available; current capture is \(mixedAudio["capture_status"] ?? "<missing>")."
+        )
+        let originalMixedAudioChecksum = try fixture.mixedAudioChecksum()
+
+        tapProcessingButton(
+            "ma.processing.startButton",
+            in: app,
+            expectingStatus: "Processing completed with transcript-only speaker labels."
+        )
+
+        assertElement(
+            "ma.processing.status",
+            in: app,
+            contains: "Processing completed with transcript-only speaker labels."
+        )
+        assertElement("ma.processing.transcriptStatus", in: app, contains: "generated with")
+        assertElement("ma.processing.degradation", in: app, contains: "transcript-only fallback")
+        assertDoesNotExist("ma.processing.error", in: app)
+        XCTAssertEqual(try fixture.mixedAudioChecksum(), originalMixedAudioChecksum)
+
+        let transcript = try fixture.transcriptPayload()
+        let transcriptText = try Self.transcriptText(from: transcript)
+        XCTAssertFalse(
+            transcriptText.contains("Fake transcript generated from local audio."),
+            "Expected real runtime transcript, not the fake transcript fixture."
+        )
+        XCTAssertTrue(
+            transcriptText.range(of: #"\p{Han}"#, options: .regularExpression) != nil,
+            "Expected real runtime transcript to contain Chinese text. Transcript: \(transcriptText)"
+        )
+        for term in ["http", "llm", "clean architecture", "eda"] {
+            XCTAssertTrue(
+                Self.transcriptContains(transcriptText, term: term),
+                "Expected real runtime transcript to contain \(term). Transcript: \(transcriptText)"
+            )
+        }
+
+        let reviewApp = launchApp(
+            workspaceURL: fixture.workspaceURL,
+            sessionID: fixture.sessionID,
+            realCaptureSameChainFixture: fixture
+        )
+
+        assertElement("ma.transcript.heading", in: reviewApp, contains: "UI smoke recording")
+        assertElement("ma.transcript.summary", in: reviewApp, contains: "Transcript has")
+        assertElement("ma.transcript.degradation", in: reviewApp, contains: "transcript-only fallback")
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Transcript actions are ready.")
+
+        tapTranscriptActionButton("ma.transcriptAction.copyButton", in: reviewApp)
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Copy complete.")
+
+        tapTranscriptActionButton("ma.transcriptAction.exportButton", in: reviewApp)
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Export complete.")
+        assertElement("ma.transcriptAction.success", in: reviewApp, contains: fixture.exportURL.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.exportURL.path))
+        let exportContent = try fixture.exportContent()
+        XCTAssertFalse(exportContent.contains("Fake transcript generated from local audio."))
+        XCTAssertTrue(Self.transcriptContains(exportContent, term: "llm"))
+
+        tapTranscriptActionButton("ma.transcriptAction.deleteButton", in: reviewApp)
+        assertElement("ma.transcriptAction.deletePromptText", in: reviewApp, contains: fixture.sessionID)
+        assertElement("ma.transcriptAction.deletePromptText", in: reviewApp, contains: "External exports are retained.")
+        tapTranscriptActionButton("ma.transcriptAction.deleteConfirmButton", in: reviewApp)
+
+        assertElement("ma.transcriptAction.status", in: reviewApp, contains: "Delete complete.")
+        assertElement("ma.transcriptAction.success", in: reviewApp, contains: "Deleted session \(fixture.sessionID).")
+        assertElement("ma.transcriptAction.success", in: reviewApp, contains: "Retained 1 external export.")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.sessionRootURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.exportURL.path))
+        let deleteEvent = try fixture.deleteEventContent()
+        XCTAssertTrue(deleteEvent.contains("meeting_session.deleted.v1"))
+        XCTAssertTrue(deleteEvent.contains(fixture.sessionID))
+        XCTAssertFalse(deleteEvent.contains(transcriptText))
+    }
+
     func testStartFailureFixtureShowsStableErrorLocatorFromLaunchedAppBundle() {
         let app = launchApp(fixture: "start-failure")
 
@@ -1923,6 +2036,17 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         }
     }
 
+    private static func realCaptureRealRuntimeSameChainCLISmokeEnabled() -> Bool {
+        switch ProcessInfo.processInfo.environment["MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() {
+        case "1", "true", "yes":
+            return true
+        default:
+            return false
+        }
+    }
+
     private static func mvpFullStackCLISmokeEnabled() -> Bool {
         switch ProcessInfo.processInfo.environment["MA_NATIVE_APP_MVP_FULL_STACK_SMOKE"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2256,6 +2380,10 @@ private final class AppAppleScreenCaptureKitRecordingFixture {
 private final class AppRealCaptureSameChainCLIFixture {
     private let captureFixture: AppAppleScreenCaptureKitRecordingFixture
     let cliURL: URL
+    private let realRuntime: Bool
+    private let runtimePath: String?
+    private let modelPath: String?
+    private let smokeAudioURL: URL?
 
     var rootURL: URL {
         captureFixture.rootURL
@@ -2285,7 +2413,43 @@ private final class AppRealCaptureSameChainCLIFixture {
             .appendingPathComponent("meeting_session.deleted.v1.jsonl", isDirectory: false)
     }
 
-    init(sourceFile: StaticString = #filePath) throws {
+    init(realRuntime: Bool = false, sourceFile: StaticString = #filePath) throws {
+        let environment = ProcessInfo.processInfo.environment
+        let resolvedRuntimePath: String?
+        let resolvedModelPath: String?
+        let resolvedSmokeAudioURL: URL?
+        if realRuntime {
+            guard let runtimePath = environment["MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME"],
+                  !runtimePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw XCTSkip("MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME is required for the real capture + real runtime app-bundle smoke.")
+            }
+            guard let modelPath = environment["MEETING_ASSISTANT_TRANSCRIPTION_MODEL"],
+                  !modelPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw XCTSkip("MEETING_ASSISTANT_TRANSCRIPTION_MODEL is required for the real capture + real runtime app-bundle smoke.")
+            }
+
+            let defaultSmokeAudio = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".local/share/ai-fixtures/asr/zh-en-tech/mixed-zh-en-tech.wav")
+            let smokeAudioPath = environment["MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO"]?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let smokeAudioURL = URL(fileURLWithPath: smokeAudioPath?.isEmpty == false ? smokeAudioPath! : defaultSmokeAudio.path)
+            guard FileManager.default.isReadableFile(atPath: smokeAudioURL.path) else {
+                throw XCTSkip("MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO must point to the mixed-language WAV fixture.")
+            }
+
+            resolvedRuntimePath = runtimePath
+            resolvedModelPath = modelPath
+            resolvedSmokeAudioURL = smokeAudioURL
+        } else {
+            resolvedRuntimePath = nil
+            resolvedModelPath = nil
+            resolvedSmokeAudioURL = nil
+        }
+
+        self.realRuntime = realRuntime
+        runtimePath = resolvedRuntimePath
+        modelPath = resolvedModelPath
+        smokeAudioURL = resolvedSmokeAudioURL
         captureFixture = try AppAppleScreenCaptureKitRecordingFixture(
             captureSystemAudio: true,
             captureMicrophoneAudio: false
@@ -2323,6 +2487,15 @@ private final class AppRealCaptureSameChainCLIFixture {
         if let ffmpegPath = Self.hostFFmpegPath() {
             app.launchEnvironment["MEETING_ASSISTANT_FFMPEG_PATH"] = ffmpegPath
         }
+        if realRuntime {
+            app.launchEnvironment["MA_NATIVE_APP_REAL_RUNTIME_SMOKE"] = "1"
+            app.launchEnvironment["MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE"] = "1"
+            app.launchEnvironment["MA_NATIVE_PROCESSING_RUNTIME"] = "whisper_cpp"
+            app.launchEnvironment["MA_NATIVE_PROCESSING_LANGUAGE"] = "zh"
+            app.launchEnvironment["MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME"] = runtimePath
+            app.launchEnvironment["MEETING_ASSISTANT_TRANSCRIPTION_MODEL"] = modelPath
+            app.launchEnvironment["MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO"] = smokeAudioURL?.path
+        }
     }
 
     private static func hostFFmpegPath() -> String? {
@@ -2358,6 +2531,56 @@ private final class AppRealCaptureSameChainCLIFixture {
         let digest = SHA256.hash(data: data)
         let hex = digest.map { String(format: "%02x", $0) }.joined()
         return "sha256:\(hex)"
+    }
+
+    func transcriptPayload() throws -> [String: Any] {
+        let session = try sessionMetadata()
+        let artifacts = try XCTUnwrap(session["artifacts"] as? [[String: Any]])
+        let transcript = try XCTUnwrap(artifacts.first { $0["artifact_type"] as? String == "transcript_text" })
+        let path = try XCTUnwrap(transcript["path"] as? String)
+        let transcriptURL = URL(fileURLWithPath: path, relativeTo: sessionRootURL)
+        let data = try Data(contentsOf: transcriptURL)
+        let payload = try JSONSerialization.jsonObject(with: data)
+        return try XCTUnwrap(payload as? [String: Any])
+    }
+
+    func startSmokeAudioPlayback() throws -> Process {
+        guard let smokeAudioURL else {
+            throw XCTSkip("Real runtime smoke audio is only configured for the real capture + real runtime smoke.")
+        }
+        let afplayURL = URL(fileURLWithPath: "/usr/bin/afplay")
+        guard FileManager.default.isExecutableFile(atPath: afplayURL.path) else {
+            throw XCTSkip("The real capture + real runtime smoke requires /usr/bin/afplay to play fixture audio through system audio.")
+        }
+        let process = Process()
+        process.executableURL = afplayURL
+        process.arguments = [smokeAudioURL.path]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        try process.run()
+        return process
+    }
+
+    func waitForSmokeAudioPlayback(_ process: Process, timeout: TimeInterval) throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        if process.isRunning {
+            process.terminate()
+            throw XCTSkip("Timed out waiting for fixture audio playback before stopping real capture.")
+        }
+        guard process.terminationStatus == 0 else {
+            throw CocoaError(.executableLoad, userInfo: [NSFilePathErrorKey: "/usr/bin/afplay"])
+        }
+    }
+
+    func terminateSmokeAudioPlayback(_ process: Process) {
+        guard process.isRunning else {
+            return
+        }
+        process.terminate()
+        process.waitUntilExit()
     }
 
     func exportContent() throws -> String {
