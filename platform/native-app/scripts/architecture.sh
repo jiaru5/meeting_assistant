@@ -93,6 +93,8 @@ grep -q "NativeRecordingCommandClient" scripts/native-capture-smoke.sh
 grep -q "MacOSNativeCapturePermissionChecker" scripts/native-capture-smoke.sh
 grep -q "CoreGraphicsScreenRecordingPermissionProbe" scripts/native-capture-smoke.sh
 grep -q "requestAccessWhenDenied: true" scripts/native-capture-smoke.sh
+grep -q "AVFoundationMicrophonePermissionProbe" scripts/native-capture-smoke.sh
+grep -q "requestAccessWhenUndetermined: true" scripts/native-capture-smoke.sh
 grep -q "AppleScreenCaptureKitNativeCaptureAdapter" scripts/native-capture-smoke.sh
 grep -q "RecordingSessionStore" scripts/native-capture-smoke.sh
 grep -q "session.json" scripts/native-capture-smoke.sh
@@ -218,15 +220,26 @@ grep -R -q "MA_NATIVE_APP_SMOKE_FIXTURE" App UITests/MeetingAssistantNativeAppUI
 grep -R -q "MeetingAssistantNativeAppUITests" MeetingAssistantNative.xcodeproj/project.pbxproj
 
 apple_adapter_file='Sources/MeetingAssistantNative/AppleScreenCaptureKitNativeCaptureAdapter.swift'
+native_permission_file='Sources/MeetingAssistantNative/NativeCapturePermissionChecker.swift'
 apple_framework_forbidden='(^[[:space:]]*import[[:space:]]+(ScreenCaptureKit|AVFoundation|CoreAudio|CoreMediaIO|ReplayKit|Network)\b|SCStream\b|SCRecordingOutput\b|SCContentFilter\b|SCShareableContent\b|AVCapture|CGDisplayStream|AVAudioEngine|AVAudioRecorder|AudioQueue|AudioUnit|AudioDevice)'
+permission_checker_capture_forbidden='(ScreenCaptureKit\b|SCStream\b|SCRecordingOutput\b|SCContentFilter\b|SCShareableContent\b|CoreAudio\b|CoreMediaIO\b|ReplayKit\b|Network\b|CGDisplayStream\b|AVAudioEngine\b|AVAudioRecorder\b|AudioQueue\b|AudioUnit\b|AudioDevice\b)'
 
 grep -q 'attemptsMixedAudioExtractionFromCombinedRecording: true' "$apple_adapter_file"
 grep -q 'AppleScreenCaptureKitMixedAudioExtracting' "$apple_adapter_file"
 grep -q 'AVAssetExportSession' "$apple_adapter_file"
+grep -q 'AVFoundationMicrophonePermissionProbe' "$native_permission_file"
+grep -q 'AVCaptureDevice.authorizationStatus(for: .audio)' "$native_permission_file"
+grep -q 'AVCaptureDevice.requestAccess(for: .audio)' "$native_permission_file"
 
 if grep -R --include '*.swift' -n -E "$apple_framework_forbidden" Sources tests App UITests |
-  grep -v -F "$apple_adapter_file"; then
-  echo "native-app architecture check failed: Apple capture framework usage is allowed only in AppleScreenCaptureKitNativeCaptureAdapter.swift." >&2
+  grep -v -F "$apple_adapter_file" |
+  grep -v -F "$native_permission_file"; then
+  echo "native-app architecture check failed: Apple capture framework usage is allowed only in AppleScreenCaptureKitNativeCaptureAdapter.swift and microphone permission checks in NativeCapturePermissionChecker.swift." >&2
+  exit 1
+fi
+
+if grep -n -E "$permission_checker_capture_forbidden" "$native_permission_file"; then
+  echo "native-app architecture check failed: NativeCapturePermissionChecker.swift may use AVFoundation only for microphone authorization status/request access." >&2
   exit 1
 fi
 
@@ -272,7 +285,8 @@ if grep -R --include '*.swift' -n -E "$native_capture_forbidden" \
   Sources/MeetingAssistantNative/NativeCapture*.swift \
   Sources/MeetingAssistantNative/ControlledNativeCaptureAdapter.swift \
   Sources/MeetingAssistantNative/NativeRecordingCommandClient.swift \
-  Sources/MeetingAssistantNative/RecordingSessionStore.swift; then
+  Sources/MeetingAssistantNative/RecordingSessionStore.swift |
+  grep -v -F "$native_permission_file"; then
   echo "native-app architecture check failed: controlled native capture slice must not call capture frameworks, helpers/CLIs, processing commands, auxiliary capture tools, network APIs, pasteboard, or file pickers." >&2
   exit 1
 fi
@@ -313,7 +327,9 @@ if ! grep -q 'case "apple_screencapturekit", "apple-screencapturekit"' App/Meeti
    ! grep -q 'AppleScreenCaptureKitNativeCaptureAdapter()' App/MeetingAssistantNativeApp.swift ||
    ! grep -q 'MacOSNativeCapturePermissionChecker(' App/MeetingAssistantNativeApp.swift ||
    ! grep -q 'CoreGraphicsScreenRecordingPermissionProbe(' App/MeetingAssistantNativeApp.swift ||
-   ! grep -q 'requestAccessWhenDenied: true' App/MeetingAssistantNativeApp.swift; then
+   ! grep -q 'requestAccessWhenDenied: true' App/MeetingAssistantNativeApp.swift ||
+   ! grep -q 'AVFoundationMicrophonePermissionProbe(' App/MeetingAssistantNativeApp.swift ||
+   ! grep -q 'requestAccessWhenUndetermined: true' App/MeetingAssistantNativeApp.swift; then
   echo "native-app architecture check failed: production recording default must use the Apple adapter while XCTest hooks stay explicit, permission-checked, and smoke-gated." >&2
   exit 1
 fi

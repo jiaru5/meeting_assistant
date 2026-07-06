@@ -265,6 +265,9 @@ struct NativeCaptureSmoke {
             permissionChecker: MacOSNativeCapturePermissionChecker(
                 screenRecordingProbe: CoreGraphicsScreenRecordingPermissionProbe(
                     requestAccessWhenDenied: true
+                ),
+                microphonePermissionProbe: AVFoundationMicrophonePermissionProbe(
+                    requestAccessWhenUndetermined: true
                 )
             ),
             captureAdapter: AppleScreenCaptureKitNativeCaptureAdapter(),

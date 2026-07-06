@@ -108,6 +108,71 @@ struct NativeRecordingCommandClientTests {
     }
 
     @Test
+    func macOSMicrophoneRequestCanGrantAccessBeforeStartingAdapter() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter()
+        let checker = MacOSNativeCapturePermissionChecker(
+            screenRecordingProbe: CoreGraphicsScreenRecordingPermissionProbe(preflight: { true }),
+            microphonePermissionProbe: AVFoundationMicrophonePermissionProbe(
+                authorizationState: { .notDetermined },
+                requestAccessWhenUndetermined: true,
+                requestAccess: { true }
+            )
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-macos-mic-request-granted",
+            permissionChecker: checker,
+            adapter: adapter
+        )
+
+        let response = try await client.startNativeRecording(
+            startRequest(workspace: workspace, captureMicrophoneAudio: true)
+        )
+
+        #expect(response.ok == true)
+        #expect(response.status == "recording")
+        #expect(await adapter.startContexts.count == 1)
+        #expect(await adapter.startContexts.first?.request.captureMicrophoneAudio == true)
+        #expect(FileManager.default.fileExists(
+            atPath: sessionRoot(workspace, "session-macos-mic-request-granted").path
+        ))
+    }
+
+    @Test
+    func macOSMicrophoneRequestDeniedFailsClosedWithoutStartingAdapter() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = ControlledNativeCaptureAdapter()
+        let checker = MacOSNativeCapturePermissionChecker(
+            screenRecordingProbe: CoreGraphicsScreenRecordingPermissionProbe(preflight: { true }),
+            microphonePermissionProbe: AVFoundationMicrophonePermissionProbe(
+                authorizationState: { .notDetermined },
+                requestAccessWhenUndetermined: true,
+                requestAccess: { false }
+            )
+        )
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-macos-mic-request-denied",
+            permissionChecker: checker,
+            adapter: adapter
+        )
+
+        let response = try await client.startNativeRecording(
+            startRequest(workspace: workspace, captureMicrophoneAudio: true)
+        )
+
+        #expect(response.ok == false)
+        #expect(response.command == .startNativeRecording)
+        #expect(response.code == .permissionDenied)
+        #expect(response.details == ["Microphone permission is denied."])
+        #expect(await adapter.startContexts.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: sessionRoot(workspace, "session-macos-mic-request-denied").path))
+    }
+
+    @Test
     func macOSMicrophoneUnknownFailsClosedOnlyWhenMicrophoneCaptureIsRequested() async throws {
         let blockedWorkspace = try temporaryWorkspace()
         let allowedWorkspace = try temporaryWorkspace()

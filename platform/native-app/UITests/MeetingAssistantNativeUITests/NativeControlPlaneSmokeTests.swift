@@ -1186,6 +1186,8 @@ private enum SwiftUIViewSourceContract {
                 "MacOSNativeCapturePermissionChecker(",
                 "CoreGraphicsScreenRecordingPermissionProbe(",
                 "requestAccessWhenDenied: true",
+                "AVFoundationMicrophonePermissionProbe(",
+                "requestAccessWhenUndetermined: true",
                 "Apple" + "Screen" + "Capture" + "Kit" + "NativeCaptureAdapter()",
                 "case .some(\"fake\"):",
                 "case .some(\"process\"):",

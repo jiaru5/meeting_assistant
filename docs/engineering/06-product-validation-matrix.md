@@ -431,6 +431,14 @@
 |---|---|---|---|
 | 本轮 `develop` VS-MA-21 native app Screen Recording request path | `PV-MA-001`、`PV-MA-002`、`PV-MA-009`; `TDG-MA-004`、`TDG-MA-005`、`TDG-MA-006` | `CoreGraphicsScreenRecordingPermissionProbe` 新增可注入的 `requestAccessWhenDenied` / `CGRequestScreenCaptureAccess()` 路径；非 XCTest app runtime 的 Apple ScreenCaptureKit recording client 现在在 `CGPreflightScreenCaptureAccess()` 未授权时会先尝试系统授权请求，若仍未授权则保留既有 `permission_denied` fail-closed 语义。`NativeRecordingCommandClientTests.macOSScreenRecordingRequestCanGrantAccessBeforeStartingAdapter` 证明 request 授权成功时才会进入 adapter start；原有 preflight denied 测试继续证明未启用或未获授权时不创建 session、不启动 adapter。`NativeControlPlaneSmokeTests` 和 `platform/native-app/scripts/architecture.sh` 已更新 source-contract，防止 production/default app path 回退到 fake 或绕过 permission checker。2026-07-06 复跑 `MA_NATIVE_APP_XCODE_DESTINATION='platform=macOS,arch=arm64' MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE=1 ./platform/native-app/scripts/test-app-bundle.sh` 仍以 `permission_denied` 失败，说明本机目标 app bundle 尚未在 System Settings 授权，未进入 `mixed_audio` 或 processing 阶段。 | 证明真实 app 路径具备主动触发系统 Screen Recording 授权请求的程序能力，并继续 fail closed；这只消除“应用没有 request 入口”的功能缺口，不关闭当前机器 TCC 授权、真实 `mixed_audio`、真实 capture -> transcript/export/delete 同链路、跨机器可重复、release bundle、发布范围 `PV-MA-*` covered 或 `VS-MA-23` readiness。 |
 
+## 2026-07-06 VS-MA-21 native app Microphone permission request evidence 回填
+
+本节补充真实 native app 录制路径的 macOS Microphone 授权检测和请求能力。该回填不新增产品事实，不改变 command、artifact、event、error code、exit code、Release hook、真实 capture 策略或发布范围；所有相关 `PV-MA-*` 和 `VS-MA-21` 继续保持 `partial` 口径。
+
+| 来源 | 影响矩阵行 | 追加证据 | 状态影响 |
+|---|---|---|---|
+| 本轮 `develop` VS-MA-21 native app Microphone request path | `PV-MA-001`、`PV-MA-002`、`PV-MA-003`; `TDG-MA-004`、`TDG-MA-005`、`TDG-MA-006` | `AVFoundationMicrophonePermissionProbe` 新增可注入的 `AVCaptureDevice.authorizationStatus(for: .audio)` / `AVCaptureDevice.requestAccess(for: .audio)` 路径；`MacOSNativeCapturePermissionChecker` 只在 `capture_microphone_audio=true` 时评估麦克风权限，避免 screen-only capture 触发麦克风授权提示。非 XCTest app runtime 和脚本级真实 capture smoke 现在在请求麦克风录制时会先尝试系统授权请求，若仍未授权则保留既有 `permission_denied` fail-closed 语义。`NativeRecordingCommandClientTests.macOSMicrophoneRequestCanGrantAccessBeforeStartingAdapter` 证明 request 授权成功时才会进入 adapter start；`macOSMicrophoneRequestDeniedFailsClosedWithoutStartingAdapter` 和既有 unknown 测试继续证明未获授权时不创建 session、不启动 adapter。`NativeControlPlaneSmokeTests` 和 `platform/native-app/scripts/architecture.sh` 已更新 source-contract，防止 production/default app path 回退到 microphone unknown 或把 AVFoundation capture API 扩散到 UI/processing 层。 | 证明真实 app 路径具备主动触发系统 Microphone 授权请求的程序能力，并继续 fail closed；这只消除“麦克风权限永远 unknown”的程序缺口，不证明真实麦克风音频已由 ScreenCaptureKit 录出、独立 `microphone_audio` 产物、真实 `mixed_audio`、真实 capture -> transcript/export/delete 同链路、跨机器 TCC/display 可重复、release bundle、发布范围 `PV-MA-*` covered 或 `VS-MA-23` readiness。 |
+
 ## 标准验证命令目标
 
 ```bash

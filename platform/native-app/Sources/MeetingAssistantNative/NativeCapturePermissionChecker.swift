@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreGraphics
 import Foundation
 
@@ -106,9 +107,79 @@ public struct CoreGraphicsScreenRecordingPermissionProbe: Sendable {
     }
 }
 
+public struct AVFoundationMicrophonePermissionProbe: Sendable {
+    public enum AuthorizationState: Equatable, Sendable {
+        case authorized
+        case denied
+        case restricted
+        case notDetermined
+        case unknown
+    }
+
+    private let authorizationState: @Sendable () -> AuthorizationState
+    private let requestAccess: @Sendable () async -> Bool
+    private let requestAccessWhenUndetermined: Bool
+
+    public init(
+        authorizationState: @escaping @Sendable () -> AuthorizationState = {
+            Self.currentAuthorizationState()
+        },
+        requestAccessWhenUndetermined: Bool = false,
+        requestAccess: @escaping @Sendable () async -> Bool = {
+            await Self.requestAudioAccess()
+        }
+    ) {
+        self.authorizationState = authorizationState
+        self.requestAccess = requestAccess
+        self.requestAccessWhenUndetermined = requestAccessWhenUndetermined
+    }
+
+    public func state() async -> NativeCapturePermissionState {
+        switch authorizationState() {
+        case .authorized:
+            return .granted
+        case .denied, .restricted:
+            return .denied
+        case .notDetermined:
+            guard requestAccessWhenUndetermined else {
+                return .unknown
+            }
+            if await requestAccess() {
+                return .granted
+            }
+            return authorizationState() == .authorized ? .granted : .denied
+        case .unknown:
+            return .unknown
+        }
+    }
+
+    public static func currentAuthorizationState() -> AuthorizationState {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return .authorized
+        case .denied:
+            return .denied
+        case .restricted:
+            return .restricted
+        case .notDetermined:
+            return .notDetermined
+        @unknown default:
+            return .unknown
+        }
+    }
+
+    public static func requestAudioAccess() async -> Bool {
+        await withCheckedContinuation { continuation in
+            AVCaptureDevice.requestAccess(for: .audio) { granted in
+                continuation.resume(returning: granted)
+            }
+        }
+    }
+}
+
 public struct MacOSNativeCapturePermissionChecker: NativeCapturePermissionChecking {
     private let screenRecordingProbe: CoreGraphicsScreenRecordingPermissionProbe
-    private let microphoneStateProvider: @Sendable () -> NativeCapturePermissionState
+    private let microphoneStateProvider: @Sendable () async -> NativeCapturePermissionState
 
     public init(
         screenRecordingProbe: CoreGraphicsScreenRecordingPermissionProbe = CoreGraphicsScreenRecordingPermissionProbe(),
@@ -117,15 +188,32 @@ public struct MacOSNativeCapturePermissionChecker: NativeCapturePermissionChecki
         }
     ) {
         self.screenRecordingProbe = screenRecordingProbe
-        self.microphoneStateProvider = microphoneStateProvider
+        self.microphoneStateProvider = {
+            microphoneStateProvider()
+        }
+    }
+
+    public init(
+        screenRecordingProbe: CoreGraphicsScreenRecordingPermissionProbe = CoreGraphicsScreenRecordingPermissionProbe(),
+        microphonePermissionProbe: AVFoundationMicrophonePermissionProbe
+    ) {
+        self.screenRecordingProbe = screenRecordingProbe
+        self.microphoneStateProvider = {
+            await microphonePermissionProbe.state()
+        }
     }
 
     public func permissionSnapshot(
         for request: StartNativeRecordingRequest
     ) async -> NativeCapturePermissionSnapshot {
-        NativeCapturePermissionSnapshot(
+        let microphoneState: NativeCapturePermissionState = if request.captureMicrophoneAudio {
+            await microphoneStateProvider()
+        } else {
+            .granted
+        }
+        return NativeCapturePermissionSnapshot(
             screenRecording: screenRecordingProbe.state(),
-            microphone: microphoneStateProvider()
+            microphone: microphoneState
         )
     }
 }
