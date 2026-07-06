@@ -747,20 +747,17 @@ private struct NativeControlPlaneFixtureConfiguration {
     private static func processingDefaultLanguage(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> String? {
-        guard isRealRuntimeProcessingSmokeEnabled(environment) else {
-            return nil
-        }
         let value = environment["MA_NATIVE_PROCESSING_LANGUAGE"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return value?.isEmpty == false ? value : "zh"
+        if value?.isEmpty == false {
+            return value
+        }
+        return isExplicitProcessingRuntimeConfigured(environment) ? "zh" : nil
     }
 
     private static func processingDefaultRuntime(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> ProcessingTranscriptRuntime? {
-        guard isRealRuntimeProcessingSmokeEnabled(environment) else {
-            return nil
-        }
         switch environment["MA_NATIVE_PROCESSING_RUNTIME"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased() {
@@ -783,6 +780,12 @@ private struct NativeControlPlaneFixtureConfiguration {
         default:
             return false
         }
+    }
+
+    private static func isExplicitProcessingRuntimeConfigured(_ environment: [String: String]) -> Bool {
+        environment["MA_NATIVE_PROCESSING_RUNTIME"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty == false
     }
 
     private static func recordingWorkspaceURL(

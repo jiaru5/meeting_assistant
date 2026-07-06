@@ -79,6 +79,7 @@ struct SmokeConfiguration {
     let captureSystemAudio: Bool
     let captureMicrophoneAudio: Bool
     let title: String
+    let playbackAudioURL: URL?
 }
 
 struct SmokeSummary: Encodable {
@@ -90,6 +91,9 @@ struct SmokeSummary: Encodable {
     let durationSeconds: Double
     let captureSystemAudio: Bool
     let captureMicrophoneAudio: Bool
+    let playbackAudioPath: String?
+    let playbackStarted: Bool
+    let playbackExitCode: Int32?
     let failureStage: String?
     let message: String?
     let startResponse: ResponseSummary?
@@ -203,6 +207,7 @@ enum SmokeInputError: Error, LocalizedError {
     case invalidBoolean(name: String, value: String)
     case invalidDuration(String)
     case invalidSessionID(String)
+    case unreadablePlaybackAudio(String)
 
     var errorDescription: String? {
         switch self {
@@ -214,6 +219,8 @@ enum SmokeInputError: Error, LocalizedError {
             return "MA_NATIVE_CAPTURE_SMOKE_DURATION_SECONDS must be greater than 0 and at most 30; got \(value)."
         case .invalidSessionID(let value):
             return "MA_NATIVE_CAPTURE_SMOKE_SESSION_ID contains unsupported path characters: \(value)."
+        case .unreadablePlaybackAudio(let path):
+            return "MA_NATIVE_CAPTURE_SMOKE_AUDIO_PLAYBACK_PATH must point to a readable local audio file; got \(path)."
         }
     }
 }
@@ -259,6 +266,9 @@ struct NativeCaptureSmoke {
         }
         if configuration.captureMicrophoneAudio {
             notes.append("Microphone capture requires the current permission checker to prove microphone permission; unknown permission fails closed, and independent microphone_audio remains unproven.")
+        }
+        if let playbackAudioURL = configuration.playbackAudioURL {
+            notes.append("The smoke plays a caller-provided local audio file during the capture window: \(playbackAudioURL.lastPathComponent).")
         }
 
         let client = NativeRecordingCommandClient(
@@ -316,8 +326,10 @@ struct NativeCaptureSmoke {
             )
         }
 
+        let playbackProcess = startAudioPlayback(configuration.playbackAudioURL)
         let nanoseconds = UInt64(configuration.durationSeconds * 1_000_000_000)
         try? await Task.sleep(nanoseconds: nanoseconds)
+        let playbackExitCode = finishAudioPlayback(playbackProcess)
 
         let stopResponse: RecordingCommandResponse
         do {
@@ -329,6 +341,8 @@ struct NativeCaptureSmoke {
                 failureStage: "stop_exception",
                 message: error.localizedDescription,
                 startResponse: ResponseSummary(startResponse),
+                playbackStarted: playbackProcess != nil,
+                playbackExitCode: playbackExitCode,
                 notes: notes
             )
         }
@@ -362,6 +376,9 @@ struct NativeCaptureSmoke {
             durationSeconds: configuration.durationSeconds,
             captureSystemAudio: configuration.captureSystemAudio,
             captureMicrophoneAudio: configuration.captureMicrophoneAudio,
+            playbackAudioPath: configuration.playbackAudioURL?.path,
+            playbackStarted: playbackProcess != nil,
+            playbackExitCode: playbackExitCode,
             failureStage: failureStage,
             message: message,
             startResponse: ResponseSummary(startResponse),
@@ -383,6 +400,8 @@ struct NativeCaptureSmoke {
         failureStage: String,
         message: String,
         startResponse: ResponseSummary? = nil,
+        playbackStarted: Bool = false,
+        playbackExitCode: Int32? = nil,
         notes: [String] = []
     ) -> SmokeSummary {
         SmokeSummary(
@@ -394,6 +413,9 @@ struct NativeCaptureSmoke {
             durationSeconds: configuration.durationSeconds,
             captureSystemAudio: configuration.captureSystemAudio,
             captureMicrophoneAudio: configuration.captureMicrophoneAudio,
+            playbackAudioPath: configuration.playbackAudioURL?.path,
+            playbackStarted: playbackStarted,
+            playbackExitCode: playbackExitCode,
             failureStage: failureStage,
             message: message,
             startResponse: startResponse,
@@ -422,6 +444,7 @@ struct NativeCaptureSmoke {
         guard let duration = Double(durationValue), duration > 0, duration <= 30 else {
             throw SmokeInputError.invalidDuration(durationValue)
         }
+        let playbackAudioURL = try playbackAudioURL(environment)
 
         return SmokeConfiguration(
             workspaceURL: URL(fileURLWithPath: workspace, isDirectory: true),
@@ -437,8 +460,48 @@ struct NativeCaptureSmoke {
                 name: "MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO",
                 defaultValue: false
             ),
-            title: environment["MA_NATIVE_CAPTURE_SMOKE_TITLE"] ?? "Native capture smoke"
+            title: environment["MA_NATIVE_CAPTURE_SMOKE_TITLE"] ?? "Native capture smoke",
+            playbackAudioURL: playbackAudioURL
         )
+    }
+
+    private static func playbackAudioURL(_ environment: [String: String]) throws -> URL? {
+        let rawPath = environment["MA_NATIVE_CAPTURE_SMOKE_AUDIO_PLAYBACK_PATH"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let rawPath, !rawPath.isEmpty else {
+            return nil
+        }
+        let url = URL(fileURLWithPath: rawPath)
+        guard FileManager.default.isReadableFile(atPath: url.path) else {
+            throw SmokeInputError.unreadablePlaybackAudio(rawPath)
+        }
+        return url
+    }
+
+    private static func startAudioPlayback(_ audioURL: URL?) -> Process? {
+        guard let audioURL else {
+            return nil
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/afplay")
+        process.arguments = [audioURL.path]
+        do {
+            try process.run()
+            return process
+        } catch {
+            return nil
+        }
+    }
+
+    private static func finishAudioPlayback(_ process: Process?) -> Int32? {
+        guard let process else {
+            return nil
+        }
+        if process.isRunning {
+            process.terminate()
+        }
+        process.waitUntilExit()
+        return process.terminationStatus
     }
 
     private static func validateSession(

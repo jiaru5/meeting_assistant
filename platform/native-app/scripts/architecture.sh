@@ -97,6 +97,9 @@ grep -q "AVFoundationMicrophonePermissionProbe" scripts/native-capture-smoke.sh
 grep -q "requestAccessWhenUndetermined: true" scripts/native-capture-smoke.sh
 grep -q "AppleScreenCaptureKitNativeCaptureAdapter" scripts/native-capture-smoke.sh
 grep -q "RecordingSessionStore" scripts/native-capture-smoke.sh
+grep -q "MA_NATIVE_CAPTURE_SMOKE_AUDIO_PLAYBACK_PATH" scripts/native-capture-smoke.sh
+grep -q "/usr/bin/afplay" scripts/native-capture-smoke.sh
+grep -q "playbackStarted" scripts/native-capture-smoke.sh
 grep -q "session.json" scripts/native-capture-smoke.sh
 grep -q "screen_video" scripts/native-capture-smoke.sh
 grep -R -q "ma.processing" Sources tests App UITests
@@ -175,6 +178,9 @@ grep -R -q "MA_NATIVE_APP_VSMA21_HARDENING_SMOKE" UITests/MeetingAssistantNative
 grep -R -q "MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE" UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE" UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MA_NATIVE_APP_MVP_FULL_STACK_SMOKE" UITests/MeetingAssistantNativeAppUITests
+grep -R -q "isExplicitProcessingRuntimeConfigured" App/MeetingAssistantNativeApp.swift
+grep -R -q "MA_NATIVE_PROCESSING_RUNTIME" App/MeetingAssistantNativeApp.swift
+grep -q "Production/default app runtime may pass an explicitly configured" tests/ArchitectureTest.md
 python3 - <<'PY'
 import sys
 from pathlib import Path

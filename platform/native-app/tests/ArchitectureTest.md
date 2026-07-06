@@ -126,9 +126,9 @@ VS-MA-20 opt-in native app-bundle MVP full-stack smoke boundary:
 VS-MA-22 opt-in real runtime app-bundle smoke boundary:
 
 1. `AppBundleLocatorSmokeTests` may run a single app-bundle smoke with the real `whisper.cpp` runtime only when the test process is explicitly launched with `MA_NATIVE_APP_REAL_RUNTIME_SMOKE=1`.
-2. The smoke may set `MA_NATIVE_PROCESSING_RUNTIME=whisper_cpp` and `MA_NATIVE_PROCESSING_LANGUAGE=zh` only in Debug/XCTest and only for a native-recording workspace fixture whose `mixed_audio` is copied from `MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO`.
+2. The smoke may set `MA_NATIVE_PROCESSING_RUNTIME=whisper_cpp` and `MA_NATIVE_PROCESSING_LANGUAGE=zh` in Debug/XCTest for a native-recording workspace fixture whose `mixed_audio` is copied from `MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO`.
 3. The launched app must still call provider-owned `platform/e2e/ma-cli-local.sh` through `ProcessingCommandProcessRunner`; the UI test must not call `meeting_assistant_cli` directly to create the transcript.
-4. Production/default app runtime must not enable this hook, must not automatically choose a runtime from environment alone, and must not download models or audio fixtures.
+4. Production/default app runtime may pass an explicitly configured `MA_NATIVE_PROCESSING_RUNTIME` / `MA_NATIVE_PROCESSING_LANGUAGE` to the provider command runner for local direct use, but it must not enable XCTest-only fixture hooks and must not download, copy or package models or audio fixtures.
 5. A passing real runtime app-bundle smoke remains partial evidence for native-to-provider runtime integration; it does not prove real ScreenCaptureKit output, true user Save Panel interaction, release distribution bundle, all developer machines, or product-validation release readiness.
 
 VS-MA-23 opt-in local functional real capture + real runtime app-bundle smoke boundary:

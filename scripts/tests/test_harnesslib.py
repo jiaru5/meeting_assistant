@@ -818,10 +818,15 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("--release-scope", wrapper)
         self.assertIn("release-scope-real-capture-same-chain", same_chain_wrapper)
         self.assertIn("native_ui_same_chain_proven", same_chain_wrapper)
+        self.assertIn("MA_REAL_CAPTURE_SAME_CHAIN_TRANSCRIPTION_RUNTIME", same_chain_wrapper)
+        self.assertIn("MA_NATIVE_CAPTURE_SMOKE_AUDIO_PLAYBACK_PATH", same_chain_wrapper)
+        self.assertIn("VS-MA-23 local real runtime same-chain marker", same_chain_wrapper)
         self.assertIn("release-scope-native-ui-hardening", dev_commands)
         self.assertIn("release-scope-real-capture-same-chain", dev_commands)
+        self.assertIn("MA_REAL_CAPTURE_SAME_CHAIN_TRANSCRIPTION_RUNTIME=whisper_cpp", dev_commands)
         self.assertIn("release-scope-native-ui-hardening", e2e_readme)
         self.assertIn("release-scope-real-capture-same-chain", e2e_readme)
+        self.assertIn("MA_NATIVE_CAPTURE_SMOKE_AUDIO_PLAYBACK_PATH", e2e_readme)
         self.assertIn("not_release_readiness=true", e2e_readme)
 
     def test_release_preflight_registers_release_scope_security_supply_chain_gate(self) -> None:

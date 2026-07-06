@@ -13,8 +13,36 @@ capture_report_dir="${MA_REAL_CAPTURE_SAME_CHAIN_CAPTURE_REPORT_DIR:-$build_dir/
 report_path="${MA_REAL_CAPTURE_SAME_CHAIN_REPORT:-$report_dir/real-capture-same-chain-report-$stamp.json}"
 capture_summary_path="${MA_REAL_CAPTURE_SAME_CHAIN_CAPTURE_SUMMARY:-$summary_dir/native-capture-summary-$stamp.json}"
 capture_report_path="${MA_REAL_CAPTURE_SAME_CHAIN_CAPTURE_REPORT:-$capture_report_dir/native-capture-report-$stamp.json}"
+processing_runtime="${MA_REAL_CAPTURE_SAME_CHAIN_TRANSCRIPTION_RUNTIME:-fake_adapter}"
+processing_language="${MA_REAL_CAPTURE_SAME_CHAIN_LANGUAGE:-zh}"
 
 mkdir -p "$report_dir" "$summary_dir" "$capture_report_dir" "$(dirname "$workspace")"
+
+case "$processing_runtime" in
+  fake_adapter|"")
+    processing_runtime="fake_adapter"
+    ;;
+  whisper_cpp)
+    for required_env in \
+      MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME \
+      MEETING_ASSISTANT_TRANSCRIPTION_MODEL \
+      MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO; do
+      if [[ -z "${!required_env:-}" ]]; then
+        echo "real capture same-chain smoke failed: $required_env is required when MA_REAL_CAPTURE_SAME_CHAIN_TRANSCRIPTION_RUNTIME=whisper_cpp." >&2
+        exit 2
+      fi
+    done
+    if [[ ! -r "${MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO}" ]]; then
+      echo "real capture same-chain smoke failed: MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO must be readable: ${MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO}" >&2
+      exit 2
+    fi
+    export MA_NATIVE_CAPTURE_SMOKE_AUDIO_PLAYBACK_PATH="$MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO"
+    ;;
+  *)
+    echo "real capture same-chain smoke failed: MA_REAL_CAPTURE_SAME_CHAIN_TRANSCRIPTION_RUNTIME must be fake_adapter or whisper_cpp." >&2
+    exit 2
+    ;;
+esac
 
 export MA_NATIVE_CAPTURE_SMOKE=1
 export MA_NATIVE_CAPTURE_RELEASE_SCOPE=1
@@ -22,17 +50,23 @@ export MA_NATIVE_CAPTURE_SMOKE_WORKSPACE="$workspace"
 export MA_NATIVE_CAPTURE_ARTIFACT_SMOKE_SUMMARY="$capture_summary_path"
 export MA_NATIVE_CAPTURE_ARTIFACT_SMOKE_REPORT="$capture_report_path"
 export MA_NATIVE_CAPTURE_ARTIFACT_SMOKE_ATTEMPTS="${MA_NATIVE_CAPTURE_ARTIFACT_SMOKE_ATTEMPTS:-1}"
-export MA_NATIVE_CAPTURE_SMOKE_DURATION_SECONDS="${MA_NATIVE_CAPTURE_SMOKE_DURATION_SECONDS:-2}"
+if [[ "$processing_runtime" == "whisper_cpp" ]]; then
+  export MA_NATIVE_CAPTURE_SMOKE_DURATION_SECONDS="${MA_NATIVE_CAPTURE_SMOKE_DURATION_SECONDS:-${MA_REAL_CAPTURE_SAME_CHAIN_REAL_RUNTIME_DURATION_SECONDS:-8}}"
+else
+  export MA_NATIVE_CAPTURE_SMOKE_DURATION_SECONDS="${MA_NATIVE_CAPTURE_SMOKE_DURATION_SECONDS:-2}"
+fi
 export MA_NATIVE_CAPTURE_SMOKE_TIMEOUT_SECONDS="${MA_NATIVE_CAPTURE_SMOKE_TIMEOUT_SECONDS:-120}"
 export MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO="${MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO:-true}"
 export MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO="${MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO:-false}"
+export MA_REAL_CAPTURE_SAME_CHAIN_TRANSCRIPTION_RUNTIME="$processing_runtime"
+export MA_REAL_CAPTURE_SAME_CHAIN_LANGUAGE="$processing_language"
 
-echo "real capture same-chain smoke running: workspace=$workspace report=$report_path" >&2
+echo "real capture same-chain smoke running: workspace=$workspace report=$report_path processing_runtime=$processing_runtime" >&2
 "$ROOT_DIR/platform/e2e/native-capture-artifact-smoke.sh"
 
 PYTHONDONTWRITEBYTECODE=1 \
 PYTHONPATH="$ROOT_DIR/platform/processing-cli/src${PYTHONPATH:+:$PYTHONPATH}" \
-python3 - "$ROOT_DIR" "$workspace" "$capture_report_path" "$report_path" <<'PY'
+python3 - "$ROOT_DIR" "$workspace" "$capture_report_path" "$capture_summary_path" "$report_path" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -54,8 +88,19 @@ class ChainFailure(Exception):
 root = Path(sys.argv[1])
 workspace = Path(sys.argv[2])
 capture_report_path = Path(sys.argv[3])
-report_path = Path(sys.argv[4])
+capture_summary_path = Path(sys.argv[4])
+report_path = Path(sys.argv[5])
 cli = root / "platform/e2e/ma-cli-local.sh"
+processing_runtime = os.environ.get("MA_REAL_CAPTURE_SAME_CHAIN_TRANSCRIPTION_RUNTIME", "fake_adapter").strip() or "fake_adapter"
+processing_language = os.environ.get("MA_REAL_CAPTURE_SAME_CHAIN_LANGUAGE", "zh").strip() or "zh"
+expected_terms = [
+    term.strip().lower()
+    for term in os.environ.get(
+        "MA_REAL_CAPTURE_SAME_CHAIN_EXPECTED_TERMS",
+        "http,llm,clean architecture,eda",
+    ).split(",")
+    if term.strip()
+]
 
 
 def write_report(report: dict[str, Any]) -> None:
@@ -124,6 +169,20 @@ def run_cli(step: str, args: list[str], *, expected_exit: int = 0) -> dict[str, 
     return payload
 
 
+def includes_term(transcript: str, term: str) -> bool:
+    normalized = transcript.lower()
+    compact = "".join(normalized.split())
+    compact_term = "".join(term.lower().split())
+    return term.lower() in normalized or compact_term in compact
+
+
+def transcript_text(session_dir: Path, session: dict[str, Any]) -> str:
+    transcript_artifact = artifact_by_type(session, "transcript_text")
+    transcript_path = artifact_path(session_dir, transcript_artifact)
+    payload = json.loads(transcript_path.read_text(encoding="utf-8"))
+    return json.dumps(payload, ensure_ascii=False)
+
+
 base_report: dict[str, Any] = {
     "report_schema": 1,
     "component": "platform/e2e/release-real-capture-same-chain-smoke",
@@ -131,15 +190,21 @@ base_report: dict[str, Any] = {
     "not_release_readiness": True,
     "workspace": str(workspace),
     "capture_report": str(capture_report_path),
+    "capture_summary": str(capture_summary_path),
     "report": str(report_path),
     "native_ui_same_chain_proven": False,
+    "processing_runtime": processing_runtime,
+    "processing_language": processing_language,
 }
 
 try:
     capture_report = json.loads(capture_report_path.read_text(encoding="utf-8"))
+    capture_summary = json.loads(capture_summary_path.read_text(encoding="utf-8"))
     session_id = str(capture_report.get("session_id") or "")
     if not session_id:
         raise ChainFailure("Native capture report did not include session_id.", step="capture_report")
+    if processing_runtime == "whisper_cpp" and capture_summary.get("playback_started") is not True:
+        raise ChainFailure("Native capture did not start the configured audio playback.", step="audio_playback")
     session_dir = workspace / "sessions" / session_id
     recorded_session = load_session(session_id)
     mixed_audio = artifact_by_type(recorded_session, "mixed_audio")
@@ -150,10 +215,10 @@ try:
     if mixed_audio.get("checksum") != original_mixed_audio_checksum:
         raise ChainFailure("Native mixed_audio checksum did not match session metadata.", step="validate_mixed_audio")
 
-    transcript_response = run_cli(
-        "generate_transcript",
-        ["generate_transcript", "--session-id", session_id, "--language", "zh"],
-    )
+    transcript_args = ["generate_transcript", "--session-id", session_id, "--language", processing_language]
+    if processing_runtime == "whisper_cpp":
+        transcript_args.extend(["--runtime", "whisper_cpp"])
+    transcript_response = run_cli("generate_transcript", transcript_args)
     transcript_id = str(transcript_response.get("transcript_id") or "")
     if not transcript_id:
         raise ChainFailure("generate_transcript did not return transcript_id.", step="generate_transcript")
@@ -187,10 +252,24 @@ try:
         ],
     )
     export_text = export_path.read_text(encoding="utf-8")
-    if "Fake transcript generated from local audio." not in export_text:
-        raise ChainFailure("Export did not include generated transcript text.", step="export_transcript")
 
     processed_session = load_session(session_id)
+    exported_or_artifact_text = export_text + "\n" + transcript_text(session_dir, processed_session)
+    if processing_runtime == "whisper_cpp":
+        missing_terms = [
+            term
+            for term in expected_terms
+            if not includes_term(exported_or_artifact_text, term)
+        ]
+        if missing_terms:
+            raise ChainFailure(
+                "Real runtime transcript missed expected mixed-language terms: " + ", ".join(missing_terms),
+                step="validate_real_runtime_transcript",
+                payload={"missing_terms": missing_terms, "expected_terms": expected_terms},
+            )
+    elif "Fake transcript generated from local audio." not in export_text:
+        raise ChainFailure("Export did not include generated transcript text.", step="export_transcript")
+
     processed_artifact_types = {artifact.get("artifact_type") for artifact in processed_session.get("artifacts", [])}
     expected_artifacts = {"screen_video", "mixed_audio", "normalized_audio", "transcript_text", "speaker_labels"}
     missing_artifacts = sorted(expected_artifacts - processed_artifact_types)
@@ -213,6 +292,8 @@ try:
         "passed": True,
         "session_id": session_id,
         "capture_mixed_audio_status": mixed_audio.get("capture_status"),
+        "audio_playback_started": capture_summary.get("playback_started"),
+        "audio_playback_exit_code": capture_summary.get("playback_exit_code"),
         "mixed_audio_checksum": original_mixed_audio_checksum,
         "transcript_id": transcript_id,
         "speaker_label_status": speaker_response.get("label_status"),
@@ -221,14 +302,18 @@ try:
         "retained_external_exports": delete_response.get("retained_external_exports", []),
         "processed_artifacts": sorted(processed_artifact_types),
         "native_capture_to_processing_same_chain_proven": True,
+        "real_runtime_transcript_terms_checked": expected_terms if processing_runtime == "whisper_cpp" else [],
         "residual_blockers": [
             "App-bundle native UI same-chain still requires MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE=1 test-app-bundle evidence.",
-            "Release bundle, signing, notarization and all-target sidecar portability remain VS-MA-23 inputs.",
+            "Release bundle and commercial distribution inputs are outside this local functional smoke.",
         ],
     }
     write_report(report)
     print(f"real capture same-chain evidence report: {report_path}")
-    print("VS-MA-21 real capture same-chain marker [non-contract]: native ScreenCaptureKit mixed_audio entered processing, transcript, export and delete.")
+    if processing_runtime == "whisper_cpp":
+        print("VS-MA-23 local real runtime same-chain marker [non-contract]: native ScreenCaptureKit mixed_audio entered whisper_cpp transcript, export and delete.")
+    else:
+        print("VS-MA-21 real capture same-chain marker [non-contract]: native ScreenCaptureKit mixed_audio entered processing, transcript, export and delete.")
 except ChainFailure as exc:
     report = {
         **base_report,
