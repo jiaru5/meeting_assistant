@@ -48,6 +48,8 @@ class NativeCaptureArtifactReportTests(unittest.TestCase):
         include_audio_degradation_reason: bool = True,
         capture_system_audio: bool = False,
         capture_microphone_audio: bool = False,
+        system_audio_available: bool = False,
+        microphone_audio_available: bool = False,
         mixed_audio_available: bool = False,
     ) -> tuple[Path, Path, Path]:
         base = Path(directory)
@@ -73,21 +75,35 @@ class NativeCaptureArtifactReportTests(unittest.TestCase):
                 "created_at": now,
             }
         ]
-        for artifact_type, requested in (
-            ("system_audio", capture_system_audio),
-            ("microphone_audio", capture_microphone_audio),
+        for artifact_type, requested, available in (
+            ("system_audio", capture_system_audio, system_audio_available),
+            ("microphone_audio", capture_microphone_audio, microphone_audio_available),
         ):
-            artifact: dict[str, object] = {
-                "id": f"artifact-{artifact_type}",
-                "session_id": session_id,
-                "artifact_type": artifact_type,
-                "path": f"artifacts/{artifact_type}.wav",
-                "format": "wav",
-                "capture_status": "degraded" if requested else "missing",
-                "created_at": now,
-            }
-            if include_audio_degradation_reason:
-                artifact["degradation_reason"] = f"{artifact_type} unavailable in screen-only capture smoke"
+            if available:
+                audio_path = artifacts_dir / f"{artifact_type}.m4a"
+                audio_path.write_bytes(f"synthetic {artifact_type} bytes\n".encode("utf-8"))
+                artifact = {
+                    "id": f"artifact-{artifact_type}",
+                    "session_id": session_id,
+                    "artifact_type": artifact_type,
+                    "path": f"artifacts/{artifact_type}.m4a",
+                    "format": "m4a",
+                    "capture_status": "available",
+                    "checksum": sha256_file(audio_path),
+                    "created_at": now,
+                }
+            else:
+                artifact = {
+                    "id": f"artifact-{artifact_type}",
+                    "session_id": session_id,
+                    "artifact_type": artifact_type,
+                    "path": f"artifacts/{artifact_type}.wav",
+                    "format": "wav",
+                    "capture_status": "degraded" if requested else "missing",
+                    "created_at": now,
+                }
+                if include_audio_degradation_reason:
+                    artifact["degradation_reason"] = f"{artifact_type} unavailable in screen-only capture smoke"
             artifacts.append(artifact)
         if mixed_audio_available:
             mixed_audio = artifacts_dir / "mixed_audio.m4a"
@@ -217,16 +233,18 @@ class NativeCaptureArtifactReportTests(unittest.TestCase):
             summary_path, report_path, _ = self.write_fixture(
                 directory,
                 capture_system_audio=True,
+                system_audio_available=True,
                 mixed_audio_available=True,
             )
 
             report = module.build_report(summary_path, report_path=report_path, root=ROOT, python=sys.executable)
 
-            self.assertEqual(report["artifacts"]["system_audio"]["capture_status"], "degraded")
+            self.assertEqual(report["artifacts"]["system_audio"]["capture_status"], "available")
+            self.assertTrue(report["artifacts"]["system_audio"]["checksum_verified"])
             self.assertEqual(report["artifacts"]["mixed_audio"]["capture_status"], "available")
             self.assertTrue(report["artifacts"]["mixed_audio"]["checksum_verified"])
             self.assertTrue(report["processing_contract"]["skipped"])
-            self.assertIn("mixed_audio was available", report["processing_contract"]["reason"])
+            self.assertIn("an audio artifact was available", report["processing_contract"]["reason"])
             self.assertFalse(report["processing_contract"]["derived_artifact_pollution"])
 
     def test_build_report_writes_release_scope_gate_without_release_readiness(self) -> None:
@@ -248,7 +266,7 @@ class NativeCaptureArtifactReportTests(unittest.TestCase):
             self.assertTrue(report["not_release_readiness"])
             self.assertNotIn("not a release-scope ScreenCaptureKit gate", report["release_blockers"])
             self.assertIn(
-                "does not prove independent system_audio or microphone_audio capture artifacts beyond productized missing/degraded registration",
+                "does not prove independent system_audio and microphone_audio capture artifacts",
                 report["release_blockers"],
             )
             self.assertIn(
@@ -256,6 +274,34 @@ class NativeCaptureArtifactReportTests(unittest.TestCase):
                 report["release_blockers"],
             )
             self.assertEqual(report["processing_contract"]["code"], "artifact_missing")
+
+    def test_build_report_marks_independent_audio_proven_when_both_tracks_are_available(self) -> None:
+        module = load_report_module()
+        with tempfile.TemporaryDirectory() as directory:
+            summary_path, report_path, _ = self.write_fixture(
+                directory,
+                capture_system_audio=True,
+                capture_microphone_audio=True,
+                system_audio_available=True,
+                microphone_audio_available=True,
+            )
+
+            report = module.build_report(
+                summary_path,
+                report_path=report_path,
+                root=ROOT,
+                python=sys.executable,
+                release_scope=True,
+            )
+
+            self.assertTrue(report["independent_audio_artifacts_proven"])
+            self.assertEqual(report["artifacts"]["system_audio"]["capture_status"], "available")
+            self.assertEqual(report["artifacts"]["microphone_audio"]["capture_status"], "available")
+            self.assertNotIn(
+                "does not prove independent system_audio and microphone_audio capture artifacts",
+                report["release_blockers"],
+            )
+            self.assertTrue(report["processing_contract"]["skipped"])
 
     def test_build_report_rejects_missing_audio_degradation_reason(self) -> None:
         module = load_report_module()

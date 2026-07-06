@@ -133,7 +133,7 @@ def _adapter_capability_report(source_root: Path | None = None) -> dict[str, Any
         and 'public static let identity = "apple_screencapturekit"' in source_text
         and "framework: \"ScreenCaptureKit\"" in source_text
         and combined_recording is True
-        and separate_audio is False
+        and separate_audio is True
         and mixed_audio_extraction is True
     )
     return {

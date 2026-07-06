@@ -212,8 +212,8 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
 
         assertElement("ma.recording.status", in: app, contains: "Recording saved.")
         assertElement("ma.recording.artifact.screen_video.status", in: app, contains: "screen_video: available")
-        assertElement("ma.recording.artifact.system_audio.status", in: app, contains: "system_audio: degraded")
-        assertElement("ma.recording.artifact.microphone_audio.status", in: app, contains: "microphone_audio: missing")
+        assertElement("ma.recording.artifact.system_audio.status", in: app, contains: "system_audio: available")
+        assertElement("ma.recording.artifact.microphone_audio.status", in: app, contains: "microphone_audio: available")
 
         let recordedSession = try fixture.sessionMetadata()
         let recordedArtifacts = try XCTUnwrap(recordedSession["artifacts"] as? [[String: Any]])
@@ -2278,7 +2278,7 @@ private final class AppRealCaptureSameChainCLIFixture {
     init(sourceFile: StaticString = #filePath) throws {
         captureFixture = try AppAppleScreenCaptureKitRecordingFixture(
             captureSystemAudio: true,
-            captureMicrophoneAudio: false
+            captureMicrophoneAudio: true
         )
 
         let nativeAppRootURL = URL(fileURLWithPath: String(describing: sourceFile))

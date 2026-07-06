@@ -48,7 +48,7 @@ public actor AppleScreenCaptureKitNativeCaptureAdapter: NativeCaptureAdapter {
         supportedCaptureTargets: [.screen],
         producedArtifactTypes: NativeCaptureArtifactType.allCases,
         producesCombinedRecordingFile: true,
-        producesSeparateAudioArtifacts: false,
+        producesSeparateAudioArtifacts: true,
         attemptsMixedAudioExtractionFromCombinedRecording: true
     )
 
@@ -202,13 +202,13 @@ public actor AppleScreenCaptureKitNativeCaptureAdapter: NativeCaptureAdapter {
                 .systemAudio,
                 recordingFile: systemAudioFile,
                 wasRequested: options.captureSystemAudio,
-                requestedReason: "ScreenCaptureKit SCRecordingOutput stores any captured system audio only inside the combined screen_video file; no separate system_audio artifact is produced by this adapter."
+                requestedReason: "ScreenCaptureKit did not provide a separate system_audio sample stream artifact for this native capture session."
             ),
             audioArtifact(
                 .microphoneAudio,
                 recordingFile: microphoneAudioFile,
                 wasRequested: options.captureMicrophoneAudio,
-                requestedReason: "ScreenCaptureKit SCRecordingOutput stores any captured microphone audio only inside the combined screen_video file; no separate microphone_audio artifact is produced by this adapter."
+                requestedReason: "ScreenCaptureKit did not provide a separate microphone_audio sample stream artifact for this native capture session."
             ),
             mixedAudioArtifact,
         ]
@@ -526,13 +526,19 @@ private actor DefaultAppleScreenCaptureKitRecordingRuntime: AppleScreenCaptureKi
             configuration: recordingConfiguration,
             delegate: recordingDelegate
         )
+        let audioOutput = ScreenCaptureKitAudioOutput(
+            directory: outputURL.deletingLastPathComponent(),
+            options: options
+        )
         do {
             try stream.addRecordingOutput(recordingOutput)
+            try audioOutput.addRequestedOutputs(to: stream)
             try await stream.startCapture()
             try streamDelegate.throwIfFailed()
             try await recordingDelegate.waitForStart()
             try recordingDelegate.throwIfFailed()
         } catch {
+            try? audioOutput.removeRequestedOutputs(from: stream)
             try? await stream.stopCapture()
             throw error
         }
@@ -543,7 +549,8 @@ private actor DefaultAppleScreenCaptureKitRecordingRuntime: AppleScreenCaptureKi
             streamDelegate: streamDelegate,
             recordingOutput: recordingOutput,
             recordingDelegate: recordingDelegate,
-            outputURL: outputURL
+            outputURL: outputURL,
+            audioOutput: audioOutput
         )
         return token
     }
@@ -560,12 +567,18 @@ private actor DefaultAppleScreenCaptureKitRecordingRuntime: AppleScreenCaptureKi
             try await session.recordingDelegate.waitForFinish()
             try session.streamDelegate.throwIfFailed()
             try session.recordingDelegate.throwIfFailed()
+            try? session.audioOutput.removeRequestedOutputs(from: session.stream)
             try? await session.stream.stopCapture()
+            let audioFiles = await session.audioOutput.finish()
             return AppleScreenCaptureKitRecordingFiles(
-                combinedRecording: AppleScreenCaptureKitRecordingFile(url: session.outputURL, format: "mp4")
+                combinedRecording: AppleScreenCaptureKitRecordingFile(url: session.outputURL, format: "mp4"),
+                systemAudio: audioFiles.systemAudio,
+                microphoneAudio: audioFiles.microphoneAudio
             )
         } catch {
+            try? session.audioOutput.removeRequestedOutputs(from: session.stream)
             try? await session.stream.stopCapture()
+            await session.audioOutput.cancel()
             throw error
         }
     }
@@ -578,6 +591,227 @@ private struct ScreenCaptureKitRecordingSession {
     let recordingOutput: SCRecordingOutput
     let recordingDelegate: ScreenCaptureKitRecordingOutputDelegate
     let outputURL: URL
+    let audioOutput: ScreenCaptureKitAudioOutput
+}
+
+@available(macOS 15.0, *)
+private struct ScreenCaptureKitAudioOutputFiles: Sendable {
+    let systemAudio: AppleScreenCaptureKitRecordingFile?
+    let microphoneAudio: AppleScreenCaptureKitRecordingFile?
+}
+
+@available(macOS 15.0, *)
+private final class ScreenCaptureKitAudioOutput: NSObject, SCStreamOutput, @unchecked Sendable {
+    private let queue = DispatchQueue(label: "local.meeting-assistant.native.screencapturekit.audio-output")
+    private let captureSystemAudio: Bool
+    private let captureMicrophoneAudio: Bool
+    private let systemAudioWriter: ScreenCaptureKitAudioTrackWriter?
+    private let microphoneAudioWriter: ScreenCaptureKitAudioTrackWriter?
+    private var isFinishing = false
+
+    init(directory: URL, options: AppleScreenCaptureKitRecordingOptions) {
+        self.captureSystemAudio = options.captureSystemAudio
+        self.captureMicrophoneAudio = options.captureMicrophoneAudio
+        self.systemAudioWriter = options.captureSystemAudio
+            ? ScreenCaptureKitAudioTrackWriter(
+                outputURL: directory.appendingPathComponent("system_audio.m4a", isDirectory: false)
+            )
+            : nil
+        self.microphoneAudioWriter = options.captureMicrophoneAudio
+            ? ScreenCaptureKitAudioTrackWriter(
+                outputURL: directory.appendingPathComponent("microphone_audio.m4a", isDirectory: false)
+            )
+            : nil
+        super.init()
+    }
+
+    func addRequestedOutputs(to stream: SCStream) throws {
+        if captureSystemAudio {
+            try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
+        }
+        if captureMicrophoneAudio {
+            try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: queue)
+        }
+    }
+
+    func removeRequestedOutputs(from stream: SCStream) throws {
+        var firstError: Error?
+        if captureSystemAudio {
+            do {
+                try stream.removeStreamOutput(self, type: .audio)
+            } catch {
+                firstError = firstError ?? error
+            }
+        }
+        if captureMicrophoneAudio {
+            do {
+                try stream.removeStreamOutput(self, type: .microphone)
+            } catch {
+                firstError = firstError ?? error
+            }
+        }
+        if let firstError {
+            throw firstError
+        }
+    }
+
+    func stream(
+        _ stream: SCStream,
+        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
+        of outputType: SCStreamOutputType
+    ) {
+        guard !isFinishing, CMSampleBufferDataIsReady(sampleBuffer) else {
+            return
+        }
+        switch outputType {
+        case .audio:
+            systemAudioWriter?.append(sampleBuffer)
+        case .microphone:
+            microphoneAudioWriter?.append(sampleBuffer)
+        default:
+            return
+        }
+    }
+
+    func finish() async -> ScreenCaptureKitAudioOutputFiles {
+        let writers = queue.sync {
+            isFinishing = true
+            return (systemAudio: systemAudioWriter, microphoneAudio: microphoneAudioWriter)
+        }
+        let systemAudio = await writers.systemAudio?.finish()
+        let microphoneAudio = await writers.microphoneAudio?.finish()
+        return ScreenCaptureKitAudioOutputFiles(
+            systemAudio: systemAudio,
+            microphoneAudio: microphoneAudio
+        )
+    }
+
+    func cancel() async {
+        let writers = queue.sync {
+            isFinishing = true
+            return [systemAudioWriter, microphoneAudioWriter].compactMap { $0 }
+        }
+        for writer in writers {
+            writer.cancel()
+        }
+    }
+}
+
+@available(macOS 15.0, *)
+private final class ScreenCaptureKitAudioTrackWriter: @unchecked Sendable {
+    private let outputURL: URL
+    private var writer: AVAssetWriter?
+    private var input: AVAssetWriterInput?
+    private var didAppendSample = false
+    private var failed = false
+
+    init(outputURL: URL) {
+        self.outputURL = outputURL
+    }
+
+    func append(_ sampleBuffer: CMSampleBuffer) {
+        guard !failed, CMSampleBufferDataIsReady(sampleBuffer) else {
+            return
+        }
+        do {
+            if writer == nil {
+                try startWriter(with: sampleBuffer)
+            }
+            guard
+                let writer,
+                let input,
+                writer.status == .writing,
+                input.isReadyForMoreMediaData
+            else {
+                failed = true
+                return
+            }
+            guard input.append(sampleBuffer) else {
+                failed = true
+                return
+            }
+            didAppendSample = true
+        } catch {
+            failed = true
+            cleanupOutput()
+        }
+    }
+
+    func finish() async -> AppleScreenCaptureKitRecordingFile? {
+        guard
+            !failed,
+            didAppendSample,
+            let writer,
+            let input,
+            writer.status == .writing
+        else {
+            cleanupOutput()
+            return nil
+        }
+
+        input.markAsFinished()
+        await writer.finishWriting()
+        guard writer.status == .completed, outputFileIsReadable() else {
+            cleanupOutput()
+            return nil
+        }
+        return AppleScreenCaptureKitRecordingFile(url: outputURL, format: "m4a")
+    }
+
+    func cancel() {
+        writer?.cancelWriting()
+        cleanupOutput()
+    }
+
+    private func startWriter(with sampleBuffer: CMSampleBuffer) throws {
+        cleanupOutput()
+        let writer = try AVAssetWriter(outputURL: outputURL, fileType: .m4a)
+        let input = AVAssetWriterInput(
+            mediaType: .audio,
+            outputSettings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 48_000,
+                AVNumberOfChannelsKey: 2,
+                AVEncoderBitRateKey: 128_000,
+            ],
+            sourceFormatHint: CMSampleBufferGetFormatDescription(sampleBuffer)
+        )
+        input.expectsMediaDataInRealTime = true
+        guard writer.canAdd(input) else {
+            throw ScreenCaptureKitAudioWriterError.inputRejected
+        }
+        writer.add(input)
+        guard writer.startWriting() else {
+            throw writer.error ?? ScreenCaptureKitAudioWriterError.writerStartFailed
+        }
+        let startTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        guard startTime.isValid else {
+            throw ScreenCaptureKitAudioWriterError.invalidStartTime
+        }
+        writer.startSession(atSourceTime: startTime)
+        self.writer = writer
+        self.input = input
+    }
+
+    private func outputFileIsReadable() -> Bool {
+        guard FileManager.default.fileExists(atPath: outputURL.path) else {
+            return false
+        }
+        return ((try? Data(contentsOf: outputURL))?.isEmpty == false)
+    }
+
+    private func cleanupOutput() {
+        if FileManager.default.fileExists(atPath: outputURL.path) {
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+    }
+}
+
+@available(macOS 15.0, *)
+private enum ScreenCaptureKitAudioWriterError: Error {
+    case inputRejected
+    case writerStartFailed
+    case invalidStartTime
 }
 
 @available(macOS 15.0, *)

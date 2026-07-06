@@ -430,7 +430,7 @@ struct NativeRecordingCommandClientTests {
         #expect(adapter.capabilitySummary.supportedCaptureTargets == [.screen])
         #expect(adapter.capabilitySummary.producedArtifactTypes == NativeCaptureArtifactType.allCases)
         #expect(adapter.capabilitySummary.producesCombinedRecordingFile == true)
-        #expect(adapter.capabilitySummary.producesSeparateAudioArtifacts == false)
+        #expect(adapter.capabilitySummary.producesSeparateAudioArtifacts == true)
         #expect(adapter.capabilitySummary.attemptsMixedAudioExtractionFromCombinedRecording == true)
     }
 
@@ -559,8 +559,8 @@ struct NativeRecordingCommandClientTests {
         #expect(system.captureStatus == "degraded")
         #expect(microphone.captureStatus == "degraded")
         #expect(mixed.captureStatus == "degraded")
-        #expect(system.degradationReason?.contains("combined screen_video file") == true)
-        #expect(microphone.degradationReason?.contains("combined screen_video file") == true)
+        #expect(system.degradationReason?.contains("separate system_audio sample stream") == true)
+        #expect(microphone.degradationReason?.contains("separate microphone_audio sample stream") == true)
         #expect(mixed.degradationReason?.contains("exportable audio track") == true)
 
         let session = try readSessionJSON(workspace: workspace, sessionID: "session-sck-combined")

@@ -74,7 +74,7 @@ class ReleaseNativeUIHardeningReportTests(unittest.TestCase):
             self.assertTrue(report["not_release_readiness"])
             self.assertTrue(report["real_capture_adapter_capability"]["source_contract_ok"])
             self.assertTrue(report["real_capture_combined_recording_file_supported"])
-            self.assertFalse(report["real_capture_separate_audio_artifacts_supported"])
+            self.assertTrue(report["real_capture_separate_audio_artifacts_supported"])
             self.assertTrue(report["real_capture_mixed_audio_extraction_supported"])
             self.assertFalse(report["real_capture_independent_audio_artifacts_proven"])
             self.assertFalse(report["real_capture_mixed_audio_artifact_proven"])
@@ -166,7 +166,7 @@ class ReleaseNativeUIHardeningReportTests(unittest.TestCase):
             self.assertIn("Screen Recording", report["real_capture_tcc_remediation"][0])
             self.assertIn("real capture app-bundle smoke exited 65", report["findings"])
 
-    def test_build_report_fails_closed_when_adapter_capability_contract_changes(self) -> None:
+    def test_build_report_fails_closed_when_adapter_capability_contract_regresses(self) -> None:
         module = load_report_module()
         with tempfile.TemporaryDirectory() as directory:
             real_capture_output, hardening_output, report_path = self.write_outputs(directory)
@@ -183,7 +183,7 @@ public actor AppleScreenCaptureKitNativeCaptureAdapter {
         supportedCaptureTargets: [.screen],
         producedArtifactTypes: NativeCaptureArtifactType.allCases,
         producesCombinedRecordingFile: true,
-        producesSeparateAudioArtifacts: true,
+        producesSeparateAudioArtifacts: false,
         attemptsMixedAudioExtractionFromCombinedRecording: true
     )
 }
@@ -205,7 +205,7 @@ public actor AppleScreenCaptureKitNativeCaptureAdapter {
             self.assertTrue(report["blocked"])
             self.assertEqual(report["blocker_type"], "adapter_capability_contract_changed")
             self.assertFalse(report["real_capture_adapter_capability"]["source_contract_ok"])
-            self.assertTrue(report["real_capture_separate_audio_artifacts_supported"])
+            self.assertFalse(report["real_capture_separate_audio_artifacts_supported"])
             self.assertIn("adapter capability source contract changed", report["findings"][0])
 
     def test_cli_writes_release_scope_report_and_marker(self) -> None:

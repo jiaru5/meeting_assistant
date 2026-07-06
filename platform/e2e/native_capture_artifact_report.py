@@ -34,7 +34,6 @@ PARTIAL_EVIDENCE_BLOCKERS = [
     "does not prove VS-MA-23 release readiness",
 ]
 RELEASE_SCOPE_RESIDUAL_RISKS = [
-    "does not prove independent system_audio or microphone_audio capture artifacts beyond productized missing/degraded registration",
     "does not prove cross-machine TCC/display repeatability beyond this release-scope run",
     "does not prove real native-to-processing successful transcript chain",
     "does not prove VS-MA-23 release readiness",
@@ -150,6 +149,31 @@ def assert_unavailable_audio_artifact(
     return artifact_report_entry(session_dir, artifact, artifact_type, require_file=False)
 
 
+def assert_requested_audio_artifact(
+    session_dir: Path,
+    session: dict[str, Any],
+    artifact_type: str,
+    *,
+    requested: bool,
+) -> dict[str, Any]:
+    artifact = artifact_by_type(session, artifact_type)
+    if requested and artifact.get("capture_status") == "available":
+        artifact_path = artifact_file_path(session_dir, artifact)
+        if not artifact_path.is_file():
+            fail(f"{artifact_type} file is missing at {artifact_path}")
+        if artifact_path.stat().st_size <= 0:
+            fail(f"{artifact_type} file must be non-empty")
+        checksum = artifact.get("checksum")
+        if not isinstance(checksum, str) or not checksum.startswith("sha256:"):
+            fail(f"{artifact_type} available artifact must include a sha256 value")
+        if sha256_file(artifact_path) != checksum:
+            fail(f"{artifact_type} checksum does not match file bytes")
+        return artifact_report_entry(session_dir, artifact, artifact_type, require_file=True)
+
+    expected_status = "degraded" if requested else "missing"
+    return assert_unavailable_audio_artifact(session_dir, session, artifact_type, expected_status)
+
+
 def assert_original_artifact_contract(
     session_dir: Path,
     session: dict[str, Any],
@@ -189,12 +213,18 @@ def assert_original_artifact_contract(
         fail("ScreenCaptureKit summary screen_video_path differs from registered artifact path")
     artifacts["screen_video"] = artifact_report_entry(session_dir, screen, "screen_video", require_file=True)
 
-    expected_status = {
-        "system_audio": "degraded" if summary.get("capture_system_audio") else "missing",
-        "microphone_audio": "degraded" if summary.get("capture_microphone_audio") else "missing",
-    }
-    for artifact_type, status in expected_status.items():
-        artifacts[artifact_type] = assert_unavailable_audio_artifact(session_dir, session, artifact_type, status)
+    artifacts["system_audio"] = assert_requested_audio_artifact(
+        session_dir,
+        session,
+        "system_audio",
+        requested=bool(summary.get("capture_system_audio")),
+    )
+    artifacts["microphone_audio"] = assert_requested_audio_artifact(
+        session_dir,
+        session,
+        "microphone_audio",
+        requested=bool(summary.get("capture_microphone_audio")),
+    )
 
     audio_requested = bool(summary.get("capture_system_audio") or summary.get("capture_microphone_audio"))
     mixed_audio = artifact_by_type(session, "mixed_audio")
@@ -305,12 +335,19 @@ def build_report(
         fail("recorded native session must include ended_at")
 
     artifacts = assert_original_artifact_contract(session_dir, session, summary)
-    mixed_audio_available = artifacts["mixed_audio"]["capture_status"] == "available"
-    if mixed_audio_available:
+    independent_audio_artifacts_proven = (
+        artifacts["system_audio"]["capture_status"] == "available"
+        and artifacts["microphone_audio"]["capture_status"] == "available"
+    )
+    audio_available = any(
+        artifacts[artifact_type]["capture_status"] == "available"
+        for artifact_type in ("system_audio", "microphone_audio", "mixed_audio")
+    )
+    if audio_available:
         processing = {
             "command": "generate_transcript",
             "skipped": True,
-            "reason": "mixed_audio was available in this native capture run; no-audio artifact_missing processing path is not applicable.",
+            "reason": "an audio artifact was available in this native capture run; no-audio artifact_missing processing path is not applicable.",
             "fail_closed": None,
         }
     else:
@@ -318,7 +355,9 @@ def build_report(
     derived_pollution = assert_no_derived_artifact_pollution(load_session(session_dir))
 
     release_gate = "release-scope-native-capture" if release_scope else "partial-evidence-only"
-    release_blockers = RELEASE_SCOPE_RESIDUAL_RISKS if release_scope else PARTIAL_EVIDENCE_BLOCKERS
+    release_blockers = list(RELEASE_SCOPE_RESIDUAL_RISKS if release_scope else PARTIAL_EVIDENCE_BLOCKERS)
+    if not independent_audio_artifacts_proven:
+        release_blockers.insert(0, "does not prove independent system_audio and microphone_audio capture artifacts")
     report: dict[str, Any] = {
         "report_schema": 1,
         "component": "platform/e2e/native-capture-artifact-smoke",
@@ -337,6 +376,7 @@ def build_report(
         "capture_system_audio": bool(summary.get("capture_system_audio")),
         "capture_microphone_audio": bool(summary.get("capture_microphone_audio")),
         "artifacts": artifacts,
+        "independent_audio_artifacts_proven": independent_audio_artifacts_proven,
         "processing_contract": processing | {
             "derived_artifact_pollution": derived_pollution,
         },

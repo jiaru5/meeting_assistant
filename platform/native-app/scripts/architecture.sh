@@ -233,12 +233,15 @@ grep -R -q "MeetingAssistantNativeAppUITests" MeetingAssistantNative.xcodeproj/p
 
 apple_adapter_file='Sources/MeetingAssistantNative/AppleScreenCaptureKitNativeCaptureAdapter.swift'
 native_permission_file='Sources/MeetingAssistantNative/NativeCapturePermissionChecker.swift'
-apple_framework_forbidden='(^[[:space:]]*import[[:space:]]+(ScreenCaptureKit|AVFoundation|CoreAudio|CoreMediaIO|ReplayKit|Network)\b|SCStream\b|SCRecordingOutput\b|SCContentFilter\b|SCShareableContent\b|AVCapture|CGDisplayStream|AVAudioEngine|AVAudioRecorder|AudioQueue|AudioUnit|AudioDevice)'
-permission_checker_capture_forbidden='(ScreenCaptureKit\b|SCStream\b|SCRecordingOutput\b|SCContentFilter\b|SCShareableContent\b|CoreAudio\b|CoreMediaIO\b|ReplayKit\b|Network\b|CGDisplayStream\b|AVAudioEngine\b|AVAudioRecorder\b|AudioQueue\b|AudioUnit\b|AudioDevice\b)'
+apple_framework_forbidden='(^[[:space:]]*import[[:space:]]+(ScreenCaptureKit|AVFoundation|CoreAudio|CoreMediaIO|ReplayKit|Network)\b|SCStream\b|SCStreamOutput\b|SCRecordingOutput\b|SCContentFilter\b|SCShareableContent\b|AVAssetWriter\b|AVCapture|CGDisplayStream|AVAudioEngine|AVAudioRecorder|AudioQueue|AudioUnit|AudioDevice)'
+permission_checker_capture_forbidden='(ScreenCaptureKit\b|SCStream\b|SCStreamOutput\b|SCRecordingOutput\b|SCContentFilter\b|SCShareableContent\b|CoreAudio\b|CoreMediaIO\b|ReplayKit\b|Network\b|CGDisplayStream\b|AVAssetWriter\b|AVAudioEngine\b|AVAudioRecorder\b|AudioQueue\b|AudioUnit\b|AudioDevice\b)'
 
+grep -q 'producesSeparateAudioArtifacts: true' "$apple_adapter_file"
 grep -q 'attemptsMixedAudioExtractionFromCombinedRecording: true' "$apple_adapter_file"
 grep -q 'AppleScreenCaptureKitMixedAudioExtracting' "$apple_adapter_file"
 grep -q 'AVAssetExportSession' "$apple_adapter_file"
+grep -q 'SCStreamOutput' "$apple_adapter_file"
+grep -q 'AVAssetWriter' "$apple_adapter_file"
 grep -q 'AVFoundationMicrophonePermissionProbe' "$native_permission_file"
 grep -q 'AVCaptureDevice.authorizationStatus(for: .audio)' "$native_permission_file"
 grep -q 'AVCaptureDevice.requestAccess(for: .audio)' "$native_permission_file"

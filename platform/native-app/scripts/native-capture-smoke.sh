@@ -538,15 +538,19 @@ struct NativeCaptureSmoke {
                 errors.append("session.json missing screen_video artifact")
             }
 
-            validateUnavailableAudioArtifact(
+            validateMixedAudioArtifact(
                 type: "system_audio",
                 expectedStatus: captureSystemAudio ? "degraded" : "missing",
+                allowAvailable: captureSystemAudio,
+                sessionURL: sessionURL,
                 artifacts: session.artifacts,
                 errors: &errors
             )
-            validateUnavailableAudioArtifact(
+            validateMixedAudioArtifact(
                 type: "microphone_audio",
                 expectedStatus: captureMicrophoneAudio ? "degraded" : "missing",
+                allowAvailable: captureMicrophoneAudio,
+                sessionURL: sessionURL,
                 artifacts: session.artifacts,
                 errors: &errors
             )

@@ -36,9 +36,9 @@
 
 1. `AppleScreenCaptureKitNativeCaptureAdapter` 是唯一允许在 native-app 内使用 Apple 官方 `ScreenCaptureKit` / `AVFoundation` capture API 的文件；Apple framework 类型被限制在该文件内。
 2. 该 adapter 实现既有 `NativeCaptureAdapter`，只复用冻结的 `start_native_recording` / `stop_recording` 语义，不新增 command 字段、error code、exit code、artifact type、schema 或 UI state。
-3. 真实 runtime 使用 `SCShareableContent`、`SCContentFilter`、`SCStream` 和 `SCRecordingOutput` 生成一个临时 combined recording file；临时文件只作为 adapter-local 输入，最终 `session.json`、artifact path、checksum 和 fail-closed 路径仍由 `RecordingSessionStore` 负责。
-4. 当前 ScreenCaptureKit spike 只能证明 combined recording file 形态：可用 combined file 登记为既有 `screen_video`；不可证明的 `system_audio`、`microphone_audio` 和 `mixed_audio` 登记为 `degraded` 或 `missing` 并写入 `degradation_reason`。无可用媒体时通过既有 `capture_failed` 语义 fail closed。
-5. Swift Testing 使用 deterministic fake runtime 覆盖 adapter capability、非 screen target fail-closed、combined file 的 partial artifact degradation、无可用媒体的 `capture_failed` session 结果；测试不依赖真实会议数据、真实 TCC 权限或真实系统音频。
+3. 真实 runtime 使用 `SCShareableContent`、`SCContentFilter`、`SCStream` 和 `SCRecordingOutput` 生成一个临时 combined recording file；请求系统或麦克风音频时，adapter-local `SCStreamOutput` 会把 `.audio` / `.microphone` sample buffer 写入临时 `.m4a` 文件。临时文件只作为 adapter-local 输入，最终 `session.json`、artifact path、checksum 和 fail-closed 路径仍由 `RecordingSessionStore` 负责。
+4. 当前 ScreenCaptureKit adapter 可用 combined file 登记为既有 `screen_video`，可用独立音频文件登记为既有 `system_audio` / `microphone_audio`，并可从 combined recording 导出既有 `mixed_audio`；不可用或写入失败的音频 artifact 登记为 `degraded` 或 `missing` 并写入 `degradation_reason`。无可用媒体时通过既有 `capture_failed` 语义 fail closed。
+5. Swift Testing 使用 deterministic fake runtime 覆盖 adapter capability、非 screen target fail-closed、combined file 的 partial artifact degradation、独立 system/microphone audio artifact materialization、未请求音轨不落盘、无可用媒体的 `capture_failed` session 结果；测试不依赖真实会议数据、真实 TCC 权限或真实系统音频。
 6. 该 adapter 是非 XCTest app runtime 的默认 recording adapter；Debug/XCTest 默认仍使用 fake，controlled recording fixture 只能通过测试 hook 启用；Debug/XCTest 真实 Apple adapter smoke 仍必须额外显式设置 `MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit`、`MA_NATIVE_CAPTURE_SMOKE=1` 和 `MA_NATIVE_APP_REAL_CAPTURE_SMOKE=1`。
 7. 该 spike 不引入 OBS、BlackHole、FFmpeg 辅助 capture，不调用 helper/processing-cli，不做 processing、transcription、speaker labeling、导出、删除、网络请求、自动下载、真实 pasteboard 或真实文件 picker。
 
