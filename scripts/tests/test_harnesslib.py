@@ -868,6 +868,8 @@ class HarnessValidationTests(unittest.TestCase):
 
         self.assertIn("MA_NATIVE_APP_VSMA21_HARDENING_SMOKE", script)
         self.assertIn("MA_NATIVE_APP_REUSE_XCTESTRUN", script)
+        self.assertIn("MA_NATIVE_APP_UI_AUTOMATION_RETRY_ATTEMPTS", script)
+        self.assertIn("run_app_bundle_test_without_building", script)
         self.assertIn("reset_xctestrun_smoke_env", script)
         self.assertIn(
             "testVSMA21AppBundleProcessingPathConflictRetryPreservesOriginalCaptureArtifactWhenExplicitlyEnabled",
@@ -885,6 +887,7 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("mixedAudioChecksum", app_bundle_tests)
         self.assertIn("MA_NATIVE_APP_VSMA21_HARDENING_SMOKE=1", dev_commands)
         self.assertIn("VS-MA-21 app-bundle hardening smoke", dev_commands)
+        self.assertIn("MA_NATIVE_APP_UI_AUTOMATION_RETRY_ATTEMPTS=0", dev_commands)
         self.assertIn("MA_NATIVE_VSMA21_HARDENING_BRIDGE_SMOKE", fast_gate_script)
         self.assertIn("native-app VS-MA-21 hardening bridge smoke passed.", fast_gate_script)
         self.assertIn(

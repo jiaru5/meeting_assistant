@@ -7,6 +7,8 @@ cd "$component_dir"
 derived_data_path="${MA_NATIVE_APP_DERIVED_DATA_PATH:-$component_dir/build/DerivedData/AppBundleUITests}"
 destination="${MA_NATIVE_APP_XCODE_DESTINATION:-platform=macOS}"
 reuse_xctestrun="${MA_NATIVE_APP_REUSE_XCTESTRUN:-0}"
+ui_automation_retry_attempts="${MA_NATIVE_APP_UI_AUTOMATION_RETRY_ATTEMPTS:-1}"
+ui_automation_retry_delay_seconds="${MA_NATIVE_APP_UI_AUTOMATION_RETRY_DELAY_SECONDS:-5}"
 real_capture_smoke="${MA_NATIVE_APP_REAL_CAPTURE_SMOKE:-0}"
 real_capture_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testOptInAppleScreenCaptureKitRecordsFromDesignedShellWhenExplicitlyEnabled"
 real_capture_log="$derived_data_path/real-capture-app-bundle-smoke.log"
@@ -220,6 +222,61 @@ is_ui_testing_automation_blocked() {
   grep -Eqi 'LocalAuthentication|System authentication is running|Timed out while enabling automation mode|Failed to initialize for UI testing|Failed to enable Automation Mode' "$log_path"
 }
 
+run_app_bundle_test_without_building() {
+  local smoke_name="$1"
+  local log_path="$2"
+  local test_identifier="$3"
+  local attempt=1
+  local max_attempts
+  local attempt_log
+  local test_status
+
+  if ! [[ "$ui_automation_retry_attempts" =~ ^[0-9]+$ ]]; then
+    echo "error: MA_NATIVE_APP_UI_AUTOMATION_RETRY_ATTEMPTS must be a non-negative integer" >&2
+    return 2
+  fi
+  max_attempts=$((ui_automation_retry_attempts + 1))
+
+  : > "$log_path"
+
+  while [[ "$attempt" -le "$max_attempts" ]]; do
+    attempt_log="$log_path.attempt-$attempt.tmp"
+    {
+      echo "== native-app $smoke_name app-bundle XCUITest attempt $attempt/$max_attempts =="
+    } >>"$log_path"
+
+    set +e
+    xcodebuild test-without-building \
+      -xctestrun "$xctestrun_path" \
+      -destination "$destination" \
+      "-only-testing:$test_identifier" 2>&1 | tee "$attempt_log"
+    test_status=${PIPESTATUS[0]}
+    set +e
+
+    cat "$attempt_log" >>"$log_path"
+
+    if [[ "$test_status" -eq 0 ]]; then
+      rm -f "$attempt_log"
+      return 0
+    fi
+
+    if ! is_ui_testing_automation_blocked "$attempt_log"; then
+      rm -f "$attempt_log"
+      return "$test_status"
+    fi
+
+    rm -f "$attempt_log"
+
+    if [[ "$attempt" -ge "$max_attempts" ]]; then
+      return "$test_status"
+    fi
+
+    echo "native-app $smoke_name app-bundle XCUITest was blocked before the test body; retrying after ${ui_automation_retry_delay_seconds}s ($attempt/$ui_automation_retry_attempts retries used)." >&2
+    sleep "$ui_automation_retry_delay_seconds"
+    attempt=$((attempt + 1))
+  done
+}
+
 write_ui_testing_automation_blocker_report() {
   local smoke_name="$1"
   local log_path="$2"
@@ -261,11 +318,8 @@ if [[ "$real_capture_smoke" == "1" || "$real_capture_smoke" == "true" || "$real_
   app_bundle_path="$(find "$derived_data_path/Build/Products" -path "*/MeetingAssistantNative.app" -type d -print -quit)"
 
   set +e
-  xcodebuild test-without-building \
-    -xctestrun "$xctestrun_path" \
-    -destination "$destination" \
-    "-only-testing:$real_capture_test" 2>&1 | tee "$real_capture_log"
-  test_status=${PIPESTATUS[0]}
+  run_app_bundle_test_without_building "real capture" "$real_capture_log" "$real_capture_test"
+  test_status=$?
   set -e
 
   if [[ "$test_status" -ne 0 ]]; then
@@ -295,11 +349,8 @@ if [[ "$real_processing_smoke" == "1" || "$real_processing_smoke" == "true" || "
   set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_REAL_PROCESSING_SMOKE" "1"
 
   set +e
-  xcodebuild test-without-building \
-    -xctestrun "$xctestrun_path" \
-    -destination "$destination" \
-    "-only-testing:$real_processing_test" 2>&1 | tee "$real_processing_log"
-  test_status=${PIPESTATUS[0]}
+  run_app_bundle_test_without_building "real processing" "$real_processing_log" "$real_processing_test"
+  test_status=$?
   set -e
 
   if [[ "$test_status" -ne 0 ]]; then
@@ -323,11 +374,8 @@ if [[ "$real_action_smoke" == "1" || "$real_action_smoke" == "true" || "$real_ac
   set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_REAL_ACTION_SMOKE" "1"
 
   set +e
-  xcodebuild test-without-building \
-    -xctestrun "$xctestrun_path" \
-    -destination "$destination" \
-    "-only-testing:$real_action_test" 2>&1 | tee "$real_action_log"
-  test_status=${PIPESTATUS[0]}
+  run_app_bundle_test_without_building "real action" "$real_action_log" "$real_action_test"
+  test_status=$?
   set -e
 
   if [[ "$test_status" -ne 0 ]]; then
@@ -355,11 +403,8 @@ if [[ "$real_runtime_smoke" == "1" || "$real_runtime_smoke" == "true" || "$real_
   require_env_for_real_runtime_smoke
 
   set +e
-  xcodebuild test-without-building \
-    -xctestrun "$xctestrun_path" \
-    -destination "$destination" \
-    "-only-testing:$real_runtime_test" 2>&1 | tee "$real_runtime_log"
-  test_status=${PIPESTATUS[0]}
+  run_app_bundle_test_without_building "real runtime" "$real_runtime_log" "$real_runtime_test"
+  test_status=$?
   set -e
 
   if [[ "$test_status" -ne 0 ]]; then
@@ -385,11 +430,8 @@ if [[ "$vs_ma21_hardening_smoke" == "1" || "$vs_ma21_hardening_smoke" == "true" 
   set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_VSMA21_HARDENING_SMOKE" "1"
 
   set +e
-  xcodebuild test-without-building \
-    -xctestrun "$xctestrun_path" \
-    -destination "$destination" \
-    "-only-testing:$vs_ma21_hardening_test" 2>&1 | tee "$vs_ma21_hardening_log"
-  test_status=${PIPESTATUS[0]}
+  run_app_bundle_test_without_building "VS-MA-21 hardening" "$vs_ma21_hardening_log" "$vs_ma21_hardening_test"
+  test_status=$?
   set -e
 
   if [[ "$test_status" -ne 0 ]]; then
@@ -416,11 +458,8 @@ if [[ "$real_capture_same_chain_smoke" == "1" || "$real_capture_same_chain_smoke
   app_bundle_path="$(find "$derived_data_path/Build/Products" -path "*/MeetingAssistantNative.app" -type d -print -quit)"
 
   set +e
-  xcodebuild test-without-building \
-    -xctestrun "$xctestrun_path" \
-    -destination "$destination" \
-    "-only-testing:$real_capture_same_chain_test" 2>&1 | tee "$real_capture_same_chain_log"
-  test_status=${PIPESTATUS[0]}
+  run_app_bundle_test_without_building "real capture same-chain" "$real_capture_same_chain_log" "$real_capture_same_chain_test"
+  test_status=$?
   set -e
 
   if [[ "$test_status" -ne 0 ]]; then
@@ -450,11 +489,8 @@ if [[ "$mvp_full_stack_smoke" == "1" || "$mvp_full_stack_smoke" == "true" || "$m
   set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_MVP_FULL_STACK_SMOKE" "1"
 
   set +e
-  xcodebuild test-without-building \
-    -xctestrun "$xctestrun_path" \
-    -destination "$destination" \
-    "-only-testing:$mvp_full_stack_test" 2>&1 | tee "$mvp_full_stack_log"
-  test_status=${PIPESTATUS[0]}
+  run_app_bundle_test_without_building "MVP full-stack" "$mvp_full_stack_log" "$mvp_full_stack_test"
+  test_status=$?
   set -e
 
   if [[ "$test_status" -ne 0 ]]; then
