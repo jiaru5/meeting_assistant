@@ -867,9 +867,15 @@ class HarnessValidationTests(unittest.TestCase):
         dev_commands = (ROOT / "docs/engineering/02-dev-commands.md").read_text(encoding="utf-8")
 
         self.assertIn("MA_NATIVE_APP_VSMA21_HARDENING_SMOKE", script)
+        self.assertIn("MA_NATIVE_APP_REUSE_XCTESTRUN", script)
+        self.assertIn("reset_xctestrun_smoke_env", script)
         self.assertIn(
             "testVSMA21AppBundleProcessingPathConflictRetryPreservesOriginalCaptureArtifactWhenExplicitlyEnabled",
             script,
+        )
+        self.assertLess(
+            script.index("reset_xctestrun_smoke_env"),
+            script.index('set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE" "1"'),
         )
         self.assertIn("vs-ma-21-hardening-app-bundle-smoke.log", script)
         self.assertIn("vs-ma-21-hardening-ui-automation-report.json", script)

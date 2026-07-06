@@ -135,6 +135,8 @@ grep -q "MA_NATIVE_APP_REAL_RUNTIME_SMOKE" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_VSMA21_HARDENING_SMOKE" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_MVP_FULL_STACK_SMOKE" scripts/test-app-bundle.sh
+grep -q "MA_NATIVE_APP_REUSE_XCTESTRUN" scripts/test-app-bundle.sh
+grep -q "reset_xctestrun_smoke_env" scripts/test-app-bundle.sh
 grep -q "test-without-building" scripts/test-app-bundle.sh
 grep -q "PlistBuddy" scripts/test-app-bundle.sh
 grep -q "permission_denied" scripts/test-app-bundle.sh

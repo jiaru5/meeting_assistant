@@ -6,6 +6,7 @@ cd "$component_dir"
 
 derived_data_path="${MA_NATIVE_APP_DERIVED_DATA_PATH:-$component_dir/build/DerivedData/AppBundleUITests}"
 destination="${MA_NATIVE_APP_XCODE_DESTINATION:-platform=macOS}"
+reuse_xctestrun="${MA_NATIVE_APP_REUSE_XCTESTRUN:-0}"
 real_capture_smoke="${MA_NATIVE_APP_REAL_CAPTURE_SMOKE:-0}"
 real_capture_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testOptInAppleScreenCaptureKitRecordsFromDesignedShellWhenExplicitlyEnabled"
 real_capture_log="$derived_data_path/real-capture-app-bundle-smoke.log"
@@ -33,6 +34,49 @@ mvp_full_stack_log="$derived_data_path/mvp-full-stack-app-bundle-smoke.log"
 
 mkdir -p "$derived_data_path"
 
+is_truthy() {
+  case "${1:-0}" in
+    1 | true | TRUE | yes | YES)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+find_xctestrun_path() {
+  find "$derived_data_path/Build/Products" -maxdepth 1 -name "*.xctestrun" -print -quit 2>/dev/null || true
+}
+
+prepare_xctestrun() {
+  local smoke_name="$1"
+
+  if is_truthy "$reuse_xctestrun"; then
+    xctestrun_path="$(find_xctestrun_path)"
+    if [[ -z "$xctestrun_path" ]]; then
+      echo "error: MA_NATIVE_APP_REUSE_XCTESTRUN=1 was set but no .xctestrun file exists under $derived_data_path/Build/Products" >&2
+      echo "Run the same app-bundle smoke once without MA_NATIVE_APP_REUSE_XCTESTRUN before granting or reusing the exact app bundle." >&2
+      exit 1
+    fi
+    echo "native-app $smoke_name app-bundle XCUITest reusing existing xctestrun: $xctestrun_path" >&2
+    return 0
+  fi
+
+  xcodebuild build-for-testing \
+    -project "$component_dir/MeetingAssistantNative.xcodeproj" \
+    -scheme "MeetingAssistantNative" \
+    -destination "$destination" \
+    -derivedDataPath "$derived_data_path" \
+    -parallel-testing-enabled NO
+
+  xctestrun_path="$(find_xctestrun_path)"
+  if [[ -z "$xctestrun_path" ]]; then
+    echo "error: build-for-testing did not produce an .xctestrun file under $derived_data_path/Build/Products" >&2
+    exit 1
+  fi
+}
+
 set_xctestrun_env() {
   local xctestrun_path="$1"
   local key="$2"
@@ -45,6 +89,22 @@ set_xctestrun_env() {
   do
     /usr/libexec/PlistBuddy -c "Set $plist_path $value" "$xctestrun_path" >/dev/null 2>&1 \
       || /usr/libexec/PlistBuddy -c "Add $plist_path string $value" "$xctestrun_path" >/dev/null
+  done
+}
+
+reset_xctestrun_smoke_env() {
+  local key
+
+  for key in \
+    MA_NATIVE_APP_REAL_CAPTURE_SMOKE \
+    MA_NATIVE_APP_REAL_PROCESSING_SMOKE \
+    MA_NATIVE_APP_REAL_ACTION_SMOKE \
+    MA_NATIVE_APP_REAL_RUNTIME_SMOKE \
+    MA_NATIVE_APP_VSMA21_HARDENING_SMOKE \
+    MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE \
+    MA_NATIVE_APP_MVP_FULL_STACK_SMOKE
+  do
+    set_xctestrun_env "$xctestrun_path" "$key" "0"
   done
 }
 
@@ -66,6 +126,8 @@ To unblock this machine:
   2. Enable MeetingAssistantNative for the app bundle built under the DerivedData path above.
   3. Quit and relaunch the app if macOS asks, then rerun:
      $rerun_command
+  4. If you granted the exact app bundle above and have not rebuilt since then, rerun without changing the app signature:
+     MA_NATIVE_APP_REUSE_XCTESTRUN=1 $rerun_command
 
 Optional settings shortcut:
   open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
@@ -191,18 +253,8 @@ require_env_for_real_runtime_smoke() {
 }
 
 if [[ "$real_capture_smoke" == "1" || "$real_capture_smoke" == "true" || "$real_capture_smoke" == "yes" ]]; then
-  xcodebuild build-for-testing \
-    -project "$component_dir/MeetingAssistantNative.xcodeproj" \
-    -scheme "MeetingAssistantNative" \
-    -destination "$destination" \
-    -derivedDataPath "$derived_data_path" \
-    -parallel-testing-enabled NO
-
-  xctestrun_path="$(find "$derived_data_path/Build/Products" -maxdepth 1 -name "*.xctestrun" -print -quit)"
-  if [[ -z "$xctestrun_path" ]]; then
-    echo "error: build-for-testing did not produce an .xctestrun file under $derived_data_path/Build/Products" >&2
-    exit 1
-  fi
+  prepare_xctestrun "real capture"
+  reset_xctestrun_smoke_env
 
   set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_REAL_CAPTURE_SMOKE" "1"
 
@@ -237,18 +289,8 @@ if [[ "$real_capture_smoke" == "1" || "$real_capture_smoke" == "true" || "$real_
 fi
 
 if [[ "$real_processing_smoke" == "1" || "$real_processing_smoke" == "true" || "$real_processing_smoke" == "yes" ]]; then
-  xcodebuild build-for-testing \
-    -project "$component_dir/MeetingAssistantNative.xcodeproj" \
-    -scheme "MeetingAssistantNative" \
-    -destination "$destination" \
-    -derivedDataPath "$derived_data_path" \
-    -parallel-testing-enabled NO
-
-  xctestrun_path="$(find "$derived_data_path/Build/Products" -maxdepth 1 -name "*.xctestrun" -print -quit)"
-  if [[ -z "$xctestrun_path" ]]; then
-    echo "error: build-for-testing did not produce an .xctestrun file under $derived_data_path/Build/Products" >&2
-    exit 1
-  fi
+  prepare_xctestrun "real processing"
+  reset_xctestrun_smoke_env
 
   set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_REAL_PROCESSING_SMOKE" "1"
 
@@ -275,18 +317,8 @@ if [[ "$real_processing_smoke" == "1" || "$real_processing_smoke" == "true" || "
 fi
 
 if [[ "$real_action_smoke" == "1" || "$real_action_smoke" == "true" || "$real_action_smoke" == "yes" ]]; then
-  xcodebuild build-for-testing \
-    -project "$component_dir/MeetingAssistantNative.xcodeproj" \
-    -scheme "MeetingAssistantNative" \
-    -destination "$destination" \
-    -derivedDataPath "$derived_data_path" \
-    -parallel-testing-enabled NO
-
-  xctestrun_path="$(find "$derived_data_path/Build/Products" -maxdepth 1 -name "*.xctestrun" -print -quit)"
-  if [[ -z "$xctestrun_path" ]]; then
-    echo "error: build-for-testing did not produce an .xctestrun file under $derived_data_path/Build/Products" >&2
-    exit 1
-  fi
+  prepare_xctestrun "real action"
+  reset_xctestrun_smoke_env
 
   set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_REAL_ACTION_SMOKE" "1"
 
@@ -313,18 +345,8 @@ if [[ "$real_action_smoke" == "1" || "$real_action_smoke" == "true" || "$real_ac
 fi
 
 if [[ "$real_runtime_smoke" == "1" || "$real_runtime_smoke" == "true" || "$real_runtime_smoke" == "yes" ]]; then
-  xcodebuild build-for-testing \
-    -project "$component_dir/MeetingAssistantNative.xcodeproj" \
-    -scheme "MeetingAssistantNative" \
-    -destination "$destination" \
-    -derivedDataPath "$derived_data_path" \
-    -parallel-testing-enabled NO
-
-  xctestrun_path="$(find "$derived_data_path/Build/Products" -maxdepth 1 -name "*.xctestrun" -print -quit)"
-  if [[ -z "$xctestrun_path" ]]; then
-    echo "error: build-for-testing did not produce an .xctestrun file under $derived_data_path/Build/Products" >&2
-    exit 1
-  fi
+  prepare_xctestrun "real runtime"
+  reset_xctestrun_smoke_env
 
   set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_REAL_RUNTIME_SMOKE" "1"
   rm -rf "$real_runtime_diagnostic_dir"
@@ -357,18 +379,8 @@ if [[ "$real_runtime_smoke" == "1" || "$real_runtime_smoke" == "true" || "$real_
 fi
 
 if [[ "$vs_ma21_hardening_smoke" == "1" || "$vs_ma21_hardening_smoke" == "true" || "$vs_ma21_hardening_smoke" == "yes" ]]; then
-  xcodebuild build-for-testing \
-    -project "$component_dir/MeetingAssistantNative.xcodeproj" \
-    -scheme "MeetingAssistantNative" \
-    -destination "$destination" \
-    -derivedDataPath "$derived_data_path" \
-    -parallel-testing-enabled NO
-
-  xctestrun_path="$(find "$derived_data_path/Build/Products" -maxdepth 1 -name "*.xctestrun" -print -quit)"
-  if [[ -z "$xctestrun_path" ]]; then
-    echo "error: build-for-testing did not produce an .xctestrun file under $derived_data_path/Build/Products" >&2
-    exit 1
-  fi
+  prepare_xctestrun "VS-MA-21 hardening"
+  reset_xctestrun_smoke_env
 
   set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_VSMA21_HARDENING_SMOKE" "1"
 
@@ -396,18 +408,8 @@ if [[ "$vs_ma21_hardening_smoke" == "1" || "$vs_ma21_hardening_smoke" == "true" 
 fi
 
 if [[ "$real_capture_same_chain_smoke" == "1" || "$real_capture_same_chain_smoke" == "true" || "$real_capture_same_chain_smoke" == "yes" ]]; then
-  xcodebuild build-for-testing \
-    -project "$component_dir/MeetingAssistantNative.xcodeproj" \
-    -scheme "MeetingAssistantNative" \
-    -destination "$destination" \
-    -derivedDataPath "$derived_data_path" \
-    -parallel-testing-enabled NO
-
-  xctestrun_path="$(find "$derived_data_path/Build/Products" -maxdepth 1 -name "*.xctestrun" -print -quit)"
-  if [[ -z "$xctestrun_path" ]]; then
-    echo "error: build-for-testing did not produce an .xctestrun file under $derived_data_path/Build/Products" >&2
-    exit 1
-  fi
+  prepare_xctestrun "real capture same-chain"
+  reset_xctestrun_smoke_env
 
   set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE" "1"
 
@@ -442,18 +444,8 @@ if [[ "$real_capture_same_chain_smoke" == "1" || "$real_capture_same_chain_smoke
 fi
 
 if [[ "$mvp_full_stack_smoke" == "1" || "$mvp_full_stack_smoke" == "true" || "$mvp_full_stack_smoke" == "yes" ]]; then
-  xcodebuild build-for-testing \
-    -project "$component_dir/MeetingAssistantNative.xcodeproj" \
-    -scheme "MeetingAssistantNative" \
-    -destination "$destination" \
-    -derivedDataPath "$derived_data_path" \
-    -parallel-testing-enabled NO
-
-  xctestrun_path="$(find "$derived_data_path/Build/Products" -maxdepth 1 -name "*.xctestrun" -print -quit)"
-  if [[ -z "$xctestrun_path" ]]; then
-    echo "error: build-for-testing did not produce an .xctestrun file under $derived_data_path/Build/Products" >&2
-    exit 1
-  fi
+  prepare_xctestrun "MVP full-stack"
+  reset_xctestrun_smoke_env
 
   set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_MVP_FULL_STACK_SMOKE" "1"
 
