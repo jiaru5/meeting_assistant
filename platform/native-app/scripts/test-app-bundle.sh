@@ -204,6 +204,113 @@ print_app_bundle_identity_diagnostics() {
   } >&2
 }
 
+find_app_bundle_under_test() {
+  find "$derived_data_path/Build/Products" -path "*/MeetingAssistantNative.app" -type d -print -quit 2>/dev/null || true
+}
+
+terminate_stale_meeting_assistant_instances() {
+  local app_bundle_path="$1"
+  local smoke_name="$2"
+  local expected_executable
+
+  if ! is_truthy "${MA_NATIVE_APP_TERMINATE_STALE_INSTANCES:-1}"; then
+    return 0
+  fi
+  if [[ -z "$app_bundle_path" || ! -d "$app_bundle_path" ]]; then
+    return 0
+  fi
+
+  expected_executable="$app_bundle_path/Contents/MacOS/MeetingAssistantNative"
+  if [[ ! -x "$expected_executable" ]]; then
+    return 0
+  fi
+
+  python3 - "$expected_executable" "$smoke_name" <<'PY'
+import os
+import signal
+import subprocess
+import sys
+import time
+
+expected_executable = os.path.realpath(sys.argv[1])
+smoke_name = sys.argv[2]
+executable_suffix = "/MeetingAssistantNative.app/Contents/MacOS/MeetingAssistantNative"
+
+try:
+    process_table = subprocess.check_output(["ps", "-axo", "pid=,command="], text=True)
+except Exception as error:
+    print(
+        f"warning: could not inspect MeetingAssistantNative processes before {smoke_name} app-bundle XCUITest: {error}",
+        file=sys.stderr,
+    )
+    sys.exit(0)
+
+stale_processes = []
+for line in process_table.splitlines():
+    stripped = line.strip()
+    if not stripped:
+        continue
+    parts = stripped.split(None, 1)
+    if len(parts) != 2:
+        continue
+    pid_text, command = parts
+    suffix_index = command.find(executable_suffix)
+    if suffix_index < 0:
+        continue
+    executable = command[: suffix_index + len(executable_suffix)]
+    if os.path.realpath(executable) == expected_executable:
+        continue
+    try:
+        pid = int(pid_text)
+    except ValueError:
+        continue
+    stale_processes.append((pid, executable))
+
+for pid, executable in stale_processes:
+    print(
+        f"native-app {smoke_name} app-bundle XCUITest terminating stale MeetingAssistantNative instance pid={pid}: {executable}",
+        file=sys.stderr,
+    )
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        continue
+    except PermissionError as error:
+        print(
+            f"warning: could not terminate stale MeetingAssistantNative instance pid={pid}: {error}",
+            file=sys.stderr,
+        )
+
+deadline = time.time() + 2.0
+remaining = {pid for pid, _ in stale_processes}
+while remaining and time.time() < deadline:
+    for pid in list(remaining):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            remaining.remove(pid)
+        except PermissionError:
+            remaining.remove(pid)
+    if remaining:
+        time.sleep(0.1)
+
+for pid in remaining:
+    try:
+        os.kill(pid, signal.SIGKILL)
+        print(
+            f"native-app {smoke_name} app-bundle XCUITest force-terminated stale MeetingAssistantNative instance pid={pid}",
+            file=sys.stderr,
+        )
+    except ProcessLookupError:
+        pass
+    except PermissionError as error:
+        print(
+            f"warning: could not force-terminate stale MeetingAssistantNative instance pid={pid}: {error}",
+            file=sys.stderr,
+        )
+PY
+}
+
 print_real_capture_permission_help() {
   local app_bundle_path="$1"
   local log_path="${2:-$real_capture_log}"
@@ -327,6 +434,7 @@ run_app_bundle_test_without_building() {
   local smoke_name="$1"
   local log_path="$2"
   local test_identifier="$3"
+  local app_bundle_path
   local attempt=1
   local max_attempts
   local attempt_log
@@ -337,6 +445,9 @@ run_app_bundle_test_without_building() {
     return 2
   fi
   max_attempts=$((ui_automation_retry_attempts + 1))
+
+  app_bundle_path="$(find_app_bundle_under_test)"
+  terminate_stale_meeting_assistant_instances "$app_bundle_path" "$smoke_name"
 
   : > "$log_path"
 
@@ -428,7 +539,7 @@ if [[ "$real_capture_smoke" == "1" || "$real_capture_smoke" == "true" || "$real_
 
   set_xctestrun_env "$xctestrun_path" "MA_NATIVE_APP_REAL_CAPTURE_SMOKE" "1"
 
-  app_bundle_path="$(find "$derived_data_path/Build/Products" -path "*/MeetingAssistantNative.app" -type d -print -quit)"
+  app_bundle_path="$(find_app_bundle_under_test)"
 
   set +e
   run_app_bundle_test_without_building "real capture" "$real_capture_log" "$real_capture_test"
