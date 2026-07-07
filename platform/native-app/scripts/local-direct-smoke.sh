@@ -8,7 +8,8 @@ cd "$root_dir"
 timeout_seconds="${MA_NATIVE_LOCAL_APP_SMOKE_TIMEOUT_SECONDS:-45}"
 report_dir="${MA_NATIVE_LOCAL_APP_SMOKE_REPORT_DIR:-$component_dir/build/local-direct-smoke}"
 report_file="$report_dir/local-direct-smoke-report.json"
-ui_tree_file="$report_dir/local-direct-ui-tree.txt"
+app_state_report_file="$report_dir/local-direct-app-state-report.json"
+window_report_file="$report_dir/local-direct-window-report.json"
 runner_log="$report_dir/run-local-app.log"
 reuse_existing="${MA_NATIVE_LOCAL_APP_SMOKE_REUSE_EXISTING:-0}"
 capture_system_audio="${MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO:-true}"
@@ -19,8 +20,9 @@ usage() {
 Usage: platform/native-app/scripts/local-direct-smoke.sh [run-local-app options]
 
 Launch the local-direct Release MeetingAssistantNative.app with run-local-app.sh,
-read the visible UI through macOS Accessibility, and verify that the designed
-shell, preflight, recording, and processing controls are present.
+verify that macOS reports a visible layer-0 app window, and verify the designed
+shell, preflight, recording, and processing readiness through the app's local
+smoke state report.
 
 This smoke does not click recording controls, does not open System Settings, and
 does not modify TCC or system permissions. It only proves the normal local GUI
@@ -59,6 +61,8 @@ if [[ "${1:-}" == "--help" ]]; then
 fi
 
 mkdir -p "$report_dir"
+rm -f "$app_state_report_file" "$window_report_file"
+export MA_NATIVE_LOCAL_APP_SMOKE_STATE_REPORT="$app_state_report_file"
 expected_recording_setup_marker="$(
   recording_setup_marker_for_request "$capture_system_audio" "$capture_microphone_audio"
 )"
@@ -130,94 +134,28 @@ if [[ -z "$app_pid" ]]; then
   exit 1
 fi
 
-ui_tree="$(osascript - "$timeout_seconds" "$app_pid" <<'OSA'
-on run argv
-  set timeoutSeconds to item 1 of argv as integer
-  set targetPid to item 2 of argv as integer
-  tell application "System Events"
-    set targetProcesses to processes whose unix id is targetPid
-    if (count of targetProcesses) = 0 then error "MeetingAssistantNative process was not visible to System Events"
-    tell item 1 of targetProcesses
-      set frontmost to true
-      repeat with attemptIndex from 1 to timeoutSeconds
-        if (count of windows) > 0 then exit repeat
-        delay 1
-      end repeat
-      if (count of windows) = 0 then error "MeetingAssistantNative window was not visible"
-      set outputText to ""
-      set allElements to entire contents of window 1
-      repeat with elementRef in allElements
-        try
-          set outputText to outputText & " role=" & (role of elementRef as text)
-        end try
-        try
-          set outputText to outputText & " identifier=" & (value of attribute "AXIdentifier" of elementRef as text)
-        end try
-        try
-          set outputText to outputText & " enabled=" & (value of attribute "AXEnabled" of elementRef as text)
-        end try
-        try
-          set outputText to outputText & " subrole=" & (subrole of elementRef as text)
-        end try
-        try
-          set outputText to outputText & " name=" & (name of elementRef as text)
-        end try
-        try
-          set outputText to outputText & " description=" & (description of elementRef as text)
-        end try
-        try
-          set outputText to outputText & " value=" & (value of elementRef as text)
-        end try
-        set outputText to outputText & linefeed
-      end repeat
-      return outputText
-    end tell
-  end tell
-end run
-OSA
-)"
+# local-app-ax.swift uses CoreGraphics for ordinary app window visibility because
+# this local SwiftUI/AppKit launch path can expose menus through Accessibility
+# while returning the application object from AXWindows.
+"$component_dir/scripts/local-app-ax.swift" window "$timeout_seconds" "$app_pid" >"$window_report_file"
 
-printf '%s\n' "$ui_tree" > "$ui_tree_file"
-
-required_markers=(
-  "Meeting Assistant"
-  "Preflight: Ready"
-  "Recording: Ready"
-  "Processing: Ready"
-  "Recording readiness is ready."
-  "Processing is ready to run."
-  "$expected_recording_setup_marker"
-)
-
-missing_markers=()
-for marker in "${required_markers[@]}"; do
-  if [[ "$ui_tree" != *"$marker"* ]]; then
-    missing_markers+=("$marker")
-  fi
-done
-
-if [[ ${#missing_markers[@]} -gt 0 ]]; then
-  echo "local-direct smoke failed: missing UI markers: ${missing_markers[*]}" >&2
-  echo "UI tree: $ui_tree_file" >&2
-  exit 1
-fi
-
-python3 - "$report_file" "$ui_tree_file" "$runner_log" "$app_pid" \
-  "$expected_recording_setup_marker" "$capture_system_audio" "$capture_microphone_audio" <<'PY'
+python3 - "$report_file" "$app_state_report_file" "$window_report_file" "$runner_log" "$app_pid" \
+  "$expected_recording_setup_marker" "$capture_system_audio" "$capture_microphone_audio" "$timeout_seconds" <<'PY'
 import json
 import os
-import re
 import sys
+import time
 from pathlib import Path
 
 report_path = Path(sys.argv[1])
-ui_tree_path = Path(sys.argv[2])
-runner_log = Path(sys.argv[3])
-app_pid = int(sys.argv[4])
-expected_recording_setup_marker = sys.argv[5]
-capture_system_audio = sys.argv[6]
-capture_microphone_audio = sys.argv[7]
-ui_tree = ui_tree_path.read_text(encoding="utf-8")
+app_state_report_path = Path(sys.argv[2])
+window_report_path = Path(sys.argv[3])
+runner_log = Path(sys.argv[4])
+app_pid = int(sys.argv[5])
+expected_recording_setup_marker = sys.argv[6]
+capture_system_audio = sys.argv[7]
+capture_microphone_audio = sys.argv[8]
+timeout_seconds = float(sys.argv[9])
 
 
 def is_truthy(value):
@@ -230,66 +168,118 @@ required_controls = {
     "ma.processing.startButton": True,
     "ma.processing.retryButton": False,
 }
-controls = {}
-for line in ui_tree.splitlines():
-    identifier_match = re.search(r"\bidentifier=([^ ]+)", line)
-    if not identifier_match:
-        continue
-    enabled_match = re.search(r"\benabled=(true|false)", line)
-    controls[identifier_match.group(1)] = {
-        "enabled": enabled_match.group(1) == "true" if enabled_match else None,
-    }
 
-control_errors = []
-for identifier, expected_enabled in required_controls.items():
-    control = controls.get(identifier)
-    if control is None:
-        control_errors.append(f"{identifier} missing")
-        continue
-    actual_enabled = control["enabled"]
-    if actual_enabled is not expected_enabled:
-        control_errors.append(
-            f"{identifier} enabled={actual_enabled!r}, expected {expected_enabled!r}"
-        )
-if control_errors:
-    for error in control_errors:
+
+def read_json(path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except json.JSONDecodeError:
+        return None
+
+
+def state_errors(state):
+    errors = []
+    if not state:
+        return ["app state report missing or invalid"]
+    if state.get("pid") != app_pid:
+        errors.append(f"app state pid={state.get('pid')!r}, expected {app_pid!r}")
+    shell = state.get("shell", {})
+    preflight = state.get("preflight", {})
+    recording = state.get("recording", {})
+    processing = state.get("processing", {})
+    if shell.get("title") != "Meeting Assistant":
+        errors.append("Meeting Assistant shell title missing")
+    if shell.get("recording_setup_text") != expected_recording_setup_marker:
+        errors.append("recording setup marker mismatch")
+    if preflight.get("phase") != "ready":
+        errors.append(f"preflight phase={preflight.get('phase')!r}, expected 'ready'")
+    if preflight.get("can_start_recording") is not True:
+        errors.append("preflight can_start_recording is not true")
+    if preflight.get("can_run_processing") is not True:
+        errors.append("preflight can_run_processing is not true")
+    if recording.get("phase") != "ready":
+        errors.append(f"recording phase={recording.get('phase')!r}, expected 'ready'")
+    if recording.get("status_text") != "Ready to start recording.":
+        errors.append("recording ready status text missing")
+    if processing.get("phase") != "idle":
+        errors.append(f"processing phase={processing.get('phase')!r}, expected 'idle'")
+    if processing.get("status_text") != "Processing is ready to run.":
+        errors.append("processing ready status text missing")
+    controls = {
+        control.get("identifier"): control.get("enabled")
+        for control in state.get("checked_controls", [])
+    }
+    for identifier, expected_enabled in required_controls.items():
+        if identifier not in controls:
+            errors.append(f"{identifier} missing")
+            continue
+        if controls[identifier] is not expected_enabled:
+            errors.append(
+                f"{identifier} enabled={controls[identifier]!r}, expected {expected_enabled!r}"
+            )
+    return errors
+
+
+deadline = time.monotonic() + timeout_seconds
+state = None
+errors = ["app state report missing"]
+while time.monotonic() < deadline:
+    state = read_json(app_state_report_path)
+    errors = state_errors(state)
+    if not errors:
+        break
+    time.sleep(0.5)
+else:
+    for error in errors:
         print(f"local-direct smoke failed: {error}", file=sys.stderr)
-    print(f"UI tree: {ui_tree_path}", file=sys.stderr)
+    print(f"app state report: {app_state_report_path}", file=sys.stderr)
+    sys.exit(1)
+
+window_report = read_json(window_report_path)
+if not window_report:
+    print(f"local-direct smoke failed: window report missing or invalid: {window_report_path}", file=sys.stderr)
+    sys.exit(1)
+if window_report.get("pid") != app_pid:
+    print(
+        f"local-direct smoke failed: window pid={window_report.get('pid')!r}, expected {app_pid!r}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+if window_report.get("is_onscreen") is not True or window_report.get("layer") != 0:
+    print(f"local-direct smoke failed: window is not a visible layer-0 app window: {window_report}", file=sys.stderr)
     sys.exit(1)
 
 report = {
     "report_schema": 1,
     "release_gate": "local-direct-ui-smoke",
     "app_pid": app_pid,
-    "ui_tree": str(ui_tree_path),
+    "app_state_report": str(app_state_report_path),
+    "window_report": str(window_report_path),
     "runner_log": str(runner_log),
     "checked_markers": [
         "Meeting Assistant",
-        "Preflight: Ready",
-        "Recording: Ready",
-        "Processing: Ready",
-        "Recording readiness is ready.",
+        state["preflight"]["summary"],
+        "Ready to start recording.",
         "Processing is ready to run.",
         expected_recording_setup_marker,
     ],
     "checked_recording_setup_text": expected_recording_setup_marker,
+    "checked_preflight_summary": state["preflight"]["summary"],
     "recording_request": {
         "capture_system_audio": is_truthy(capture_system_audio),
         "capture_microphone_audio": is_truthy(capture_microphone_audio),
     },
-    "checked_controls": [
-        {
-            "identifier": identifier,
-            "enabled": controls[identifier]["enabled"],
-        }
-        for identifier in required_controls
-    ],
+    "checked_controls": state["checked_controls"],
+    "checked_visible_window": window_report,
+    "verifies_app_state_report": True,
     "verifies_action_control_identifiers": True,
     "modifies_tcc_or_system_settings": False,
     "opens_system_settings": False,
     "starts_recording": False,
     "requires_developer_id_or_notarization": False,
-    "workspace": os.environ.get("MEETING_ASSISTANT_WORKSPACE", ""),
+    "workspace": state.get("launch_environment", {}).get("workspace", ""),
 }
 report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY

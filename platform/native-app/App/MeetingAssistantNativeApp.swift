@@ -4,8 +4,9 @@ import SwiftUI
 
 @main
 struct MeetingAssistantNativeApp: App {
-    @NSApplicationDelegateAdaptor(MeetingAssistantNativeAppDelegate.self)
-    private var appDelegate
+    init() {
+        MeetingAssistantNativeLaunchCoordinator.shared.install()
+    }
 
     var body: some Scene {
         Settings {
@@ -15,29 +16,74 @@ struct MeetingAssistantNativeApp: App {
 }
 
 @MainActor
-private final class MeetingAssistantNativeAppDelegate: NSObject, NSApplicationDelegate {
-    nonisolated(unsafe) private static var retainedWindowController: NSWindowController?
+private final class MeetingAssistantNativeLaunchCoordinator {
+    static let shared = MeetingAssistantNativeLaunchCoordinator()
+
+    private var didInstall = false
+    private var didOpenMainWindow = false
+    private var didFinishLaunchingObserver: NSObjectProtocol?
+    private var didBecomeActiveObserver: NSObjectProtocol?
+
+    func install() {
+        guard !didInstall else {
+            return
+        }
+        didInstall = true
+        didFinishLaunchingObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didFinishLaunchingNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.openMainWindowOnce()
+            }
+        }
+        didBecomeActiveObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.reopenMainWindowIfNeeded()
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            Task { @MainActor in
+                self?.openMainWindowOnce()
+            }
+        }
+    }
+
+    private func openMainWindowOnce() {
+        guard !didOpenMainWindow else {
+            return
+        }
+        didOpenMainWindow = true
+        MeetingAssistantNativeMainWindow.shared.openMainWindow()
+    }
+
+    private func reopenMainWindowIfNeeded() {
+        guard didOpenMainWindow,
+              !MeetingAssistantNativeMainWindow.shared.hasVisibleWindow else {
+            return
+        }
+        MeetingAssistantNativeMainWindow.shared.openMainWindow()
+    }
+}
+
+@MainActor
+private final class MeetingAssistantNativeMainWindow {
+    static let shared = MeetingAssistantNativeMainWindow()
+
     private var windowController: NSWindowController?
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        DispatchQueue.main.async { [weak self] in
-            self?.openMainWindow()
-        }
+    var hasVisibleWindow: Bool {
+        windowController?.window?.isVisible == true
     }
 
-    func applicationShouldHandleReopen(
-        _ sender: NSApplication,
-        hasVisibleWindows flag: Bool
-    ) -> Bool {
-        if !flag {
-            openMainWindow()
-        }
-        return true
-    }
-
-    private func openMainWindow() {
+    func openMainWindow() {
         NSApp.setActivationPolicy(.regular)
-
         if let window = windowController?.window {
             show(window: window)
             return
@@ -45,7 +91,11 @@ private final class MeetingAssistantNativeAppDelegate: NSObject, NSApplicationDe
 
         let configuration = NativeControlPlaneFixtureConfiguration.fromLaunchContext()
         let windowPlacement = NativeAppWindowPlacement.fromLaunchContext()
-        let rootView = NativeControlPlaneRootView(configuration: configuration)
+        let smokeStateReporter = NativeLocalAppSmokeStateReporter.fromLaunchContext()
+        let rootView = NativeControlPlaneRootView(
+            configuration: configuration,
+            smokeStateReporter: smokeStateReporter
+        )
             .background(WindowPlacementView(placement: windowPlacement))
         let hostingController = NSHostingController(rootView: rootView)
         let window = NSWindow(
@@ -62,7 +112,6 @@ private final class MeetingAssistantNativeAppDelegate: NSObject, NSApplicationDe
 
         let controller = NSWindowController(window: window)
         windowController = controller
-        Self.retainedWindowController = controller
         controller.showWindow(nil)
         show(window: window)
     }
@@ -85,8 +134,12 @@ private struct NativeControlPlaneRootView: View {
     private let autoRefreshPreflightOnAppear: Bool
     private let captureSystemAudio: Bool
     private let captureMicrophoneAudio: Bool
+    private let smokeStateReporter: NativeLocalAppSmokeStateReporter?
 
-    init(configuration: NativeControlPlaneFixtureConfiguration) {
+    init(
+        configuration: NativeControlPlaneFixtureConfiguration,
+        smokeStateReporter: NativeLocalAppSmokeStateReporter? = nil
+    ) {
         let readinessState = configuration.initialReadinessState()
         let recordingWorkspaceURL = configuration.recordingWorkspaceURL()
         let autoRefreshPreflightOnAppear = configuration.autoRefreshPreflightOnAppear()
@@ -99,6 +152,7 @@ private struct NativeControlPlaneRootView: View {
         self.autoRefreshPreflightOnAppear = autoRefreshPreflightOnAppear
         self.captureSystemAudio = configuration.captureSystemAudio
         self.captureMicrophoneAudio = configuration.captureMicrophoneAudio
+        self.smokeStateReporter = smokeStateReporter
         _shellViewModel = StateObject(wrappedValue: DesignedNativeShellViewModel())
         _permissionViewModel = StateObject(
             wrappedValue: PermissionDependencyStatusViewModel(
@@ -151,6 +205,257 @@ private struct NativeControlPlaneRootView: View {
             captureSystemAudio: captureSystemAudio,
             captureMicrophoneAudio: captureMicrophoneAudio
         )
+        .background {
+            smokeStateReportView
+        }
+    }
+
+    @ViewBuilder
+    private var smokeStateReportView: some View {
+        if let smokeStateReporter {
+            NativeLocalAppSmokeStateReportView(
+                reporter: smokeStateReporter,
+                shellViewModel: shellViewModel,
+                permissionViewModel: permissionViewModel,
+                recordingViewModel: recordingViewModel,
+                processingViewModel: processingViewModel,
+                captureSystemAudio: captureSystemAudio,
+                captureMicrophoneAudio: captureMicrophoneAudio
+            )
+        } else {
+            EmptyView()
+        }
+    }
+}
+
+private struct NativeLocalAppSmokeStateReportView: View {
+    let reporter: NativeLocalAppSmokeStateReporter
+    @ObservedObject var shellViewModel: DesignedNativeShellViewModel
+    @ObservedObject var permissionViewModel: PermissionDependencyStatusViewModel
+    @ObservedObject var recordingViewModel: RecordingControlViewModel
+    @ObservedObject var processingViewModel: ProcessingStateViewModel
+    let captureSystemAudio: Bool
+    let captureMicrophoneAudio: Bool
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .task {
+                write(reason: "appeared")
+            }
+            .onChange(of: permissionViewModel.state) { _, _ in
+                write(reason: "preflight-changed")
+            }
+            .onChange(of: recordingViewModel.state) { _, _ in
+                write(reason: "recording-changed")
+            }
+            .onChange(of: processingViewModel.state) { _, _ in
+                write(reason: "processing-changed")
+            }
+    }
+
+    @MainActor
+    private func write(reason: String) {
+        reporter.write(
+            reason: reason,
+            shellViewModel: shellViewModel,
+            permissionViewModel: permissionViewModel,
+            recordingViewModel: recordingViewModel,
+            processingViewModel: processingViewModel,
+            captureSystemAudio: captureSystemAudio,
+            captureMicrophoneAudio: captureMicrophoneAudio
+        )
+    }
+}
+
+private struct NativeLocalAppSmokeStateReporter {
+    let reportURL: URL
+    let environment: [String: String]
+
+    static func fromLaunchContext(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> NativeLocalAppSmokeStateReporter? {
+        guard let rawPath = environment["MA_NATIVE_LOCAL_APP_SMOKE_STATE_REPORT"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !rawPath.isEmpty
+        else {
+            return nil
+        }
+
+        return NativeLocalAppSmokeStateReporter(
+            reportURL: URL(fileURLWithPath: rawPath),
+            environment: environment
+        )
+    }
+
+    @MainActor
+    func write(
+        reason: String,
+        shellViewModel: DesignedNativeShellViewModel,
+        permissionViewModel: PermissionDependencyStatusViewModel,
+        recordingViewModel: RecordingControlViewModel,
+        processingViewModel: ProcessingStateViewModel,
+        captureSystemAudio: Bool,
+        captureMicrophoneAudio: Bool
+    ) {
+        do {
+            let payload = makePayload(
+                reason: reason,
+                shellViewModel: shellViewModel,
+                permissionViewModel: permissionViewModel,
+                recordingViewModel: recordingViewModel,
+                processingViewModel: processingViewModel,
+                captureSystemAudio: captureSystemAudio,
+                captureMicrophoneAudio: captureMicrophoneAudio
+            )
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+            try FileManager.default.createDirectory(
+                at: reportURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let temporaryURL = reportURL.appendingPathExtension("tmp")
+            try data.write(to: temporaryURL, options: [.atomic])
+            if FileManager.default.fileExists(atPath: reportURL.path) {
+                try FileManager.default.removeItem(at: reportURL)
+            }
+            try FileManager.default.moveItem(at: temporaryURL, to: reportURL)
+        } catch {
+            fputs("MeetingAssistantNative local smoke state report failed: \(error.localizedDescription)\n", stderr)
+        }
+    }
+
+    @MainActor
+    private func makePayload(
+        reason: String,
+        shellViewModel: DesignedNativeShellViewModel,
+        permissionViewModel: PermissionDependencyStatusViewModel,
+        recordingViewModel: RecordingControlViewModel,
+        processingViewModel: ProcessingStateViewModel,
+        captureSystemAudio: Bool,
+        captureMicrophoneAudio: Bool
+    ) -> [String: Any] {
+        let permissionState = permissionViewModel.state
+        let recordingState = recordingViewModel.state
+        let processingState = processingViewModel.state
+        let recordingSetupText = DesignedNativeShellViewModel.recordingSetupText(
+            captureSystemAudio: captureSystemAudio,
+            captureMicrophoneAudio: captureMicrophoneAudio
+        )
+
+        return [
+            "report_schema": 1,
+            "release_gate": "local-direct-app-state-smoke",
+            "not_release_readiness": true,
+            "reason": reason,
+            "pid": ProcessInfo.processInfo.processIdentifier,
+            "bundle": bundlePayload(),
+            "launch_environment": launchEnvironmentPayload(),
+            "shell": [
+                "title": "Meeting Assistant",
+                "selected_section": shellViewModel.selectedSection.rawValue,
+                "selected_section_label": shellViewModel.selectedSectionLabel,
+                "recording_setup_text": recordingSetupText,
+                "root_identifier": DesignedNativeShellAccessibilityID.root,
+            ],
+            "preflight": [
+                "phase": permissionState.phase.rawValue,
+                "summary": permissionState.summary,
+                "can_start_recording": permissionState.canStartRecording,
+                "can_run_processing": permissionState.canRunProcessing,
+                "missing_required_check_ids": permissionState.missingRequiredCheckIDs,
+                "warnings": permissionState.warnings,
+                "permissions": permissionState.permissions.map(permissionPayload),
+                "dependencies": permissionState.dependencies.map(dependencyPayload),
+            ],
+            "recording": [
+                "phase": recordingState.phase.rawValue,
+                "status_text": recordingState.statusText,
+                "can_start": recordingViewModel.canStart,
+                "can_stop": recordingViewModel.canStop,
+                "start_button_identifier": RecordingControlAccessibilityID.startButton,
+                "stop_button_identifier": RecordingControlAccessibilityID.stopButton,
+            ],
+            "processing": [
+                "phase": processingState.phase.rawValue,
+                "status_text": processingState.statusText,
+                "can_start": processingViewModel.canStart,
+                "can_retry": processingViewModel.canRetry,
+                "start_button_identifier": ProcessingAccessibilityID.startButton,
+                "retry_button_identifier": ProcessingAccessibilityID.retryButton,
+            ],
+            "checked_controls": [
+                [
+                    "identifier": RecordingControlAccessibilityID.startButton,
+                    "enabled": recordingViewModel.canStart,
+                ],
+                [
+                    "identifier": RecordingControlAccessibilityID.stopButton,
+                    "enabled": recordingViewModel.canStop,
+                ],
+                [
+                    "identifier": ProcessingAccessibilityID.startButton,
+                    "enabled": processingViewModel.canStart,
+                ],
+                [
+                    "identifier": ProcessingAccessibilityID.retryButton,
+                    "enabled": processingViewModel.canRetry,
+                ],
+            ],
+            "checked_markers": [
+                "Meeting Assistant",
+                permissionState.summary,
+                recordingState.statusText,
+                processingState.statusText,
+                recordingSetupText,
+            ],
+            "modifies_tcc_or_system_settings": false,
+            "opens_system_settings": false,
+            "starts_recording": false,
+            "requires_developer_id_or_notarization": false,
+        ]
+    }
+
+    private func bundlePayload(bundle: Bundle = .main) -> [String: Any] {
+        [
+            "path": bundle.bundlePath,
+            "identifier": bundle.bundleIdentifier ?? "unknown",
+            "name": bundle.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "unknown",
+            "display_name": bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "",
+        ]
+    }
+
+    private func launchEnvironmentPayload() -> [String: Any] {
+        [
+            "workspace": environment["MEETING_ASSISTANT_WORKSPACE"] ?? "",
+            "cli_path": environment["MEETING_ASSISTANT_CLI_PATH"] ?? "",
+            "transcription_runtime": environment["MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME"] ?? "",
+            "transcription_model": environment["MEETING_ASSISTANT_TRANSCRIPTION_MODEL"] ?? "",
+            "ffmpeg_path": environment["MEETING_ASSISTANT_FFMPEG_PATH"] ?? "",
+            "recording_client": environment["MA_NATIVE_RECORDING_CLIENT"] ?? "",
+            "processing_client": environment["MA_NATIVE_PROCESSING_CLIENT"] ?? "",
+            "transcript_action_client": environment["MA_NATIVE_TRANSCRIPT_ACTION_CLIENT"] ?? "",
+            "transcript_action_os_client": environment["MA_NATIVE_TRANSCRIPT_ACTION_OS_CLIENT"] ?? "",
+        ]
+    }
+
+    private func permissionPayload(_ item: PermissionStatusItem) -> [String: Any] {
+        [
+            "id": item.id,
+            "title": item.title,
+            "state": item.state.rawValue,
+            "message": item.message,
+        ]
+    }
+
+    private func dependencyPayload(_ item: DependencyStatusItem) -> [String: Any] {
+        [
+            "id": item.id,
+            "title": item.title,
+            "status": item.status,
+            "required": item.required,
+            "is_passing": item.isPassing,
+            "message": item.message,
+        ]
     }
 }
 
@@ -182,9 +487,6 @@ private struct WindowPlacementView: NSViewRepresentable {
     }
 
     private func placeWindow(for view: NSView, context: Context) {
-        guard let placement else {
-            return
-        }
         context.coordinator.placeWindow(placement: placement, view: view)
     }
 
@@ -201,7 +503,7 @@ private struct WindowPlacementView: NSViewRepresentable {
             self.retryDelay = retryDelay
         }
 
-        func placeWindow(placement: NativeAppWindowPlacement, view: NSView) {
+        func placeWindow(placement: NativeAppWindowPlacement?, view: NSView) {
             guard !didPlaceWindow, !scheduledRetry, attempts < retryLimit else {
                 return
             }
@@ -212,22 +514,28 @@ private struct WindowPlacementView: NSViewRepresentable {
             }
         }
 
-        private func attemptPlacement(placement: NativeAppWindowPlacement, view: NSView?) {
+        private func attemptPlacement(placement: NativeAppWindowPlacement?, view: NSView?) {
             scheduledRetry = false
             guard !didPlaceWindow else {
                 return
             }
 
             attempts += 1
-            guard placement.apply(to: view?.window) else {
+            guard let window = view?.window else {
                 retryIfNeeded(placement: placement, view: view)
                 return
             }
 
+            window.setFrameAutosaveName("meeting-assistant-main")
+            window.makeKeyAndOrderFront(nil)
+            if let placement, !placement.apply(to: window) {
+                retryIfNeeded(placement: placement, view: view)
+                return
+            }
             didPlaceWindow = true
         }
 
-        private func retryIfNeeded(placement: NativeAppWindowPlacement, view: NSView?) {
+        private func retryIfNeeded(placement: NativeAppWindowPlacement?, view: NSView?) {
             guard attempts < retryLimit else {
                 return
             }

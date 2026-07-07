@@ -6,32 +6,40 @@ root_dir="$(cd "$component_dir/../.." && pwd)"
 
 default_source_app="$root_dir/.harness/release-build/native-app/DerivedData/Build/Products/Release/MeetingAssistantNative.app"
 install_dir="${MA_NATIVE_LOCAL_APP_INSTALL_DIR:-$HOME/Applications}"
-install_path="${MA_NATIVE_LOCAL_APP_INSTALL_PATH:-$install_dir/MeetingAssistantNative.app}"
+install_app_name="${MA_NATIVE_LOCAL_APP_INSTALL_APP_NAME:-MeetingAssistantNativeLocal}"
+install_path="${MA_NATIVE_LOCAL_APP_INSTALL_PATH:-$install_dir/$install_app_name.app}"
 source_app="${MA_NATIVE_LOCAL_APP_SOURCE_APP:-$default_source_app}"
 report_dir="${MA_NATIVE_LOCAL_APP_INSTALL_REPORT_DIR:-$component_dir/build/local-app-install}"
 report_file="${MA_NATIVE_LOCAL_APP_INSTALL_REPORT:-$report_dir/local-app-install-report.json}"
 build_if_missing="${MA_NATIVE_LOCAL_APP_BUILD_IF_MISSING:-1}"
 rebuild="${MA_NATIVE_LOCAL_APP_REBUILD:-0}"
 dry_run="${MA_NATIVE_LOCAL_APP_DRY_RUN:-0}"
+source_bundle_id="local.meeting-assistant.native"
+source_bundle_name="MeetingAssistantNative"
+install_bundle_id="${MA_NATIVE_LOCAL_APP_INSTALL_BUNDLE_ID:-local.meeting-assistant.native.localdirect}"
+install_bundle_name="${MA_NATIVE_LOCAL_APP_INSTALL_BUNDLE_NAME:-MeetingAssistantNativeLocal}"
+install_display_name="${MA_NATIVE_LOCAL_APP_INSTALL_DISPLAY_NAME:-Meeting Assistant Native Local}"
 
 usage() {
   cat <<'USAGE'
 Usage: platform/native-app/scripts/install-local-app.sh [options]
 
 Build or reuse the local-direct Release MeetingAssistantNative.app and install it
-to a stable user-owned app path, defaulting to ~/Applications/MeetingAssistantNative.app.
+to a stable user-owned app path, defaulting to ~/Applications/MeetingAssistantNativeLocal.app.
 
 Options:
   --source-app PATH    Copy from an existing MeetingAssistantNative.app bundle.
   --install-path PATH  Install to this exact .app path.
-  --install-dir DIR    Install as MeetingAssistantNative.app inside DIR.
+  --install-dir DIR    Install as MeetingAssistantNativeLocal.app inside DIR.
   --report-file PATH   Write the install identity report to this JSON file.
   --no-build           Require the source app bundle to already exist.
   --rebuild            Rebuild the local-direct Release app before installing.
   --dry-run            Print the resolved install plan without copying.
   --help               Show this help.
 
-This script does not open System Settings, modify TCC, or require Developer ID,
+This script rewrites only the copied local app's Info.plist identity to avoid
+TCC confusion with Debug/XCUITest apps, then applies local ad-hoc codesigning.
+It does not open System Settings, modify TCC, or require Developer ID,
 notarization, stapling, Sigstore, or App Store distribution.
 USAGE
 }
@@ -61,8 +69,11 @@ plist_value() {
   /usr/libexec/PlistBuddy -c "Print :$key" "$app/Contents/Info.plist" 2>/dev/null
 }
 
-require_meeting_assistant_app() {
+require_app_identity() {
   local app="$1"
+  local expected_bundle_id="$2"
+  local expected_bundle_name="$3"
+  local context="$4"
   if [[ ! -d "$app" ]]; then
     echo "error: app bundle does not exist: $app" >&2
     exit 1
@@ -75,18 +86,64 @@ require_meeting_assistant_app() {
   local bundle_name
   bundle_id="$(plist_value "$app" "CFBundleIdentifier" || true)"
   bundle_name="$(plist_value "$app" "CFBundleName" || true)"
-  if [[ "$bundle_id" != "local.meeting-assistant.native" ]]; then
-    echo "error: expected CFBundleIdentifier local.meeting-assistant.native, got ${bundle_id:-missing}: $app" >&2
+  if [[ "$bundle_id" != "$expected_bundle_id" ]]; then
+    echo "error: expected $context CFBundleIdentifier $expected_bundle_id, got ${bundle_id:-missing}: $app" >&2
     exit 1
   fi
-  if [[ "$bundle_name" != "MeetingAssistantNative" ]]; then
-    echo "error: expected CFBundleName MeetingAssistantNative, got ${bundle_name:-missing}: $app" >&2
+  if [[ "$bundle_name" != "$expected_bundle_name" ]]; then
+    echo "error: expected $context CFBundleName $expected_bundle_name, got ${bundle_name:-missing}: $app" >&2
     exit 1
   fi
   if [[ ! -x "$app/Contents/MacOS/MeetingAssistantNative" ]]; then
     echo "error: app executable is missing or not executable: $app/Contents/MacOS/MeetingAssistantNative" >&2
     exit 1
   fi
+}
+
+require_source_app() {
+  require_app_identity "$1" "$source_bundle_id" "$source_bundle_name" "source app"
+}
+
+require_installed_app() {
+  require_app_identity "$1" "$install_bundle_id" "$install_bundle_name" "installed app"
+}
+
+require_existing_install_target() {
+  local app="$1"
+  if [[ ! -d "$app" ]]; then
+    echo "error: app bundle does not exist: $app" >&2
+    exit 1
+  fi
+  local bundle_id
+  local bundle_name
+  bundle_id="$(plist_value "$app" "CFBundleIdentifier" || true)"
+  bundle_name="$(plist_value "$app" "CFBundleName" || true)"
+  if [[ "$bundle_id" == "$source_bundle_id" && "$bundle_name" == "$source_bundle_name" ]]; then
+    return 0
+  fi
+  if [[ "$bundle_id" == "$install_bundle_id" && "$bundle_name" == "$install_bundle_name" ]]; then
+    return 0
+  fi
+  echo "error: existing install target is not a Meeting Assistant local app: $app" >&2
+  echo "       got CFBundleIdentifier=${bundle_id:-missing} CFBundleName=${bundle_name:-missing}" >&2
+  exit 1
+}
+
+plist_set_or_add_string() {
+  local plist="$1"
+  local key="$2"
+  local value="$3"
+  if ! /usr/libexec/PlistBuddy -c "Set :$key $value" "$plist" >/dev/null 2>&1; then
+    /usr/libexec/PlistBuddy -c "Add :$key string $value" "$plist" >/dev/null
+  fi
+}
+
+localize_installed_identity() {
+  local app="$1"
+  local plist="$app/Contents/Info.plist"
+  plist_set_or_add_string "$plist" "CFBundleIdentifier" "$install_bundle_id"
+  plist_set_or_add_string "$plist" "CFBundleName" "$install_bundle_name"
+  plist_set_or_add_string "$plist" "CFBundleDisplayName" "$install_display_name"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -113,7 +170,7 @@ while [[ $# -gt 0 ]]; do
         exit 2
       fi
       install_dir="$2"
-      install_path="$install_dir/MeetingAssistantNative.app"
+      install_path="$install_dir/$install_app_name.app"
       shift 2
       ;;
     --report-file)
@@ -165,15 +222,18 @@ if is_truthy "$rebuild" || { [[ ! -d "$source_app" ]] && is_truthy "$build_if_mi
     --source-repository "${MEETING_ASSISTANT_RELEASE_SOURCE_REPOSITORY:-local/meeting_assistant}"
 fi
 
-require_meeting_assistant_app "$source_app"
+require_source_app "$source_app"
 
 if [[ -e "$install_path" ]]; then
-  require_meeting_assistant_app "$install_path"
+  require_existing_install_target "$install_path"
 fi
 
 echo "MeetingAssistantNative local install:"
 echo "  source: $source_app"
 echo "  install: $install_path"
+echo "  install bundle id: $install_bundle_id"
+echo "  install bundle name: $install_bundle_name"
+echo "  install display name: $install_display_name"
 echo "  report: $report_file"
 echo "  distribution mode: local-direct"
 echo "  modifies tcc or system settings: false"
@@ -185,12 +245,15 @@ if is_truthy "$dry_run"; then
 fi
 
 mkdir -p "$install_dir"
-tmp_app="$install_dir/.MeetingAssistantNative.app.install.$$"
+tmp_app="$install_dir/.$install_bundle_name.app.install.$$"
 rm -rf "$tmp_app"
 trap 'rm -rf "$tmp_app"' EXIT INT TERM
 
 /usr/bin/ditto "$source_app" "$tmp_app"
-require_meeting_assistant_app "$tmp_app"
+require_source_app "$tmp_app"
+localize_installed_identity "$tmp_app"
+require_installed_app "$tmp_app"
+/usr/bin/codesign --force --deep --sign - "$tmp_app" >/dev/null
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$tmp_app" >/dev/null
 
 if [[ -e "$install_path" ]]; then
@@ -240,18 +303,32 @@ def codesign_details(app: Path) -> dict[str, str]:
 
 
 plist = info_plist(install_app)
+source_plist = info_plist(source_app)
 report = {
     "report_schema": 1,
     "release_gate": "local-direct-app-install",
     "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     "source_app": str(source_app),
+    "source_app_identity": {
+        "path": str(source_app),
+        "CFBundleIdentifier": source_plist.get("CFBundleIdentifier", ""),
+        "CFBundleName": source_plist.get("CFBundleName", ""),
+        "CFBundleDisplayName": source_plist.get("CFBundleDisplayName", ""),
+        "CFBundleShortVersionString": source_plist.get("CFBundleShortVersionString", ""),
+        "codesign": codesign_details(source_app),
+    },
     "installed_app": {
         "path": str(install_app),
         "CFBundleIdentifier": plist.get("CFBundleIdentifier", ""),
         "CFBundleName": plist.get("CFBundleName", ""),
+        "CFBundleDisplayName": plist.get("CFBundleDisplayName", ""),
         "CFBundleShortVersionString": plist.get("CFBundleShortVersionString", ""),
         "codesign": codesign_details(install_app),
     },
+    "local_tcc_identity_strategy": (
+        "The copied local app uses a distinct bundle id/name from Debug and XCUITest apps so "
+        "macOS Screen Recording authorization targets are not confused with stale same-name bundles."
+    ),
     "distribution_mode": "local-direct",
     "install_method": "user-applications-copy",
     "opens_system_settings": False,

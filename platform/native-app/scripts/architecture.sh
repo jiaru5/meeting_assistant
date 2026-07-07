@@ -199,13 +199,21 @@ grep -R -q "MA_NATIVE_PROCESSING_RUNTIME" App/MeetingAssistantNativeApp.swift
 grep -R -q "ProcessingCLIDependencyCheckRunner(environment: environment)" App/MeetingAssistantNativeApp.swift
 grep -R -q "usesStaticDependencyFixture" App/MeetingAssistantNativeApp.swift
 grep -R -q "initialReadinessState" App/MeetingAssistantNativeApp.swift
-grep -R -q "NSApplicationDelegateAdaptor(MeetingAssistantNativeAppDelegate.self)" App/MeetingAssistantNativeApp.swift
+grep -R -q "init() {" App/MeetingAssistantNativeApp.swift
+grep -R -q "Task { @MainActor in" App/MeetingAssistantNativeApp.swift
+grep -R -q "NSApplication.didFinishLaunchingNotification" App/MeetingAssistantNativeApp.swift
+grep -R -q "NSApplication.didBecomeActiveNotification" App/MeetingAssistantNativeApp.swift
+grep -R -q "reopenMainWindowIfNeeded()" App/MeetingAssistantNativeApp.swift
+grep -R -q "MeetingAssistantNativeMainWindow.shared.openMainWindow()" App/MeetingAssistantNativeApp.swift
+grep -R -q "final class MeetingAssistantNativeMainWindow" App/MeetingAssistantNativeApp.swift
+grep -R -q "private var windowController: NSWindowController" App/MeetingAssistantNativeApp.swift
+grep -R -q "var hasVisibleWindow: Bool" App/MeetingAssistantNativeApp.swift
 grep -R -q "NSHostingController(rootView: rootView)" App/MeetingAssistantNativeApp.swift
 grep -R -q "NSWindow(" App/MeetingAssistantNativeApp.swift
 grep -R -q "window.setFrameAutosaveName(\"meeting-assistant-main\")" App/MeetingAssistantNativeApp.swift
 grep -R -q "window.makeKeyAndOrderFront(nil)" App/MeetingAssistantNativeApp.swift
-if grep -q "WindowGroup(\"Meeting Assistant Native" App/MeetingAssistantNativeApp.swift; then
-  echo "native-app architecture check failed: local-direct app must not create a parallel SwiftUI WindowGroup for the main window." >&2
+if grep -q "NSApplicationDelegateAdaptor\\|MeetingAssistantNativeAppDelegate\\|applicationDidFinishLaunching\\|WindowGroup(\"Meeting Assistant Native" App/MeetingAssistantNativeApp.swift; then
+  echo "native-app architecture check failed: local-direct launch must use App.init plus a retained AppKit window controller, not AppDelegate or WindowGroup auto-open." >&2
   exit 1
 fi
 grep -R -q "autoRefreshPreflightOnAppear" App/MeetingAssistantNativeApp.swift Sources/MeetingAssistantNative/DesignedNativeShellView.swift
@@ -239,6 +247,10 @@ fi
 grep -q "release-bundle-create.py" scripts/install-local-app.sh
 grep -q "local-direct" scripts/install-local-app.sh
 grep -q "MA_NATIVE_LOCAL_APP_INSTALL_PATH" scripts/install-local-app.sh
+grep -q "MA_NATIVE_LOCAL_APP_INSTALL_APP_NAME" scripts/install-local-app.sh
+grep -q "MA_NATIVE_LOCAL_APP_INSTALL_BUNDLE_ID" scripts/install-local-app.sh
+grep -q "MA_NATIVE_LOCAL_APP_INSTALL_BUNDLE_NAME" scripts/install-local-app.sh
+grep -q "MA_NATIVE_LOCAL_APP_INSTALL_DISPLAY_NAME" scripts/install-local-app.sh
 grep -q "MA_NATIVE_LOCAL_APP_SOURCE_APP" scripts/install-local-app.sh
 grep -q "MA_NATIVE_LOCAL_APP_INSTALL_REPORT" scripts/install-local-app.sh
 grep -q "local-app-install-report.json" scripts/install-local-app.sh
@@ -246,8 +258,13 @@ grep -q '"release_gate": "local-direct-app-install"' scripts/install-local-app.s
 grep -q '"installed_app"' scripts/install-local-app.sh
 grep -q "CFBundleIdentifier" scripts/install-local-app.sh
 grep -q "local.meeting-assistant.native" scripts/install-local-app.sh
+grep -q "local.meeting-assistant.native.localdirect" scripts/install-local-app.sh
 grep -q "CFBundleName" scripts/install-local-app.sh
 grep -q "MeetingAssistantNative" scripts/install-local-app.sh
+grep -q "MeetingAssistantNativeLocal" scripts/install-local-app.sh
+grep -q "Meeting Assistant Native Local" scripts/install-local-app.sh
+grep -q "local_tcc_identity_strategy" scripts/install-local-app.sh
+grep -q "codesign --force --deep --sign -" scripts/install-local-app.sh
 grep -q "modifies tcc or system settings: false" scripts/install-local-app.sh
 grep -q "requires developer id or notarization: false" scripts/install-local-app.sh
 grep -q '"modifies_tcc_or_system_settings": False' scripts/install-local-app.sh
@@ -265,6 +282,8 @@ grep -q '"release_gate": "local-app-permission-diagnostics"' scripts/local-app-p
 grep -q '"recommended_tcc_target"' scripts/local-app-permission-diagnostics.sh
 grep -q '"same_app_as_recording_smoke"' scripts/local-app-permission-diagnostics.sh
 grep -q '"screen_recording_permission_denied"' scripts/local-app-permission-diagnostics.sh
+grep -q "CFBundleDisplayName" scripts/local-app-permission-diagnostics.sh
+grep -q "local_tcc_identity_strategy" scripts/local-app-permission-diagnostics.sh
 grep -q '"user_action_required"' scripts/local-app-permission-diagnostics.sh
 grep -q '"modifies_tcc_or_system_settings": False' scripts/local-app-permission-diagnostics.sh
 grep -q '"requires_developer_id_or_notarization": False' scripts/local-app-permission-diagnostics.sh
@@ -274,10 +293,16 @@ if grep -q "x-apple.systempreferences\\|tccutil\\|security authorizationdb\\|not
   exit 1
 fi
 grep -q "run-local-app.sh" scripts/local-direct-smoke.sh
-grep -q "System Events" scripts/local-direct-smoke.sh
+grep -q "local-app-ax.swift" scripts/local-direct-smoke.sh
+grep -q "AXUIElementCreateApplication" scripts/local-app-ax.swift
+grep -q "kAXWindowsAttribute" scripts/local-app-ax.swift
+grep -q "kAXPressAction" scripts/local-app-ax.swift
+grep -q "CGWindowListCopyWindowInfo" scripts/local-app-ax.swift
+grep -q "MA_NATIVE_LOCAL_APP_SMOKE_STATE_REPORT" scripts/local-direct-smoke.sh
+grep -q "local-direct-app-state-report.json" scripts/local-direct-smoke.sh
+grep -q "local-direct-window-report.json" scripts/local-direct-smoke.sh
+grep -q "verifies_app_state_report" scripts/local-direct-smoke.sh
 grep -q "local-direct-ui-smoke" scripts/local-direct-smoke.sh
-grep -q "AXIdentifier" scripts/local-direct-smoke.sh
-grep -q "AXEnabled" scripts/local-direct-smoke.sh
 grep -q "ma.recording.startButton" scripts/local-direct-smoke.sh
 grep -q "ma.recording.stopButton" scripts/local-direct-smoke.sh
 grep -q "ma.processing.startButton" scripts/local-direct-smoke.sh
@@ -289,8 +314,7 @@ grep -q "System audio capture is requested; microphone capture is not requested 
 grep -q '"opens_system_settings": False' scripts/local-direct-smoke.sh
 grep -q '"starts_recording": False' scripts/local-direct-smoke.sh
 grep -q '"requires_developer_id_or_notarization": False' scripts/local-direct-smoke.sh
-grep -q "Preflight: Ready" scripts/local-direct-smoke.sh
-grep -q "Recording readiness is ready." scripts/local-direct-smoke.sh
+grep -q "Ready to start recording." scripts/local-direct-smoke.sh
 grep -q "Processing is ready to run." scripts/local-direct-smoke.sh
 if grep -q "CGRequestScreenCaptureAccess\\|AVCaptureDevice\\.requestAccess\\|x-apple.systempreferences\\|tccutil\\|security authorizationdb\\|notarytool\\|stapler\\|cosign" scripts/local-direct-smoke.sh; then
   echo "native-app architecture check failed: local-direct smoke must not request permissions, open System Settings, or require distribution gates." >&2

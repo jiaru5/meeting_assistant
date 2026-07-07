@@ -114,6 +114,8 @@ installed_path = str(installed_app.get("path", "")).strip()
 if not installed_path:
     raise SystemExit(f"install report is missing installed_app.path: {install_report_path}")
 
+local_tcc_identity_strategy = str(install_report.get("local_tcc_identity_strategy", "")).strip()
+
 codesign = installed_app.get("codesign")
 if not isinstance(codesign, dict):
     codesign = {}
@@ -143,6 +145,7 @@ recommended_target = {
     "path": installed_path,
     "CFBundleIdentifier": installed_app.get("CFBundleIdentifier", ""),
     "CFBundleName": installed_app.get("CFBundleName", ""),
+    "CFBundleDisplayName": installed_app.get("CFBundleDisplayName", ""),
     "CDHash": installed_cdhash,
     "Signature": codesign.get("Signature", ""),
     "TeamIdentifier": codesign.get("TeamIdentifier", ""),
@@ -159,6 +162,7 @@ report = {
     "same_app_as_recording_smoke": same_app_as_recording_smoke,
     "screen_recording_permission_denied": screen_recording_denied,
     "permission_failure_details": permission_details,
+    "local_tcc_identity_strategy": local_tcc_identity_strategy,
     "user_action_required": screen_recording_denied or not same_app_as_recording_smoke,
     "user_action_summary": (
         "Grant Screen Recording / Screen & System Audio Recording to the recommended_tcc_target.path, "
@@ -191,6 +195,7 @@ report = {
 report_file.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 print("local app permission diagnostics:")
 print(f"  target: {installed_path}")
+print(f"  display name: {installed_app.get('CFBundleDisplayName', '') or installed_app.get('CFBundleName', '') or 'unknown'}")
 print(f"  cdhash: {installed_cdhash or 'unknown'}")
 print(f"  screen recording denied: {str(screen_recording_denied).lower()}")
 print(f"  same app as recording smoke: {str(same_app_as_recording_smoke).lower()}")
