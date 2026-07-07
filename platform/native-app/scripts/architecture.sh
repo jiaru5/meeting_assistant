@@ -371,6 +371,8 @@ grep -q "ma.recording.stopButton" scripts/local-direct-recording-smoke.sh
 grep -q "Recording in progress." scripts/local-direct-recording-smoke.sh
 grep -q "Recording saved." scripts/local-direct-recording-smoke.sh
 grep -q 'wait_for_marker(marker, min(timeout_seconds, 60))' scripts/local-direct-recording-smoke.sh
+grep -q '"blocker_detail_summary"' scripts/local-direct-recording-smoke.sh
+grep -q "Full UI tree is written to the report ui_tree path." scripts/local-direct-recording-smoke.sh
 grep -q "recording_request" scripts/local-direct-recording-smoke.sh
 grep -q "permission_failure_details" scripts/local-direct-recording-smoke.sh
 grep -q "tcc_identity_mismatch_hint" scripts/local-direct-recording-smoke.sh

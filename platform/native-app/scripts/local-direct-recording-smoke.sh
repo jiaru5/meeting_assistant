@@ -495,6 +495,26 @@ def permission_failure_details(text: str) -> list[str]:
     return details
 
 
+def failure_summary(kind: str, detail: str) -> str:
+    if kind != "permission_denied":
+        return detail
+    config = runner_configuration()
+    identity = app_identity(config)
+    codesign = identity.get("codesign", {})
+    permission_details = permission_failure_details(last_snapshot)
+    reason = "; ".join(permission_details) or "recording permission was denied or unknown"
+    app_path = str(identity.get("path") or config.get("app") or "unknown app")
+    cdhash = "unknown"
+    if isinstance(codesign, dict):
+        cdhash = str(codesign.get("CDHash") or "unknown")
+    launch_mode = config.get("launch_mode", "unknown")
+    return (
+        f"{reason}; launch_mode={launch_mode}; authorize exact app {app_path} "
+        f"(CDHash={cdhash}) in Screen Recording / Screen & System Audio Recording. "
+        "Full UI tree is written to the report ui_tree path."
+    )
+
+
 def write_report(passed: bool) -> None:
     config = runner_configuration()
     launch_mode = config.get("launch_mode", "")
@@ -505,6 +525,7 @@ def write_report(passed: bool) -> None:
         "passed": passed,
         "blocker_type": blocker_type,
         "blocker_detail": blocker_detail,
+        "blocker_detail_summary": failure_summary(blocker_type, blocker_detail),
         "app_pid": app_pid,
         "workspace": str(workspace_dir),
         "runner_configuration": config,
@@ -569,7 +590,7 @@ except SmokeFailure as exc:
     except SmokeFailure:
         pass
     write_report(False)
-    print(f"local-direct recording smoke failed: {blocker_type}: {blocker_detail}", file=sys.stderr)
+    print(f"local-direct recording smoke failed: {blocker_type}: {failure_summary(blocker_type, blocker_detail)}", file=sys.stderr)
     print(f"report: {report_path}", file=sys.stderr)
     sys.exit(1)
 finally:

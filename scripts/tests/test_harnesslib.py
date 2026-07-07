@@ -1302,6 +1302,8 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("Recording in progress.", recording_smoke_script)
         self.assertIn("Recording saved.", recording_smoke_script)
         self.assertIn("wait_for_marker(marker, min(timeout_seconds, 60))", recording_smoke_script)
+        self.assertIn('"blocker_detail_summary"', recording_smoke_script)
+        self.assertIn("Full UI tree is written to the report ui_tree path.", recording_smoke_script)
         self.assertIn("recording_request", recording_smoke_script)
         self.assertIn("permission_failure_details", recording_smoke_script)
         self.assertIn("tcc_identity_mismatch_hint", recording_smoke_script)
