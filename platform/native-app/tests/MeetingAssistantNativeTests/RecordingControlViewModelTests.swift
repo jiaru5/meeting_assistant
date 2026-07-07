@@ -108,10 +108,12 @@ struct RecordingControlViewModelTests {
         #expect(viewModel.state.errorMessage?.contains("Native capture permissions are denied or unknown.") == true)
         #expect(viewModel.state.errorMessage?.contains("Screen Recording permission is denied.") == true)
         #expect(viewModel.state.errorMessage?.contains("System Settings > Privacy & Security") == true)
-        #expect(viewModel.state.errorMessage?.contains("/Users/jerry/Applications/MeetingAssistantNative.app") == true)
-        #expect(viewModel.state.errorMessage?.contains("local.meeting-assistant.native") == true)
-        #expect(viewModel.state.errorMessage?.contains("d12037268c3d4ffd101c65b7a614c2cbc6378432") == true)
-        #expect(viewModel.state.errorMessage?.contains("remove the stale entry") == true)
+        #expect(viewModel.state.errorMessage?.contains("/Users/jerry/Applications/MeetingAssistantNativeLocal.app") == true)
+        #expect(viewModel.state.errorMessage?.contains("local.meeting-assistant.native.localdirect") == true)
+        #expect(viewModel.state.errorMessage?.contains("designated requirement: identifier") == true)
+        #expect(viewModel.state.errorMessage?.contains("Meeting Assistant Local Code Signing") == true)
+        #expect(viewModel.state.errorMessage?.contains("ca3e033b67f6b4b8cabb9245cc9c7d9f0b7290db") == true)
+        #expect(viewModel.state.errorMessage?.contains("remove stale ad-hoc") == true)
     }
 
     @Test
@@ -257,9 +259,11 @@ private func readyReadinessState() -> PermissionDependencyStatusState {
 
 private func installedAppIdentity() -> LocalAppPermissionIdentity {
     LocalAppPermissionIdentity(
-        bundlePath: "/Users/jerry/Applications/MeetingAssistantNative.app",
-        bundleIdentifier: "local.meeting-assistant.native",
-        codeSignatureHash: "d12037268c3d4ffd101c65b7a614c2cbc6378432"
+        bundlePath: "/Users/jerry/Applications/MeetingAssistantNativeLocal.app",
+        bundleIdentifier: "local.meeting-assistant.native.localdirect",
+        codeSignatureHash: "ca3e033b67f6b4b8cabb9245cc9c7d9f0b7290db",
+        designatedRequirement: "identifier \"local.meeting-assistant.native.localdirect\" and certificate root = H\"d2ebc4b501da40173af71fd03a33c9581d13b5dd\"",
+        signingAuthority: "Meeting Assistant Local Code Signing"
     )
 }
 

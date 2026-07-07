@@ -570,11 +570,17 @@ grep -R -q "MA_NATIVE_APP_SMOKE_FIXTURE" App UITests/MeetingAssistantNativeAppUI
 grep -R -q "MeetingAssistantNativeAppUITests" MeetingAssistantNative.xcodeproj/project.pbxproj
 
 permission_privacy_settings_file='Sources/MeetingAssistantNative/PermissionDependencyStatusView.swift'
+permission_view_model_file='Sources/MeetingAssistantNative/PermissionDependencyStatusViewModel.swift'
 grep -q 'Button("Open Privacy Settings")' "$permission_privacy_settings_file"
 grep -q 'openPrivacySettings()' "$permission_privacy_settings_file"
 grep -q 'NSWorkspace.shared.open(url)' "$permission_privacy_settings_file"
 grep -q 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture' "$permission_privacy_settings_file"
 grep -q 'PermissionDependencyAccessibilityID.openPrivacySettingsButton' "$permission_privacy_settings_file"
+grep -q 'kSecCodeInfoDesignatedRequirement' "$permission_view_model_file"
+grep -q 'SecRequirementCopyString' "$permission_view_model_file"
+grep -q 'kSecCodeInfoCertificates' "$permission_view_model_file"
+grep -q 'designated requirement' "$permission_view_model_file"
+grep -q 'signingAuthority' "$permission_view_model_file"
 
 if grep -R --include '*.swift' -n -E 'NSWorkspace\b|x-apple\.systempreferences' Sources tests App UITests |
   grep -v -F "$permission_privacy_settings_file"; then

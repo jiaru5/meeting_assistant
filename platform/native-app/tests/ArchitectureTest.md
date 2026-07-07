@@ -8,7 +8,7 @@ VS-MA-12 boundary:
 2. It consumes the `check_dependencies` command contract through stable JSON only.
 3. It may expose SwiftUI status labels and accessibility identifiers for permissions and dependencies.
 4. It may expose an injected `Open Privacy Settings` action that opens the macOS Privacy & Security Screen Recording pane through `NSWorkspace.shared.open` from `PermissionDependencyStatusView.swift` only.
-5. It may display the current app bundle path, bundle identifier and best-effort code signature hash through `ma.permissionDependency.appIdentity` so users can authorize the exact app shown by macOS TCC instead of a stale same-name entry.
+5. It may display the current app bundle path, bundle identifier, best-effort code signature hash, designated requirement and signing authority through `ma.permissionDependency.appIdentity` so users can authorize the exact app identity shown by macOS TCC instead of a stale same-name entry.
 6. The privacy settings action and app identity hint must not grant permissions, edit TCC, call `tccutil`, mutate authorization databases, run shell/system commands, use AppleScript or change system settings without the user acting in System Settings.
 
 VS-MA-13 fake recording boundary:

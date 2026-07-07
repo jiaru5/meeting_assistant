@@ -36,56 +36,102 @@ public struct LocalAppPermissionIdentity: Equatable, Sendable {
     public let bundlePath: String
     public let bundleIdentifier: String
     public let codeSignatureHash: String?
+    public let designatedRequirement: String?
+    public let signingAuthority: String?
 
     public init(
         bundlePath: String,
         bundleIdentifier: String,
-        codeSignatureHash: String? = nil
+        codeSignatureHash: String? = nil,
+        designatedRequirement: String? = nil,
+        signingAuthority: String? = nil
     ) {
         self.bundlePath = bundlePath
         self.bundleIdentifier = bundleIdentifier
         self.codeSignatureHash = codeSignatureHash
+        self.designatedRequirement = designatedRequirement
+        self.signingAuthority = signingAuthority
     }
 
     public static func current(bundle: Bundle = .main) -> LocalAppPermissionIdentity {
-        LocalAppPermissionIdentity(
+        let signingDetails = currentCodeSigningDetails()
+        return LocalAppPermissionIdentity(
             bundlePath: bundle.bundlePath,
             bundleIdentifier: bundle.bundleIdentifier ?? "unknown",
-            codeSignatureHash: currentCodeSignatureHash()
+            codeSignatureHash: signingDetails.cdHash,
+            designatedRequirement: signingDetails.designatedRequirement,
+            signingAuthority: signingDetails.signingAuthority
         )
     }
 
     public var permissionRepairSummary: String {
-        let hashSummary = codeSignatureHash.map { ", CDHash: \($0)" } ?? ""
-        return "Authorize this exact app in Screen Recording / Screen & System Audio Recording: \(bundlePath) (bundle id: \(bundleIdentifier)\(hashSummary))."
+        var identityDetails = ["bundle id: \(bundleIdentifier)"]
+        if let designatedRequirement, !designatedRequirement.isEmpty {
+            identityDetails.append("designated requirement: \(designatedRequirement)")
+        }
+        if let signingAuthority, !signingAuthority.isEmpty {
+            identityDetails.append("authority: \(signingAuthority)")
+        }
+        if let codeSignatureHash, !codeSignatureHash.isEmpty {
+            identityDetails.append("current CDHash: \(codeSignatureHash)")
+        }
+        return "Authorize this exact app in Screen Recording / Screen & System Audio Recording: \(bundlePath) (\(identityDetails.joined(separator: ", ")))."
     }
 
     public var staleIdentityRepairSummary: String {
-        "If System Settings already shows MeetingAssistantNative enabled but recording still fails, remove the stale entry and add this exact app again."
+        "If System Settings already shows MeetingAssistantNative enabled but recording still fails, verify the exact app path and designated requirement, remove stale ad-hoc or old-path entries, then add this exact app again."
     }
 
     public var recordingPermissionFailureHint: String {
         "\(permissionRepairSummary) \(staleIdentityRepairSummary)"
     }
 
-    private static func currentCodeSignatureHash() -> String? {
+    private struct CodeSigningDetails {
+        var cdHash: String?
+        var designatedRequirement: String?
+        var signingAuthority: String?
+    }
+
+    private static func currentCodeSigningDetails() -> CodeSigningDetails {
         var code: SecCode?
         guard SecCodeCopySelf(SecCSFlags(), &code) == errSecSuccess, let code else {
-            return nil
+            return CodeSigningDetails()
         }
         var staticCode: SecStaticCode?
         guard SecCodeCopyStaticCode(code, SecCSFlags(), &staticCode) == errSecSuccess, let staticCode else {
-            return nil
+            return CodeSigningDetails()
         }
         var information: CFDictionary?
-        let flags = SecCSFlags(rawValue: kSecCSSigningInformation)
+        let flags = SecCSFlags(rawValue: kSecCSSigningInformation | kSecCSRequirementInformation)
         guard SecCodeCopySigningInformation(staticCode, flags, &information) == errSecSuccess,
-              let dictionary = information as? [String: Any],
-              let unique = dictionary[kSecCodeInfoUnique as String] as? Data
+              let dictionary = information as? [String: Any]
         else {
-            return nil
+            return CodeSigningDetails()
         }
-        return unique.map { String(format: "%02x", $0) }.joined()
+
+        var details = CodeSigningDetails()
+        if let unique = dictionary[kSecCodeInfoUnique as String] as? Data {
+            details.cdHash = unique.map { String(format: "%02x", $0) }.joined()
+        }
+        if let requirementValue = dictionary[kSecCodeInfoDesignatedRequirement as String] {
+            let requirementObject = requirementValue as CFTypeRef
+            if CFGetTypeID(requirementObject) == SecRequirementGetTypeID() {
+                let requirement = requirementObject as! SecRequirement
+                var requirementText: CFString?
+                if SecRequirementCopyString(requirement, SecCSFlags(), &requirementText) == errSecSuccess {
+                    details.designatedRequirement = requirementText as String?
+                }
+            }
+        }
+        if let certificates = dictionary[kSecCodeInfoCertificates as String] as? [SecCertificate] {
+            let summaries = certificates.compactMap { certificate -> String? in
+                SecCertificateCopySubjectSummary(certificate) as String?
+            }
+            if !summaries.isEmpty {
+                details.signingAuthority = summaries.joined(separator: " -> ")
+            }
+        }
+        return details
     }
 }
 

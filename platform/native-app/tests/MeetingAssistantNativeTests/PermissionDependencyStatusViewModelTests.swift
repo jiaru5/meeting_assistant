@@ -189,15 +189,21 @@ struct PermissionDependencyStatusViewModelTests {
     @Test
     func appPermissionIdentityBuildsExactRepairHint() {
         let identity = LocalAppPermissionIdentity(
-            bundlePath: "/Users/jerry/Applications/MeetingAssistantNative.app",
-            bundleIdentifier: "local.meeting-assistant.native",
-            codeSignatureHash: "d12037268c3d4ffd101c65b7a614c2cbc6378432"
+            bundlePath: "/Users/jerry/Applications/MeetingAssistantNativeLocal.app",
+            bundleIdentifier: "local.meeting-assistant.native.localdirect",
+            codeSignatureHash: "ca3e033b67f6b4b8cabb9245cc9c7d9f0b7290db",
+            designatedRequirement: "identifier \"local.meeting-assistant.native.localdirect\" and certificate root = H\"d2ebc4b501da40173af71fd03a33c9581d13b5dd\"",
+            signingAuthority: "Meeting Assistant Local Code Signing"
         )
 
-        #expect(identity.permissionRepairSummary.contains("/Users/jerry/Applications/MeetingAssistantNative.app"))
-        #expect(identity.permissionRepairSummary.contains("local.meeting-assistant.native"))
-        #expect(identity.permissionRepairSummary.contains("d12037268c3d4ffd101c65b7a614c2cbc6378432"))
-        #expect(identity.staleIdentityRepairSummary.contains("remove the stale entry"))
+        #expect(identity.permissionRepairSummary.contains("/Users/jerry/Applications/MeetingAssistantNativeLocal.app"))
+        #expect(identity.permissionRepairSummary.contains("local.meeting-assistant.native.localdirect"))
+        #expect(identity.permissionRepairSummary.contains("designated requirement: identifier"))
+        #expect(identity.permissionRepairSummary.contains("certificate root"))
+        #expect(identity.permissionRepairSummary.contains("Meeting Assistant Local Code Signing"))
+        #expect(identity.permissionRepairSummary.contains("ca3e033b67f6b4b8cabb9245cc9c7d9f0b7290db"))
+        #expect(identity.staleIdentityRepairSummary.contains("designated requirement"))
+        #expect(identity.staleIdentityRepairSummary.contains("remove stale ad-hoc"))
         #expect(identity.recordingPermissionFailureHint.contains("add this exact app again"))
     }
 
