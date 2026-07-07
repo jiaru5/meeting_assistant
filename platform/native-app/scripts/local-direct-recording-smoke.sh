@@ -7,6 +7,7 @@ cd "$root_dir"
 
 timeout_seconds="${MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_TIMEOUT_SECONDS:-150}"
 recording_seconds="${MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_DURATION_SECONDS:-4}"
+audio_grace_seconds="${MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_AUDIO_GRACE_SECONDS:-10}"
 report_dir="${MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_REPORT_DIR:-$component_dir/build/local-direct-recording-smoke}"
 report_file="$report_dir/local-direct-recording-smoke-report.json"
 snapshot_file="$report_dir/local-direct-recording-ui-tree.txt"
@@ -114,7 +115,7 @@ if [[ -z "$app_pid" ]]; then
   exit 1
 fi
 
-python3 - "$report_file" "$snapshot_file" "$runner_log" "$app_pid" "$workspace_dir" "$timeout_seconds" "$recording_seconds" "$audio_path" "$ax_helper" <<'PY'
+python3 - "$report_file" "$snapshot_file" "$runner_log" "$app_pid" "$workspace_dir" "$timeout_seconds" "$recording_seconds" "$audio_grace_seconds" "$audio_path" "$ax_helper" <<'PY'
 import json
 import os
 import subprocess
@@ -130,13 +131,15 @@ app_pid = int(sys.argv[4])
 workspace_dir = Path(sys.argv[5])
 timeout_seconds = int(sys.argv[6])
 recording_seconds = float(sys.argv[7])
-audio_path = sys.argv[8].strip()
-AX_HELPER = Path(sys.argv[9])
+audio_grace_seconds = float(sys.argv[8])
+audio_path = sys.argv[9].strip()
+AX_HELPER = Path(sys.argv[10])
 
 start_time = time.monotonic()
 last_snapshot = ""
 checked_markers: list[str] = []
 pressed_controls: list[str] = []
+audio_playback_completed: Optional[bool] = None
 blocker_type = "none"
 blocker_detail = ""
 
@@ -327,6 +330,23 @@ def start_audio_playback() -> Optional[subprocess.Popen]:
     )
 
 
+def wait_for_recording_audio(playback: Optional[subprocess.Popen]) -> None:
+    global audio_playback_completed
+    time.sleep(recording_seconds)
+    if playback is None:
+        audio_playback_completed = None
+        return
+    try:
+        playback.wait(timeout=audio_grace_seconds)
+        audio_playback_completed = True
+    except subprocess.TimeoutExpired as exc:
+        audio_playback_completed = False
+        raise SmokeFailure(
+            "audio_playback_timeout",
+            f"audio fixture playback did not finish within {audio_grace_seconds:g}s after the minimum recording duration",
+        ) from exc
+
+
 def workspace_files() -> list[str]:
     if not workspace_dir.exists():
         return []
@@ -436,7 +456,9 @@ def write_report(passed: bool) -> None:
         "checked_markers": checked_markers,
         "pressed_controls": pressed_controls,
         "recording_duration_seconds": recording_seconds,
+        "audio_grace_seconds": audio_grace_seconds,
         "audio_playback_requested": bool(audio_path),
+        "audio_playback_completed": audio_playback_completed,
         "workspace_files": workspace_files()[:80],
         "workspace_precondition": "Use an empty smoke workspace or leave MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_WORKSPACE unset for a temporary workspace.",
         "starts_recording": True,
@@ -469,7 +491,7 @@ try:
     press("ma.recording.startButton")
     wait_for_marker("Recording in progress.", min(timeout_seconds, 60))
     playback = start_audio_playback()
-    time.sleep(recording_seconds)
+    wait_for_recording_audio(playback)
     press("ma.recording.stopButton")
     saved_snapshot = wait_for_marker("Recording saved.", timeout_seconds)
     for marker in ("screen_video: available", "mixed_audio: available"):

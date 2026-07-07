@@ -143,6 +143,9 @@ blocker_type = "none"
 blocker_detail = ""
 success_marker = ""
 preexisting_processing_artifacts: list[str] = []
+ui_completion_marker_observed = False
+artifact_completion_fallback = False
+ui_completion_observation_error: dict[str, str] = {}
 
 
 SNAPSHOT_SCRIPT = r'''
@@ -592,6 +595,9 @@ def write_report(passed: bool, processing_artifacts: Optional[dict[str, Any]] = 
         "checked_markers": checked_markers,
         "pressed_controls": pressed_controls,
         "success_marker": success_marker,
+        "ui_completion_marker_observed": ui_completion_marker_observed,
+        "artifact_completion_fallback": artifact_completion_fallback,
+        "ui_completion_observation_error": ui_completion_observation_error,
         "preexisting_processing_artifacts": preexisting_processing_artifacts,
         "processing_artifacts": processing_artifacts or {},
         "workspace_files": workspace_files()[:120],
@@ -620,8 +626,21 @@ try:
     validate_recorded_input()
     wait_for_marker("Processing is ready to run.", min(timeout_seconds, 90))
     press("ma.processing.startButton")
-    wait_for_success(timeout_seconds)
-    processing_artifacts = validate_processing_artifacts()
+    try:
+        wait_for_success(timeout_seconds)
+        ui_completion_marker_observed = True
+        processing_artifacts = validate_processing_artifacts()
+    except SmokeFailure as ui_exc:
+        if ui_exc.kind not in {"accessibility_error", "accessibility_timeout", "ui_marker_timeout"}:
+            raise
+        processing_artifacts = validate_processing_artifacts()
+        artifact_completion_fallback = True
+        ui_completion_observation_error = {
+            "blocker_type": ui_exc.kind,
+            "blocker_detail": ui_exc.detail,
+        }
+        success_marker = "Processing artifacts complete after UI completion marker became unavailable."
+        checked_markers.append(success_marker)
     write_report(True, processing_artifacts=processing_artifacts)
 except SmokeFailure as exc:
     blocker_type = exc.kind

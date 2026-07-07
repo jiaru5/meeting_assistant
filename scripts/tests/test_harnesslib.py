@@ -1124,6 +1124,9 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("launch_attribution_boundary", recording_smoke_script)
         self.assertIn("recording session path already exists", recording_smoke_script)
         self.assertIn("workspace_precondition", recording_smoke_script)
+        self.assertIn("MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_AUDIO_GRACE_SECONDS", recording_smoke_script)
+        self.assertIn("audio_playback_completed", recording_smoke_script)
+        self.assertIn("wait_for_recording_audio", recording_smoke_script)
         self.assertIn('"starts_recording": True', recording_smoke_script)
         self.assertIn('"may_request_macos_permissions": True', recording_smoke_script)
         self.assertIn('"not_release_readiness": True', recording_smoke_script)
@@ -1139,6 +1142,10 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("Processing is ready to run.", processing_smoke_script)
         self.assertIn("Processing complete.", processing_smoke_script)
         self.assertIn("Processing completed with transcript-only speaker labels.", processing_smoke_script)
+        self.assertIn("ui_completion_marker_observed", processing_smoke_script)
+        self.assertIn("artifact_completion_fallback", processing_smoke_script)
+        self.assertIn("ui_completion_observation_error", processing_smoke_script)
+        self.assertIn("Processing artifacts complete after UI completion marker became unavailable.", processing_smoke_script)
         self.assertIn("normalized_audio", processing_smoke_script)
         self.assertIn("transcript_text", processing_smoke_script)
         self.assertIn("speaker_labels", processing_smoke_script)
@@ -1208,6 +1215,7 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("local-direct-smoke.sh", dev_commands)
         self.assertIn("local-direct-recording-smoke.sh", dev_commands)
         self.assertIn("local-direct-processing-smoke.sh", dev_commands)
+        self.assertIn("artifact_completion_fallback", architecture_doc)
         self.assertIn("local-direct-same-chain-smoke.sh", dev_commands)
         self.assertIn("run-local-app.sh", e2e_readme)
         self.assertIn("install-local-app.sh", e2e_readme)
@@ -1373,6 +1381,43 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("release-sidecar-portability", security_supply_chain)
         self.assertIn("release-sidecar-portability-report.sh", production_readiness)
         self.assertIn("release-sidecar-portability-report.sh", e2e_readme)
+
+    def test_release_local_direct_repeatability_entrypoints_are_documented(self) -> None:
+        target_wrapper = (ROOT / "platform/e2e/release-local-direct-target-smoke.sh").read_text(encoding="utf-8")
+        target_report = (ROOT / "platform/e2e/release_local_direct_target_smoke_report.py").read_text(encoding="utf-8")
+        repeatability_wrapper = (
+            ROOT / "platform/e2e/release-local-direct-repeatability-report.sh"
+        ).read_text(encoding="utf-8")
+        repeatability_report = (
+            ROOT / "platform/e2e/release_local_direct_repeatability_report.py"
+        ).read_text(encoding="utf-8")
+        dev_commands = (ROOT / "docs/engineering/02-dev-commands.md").read_text(encoding="utf-8")
+        e2e_readme = (ROOT / "platform/e2e/README.md").read_text(encoding="utf-8")
+        matrix = (ROOT / "docs/engineering/06-product-validation-matrix.md").read_text(encoding="utf-8")
+        plan = (ROOT / "docs/engineering/07-development-plan.md").read_text(encoding="utf-8")
+
+        self.assertIn("local-direct-same-chain-smoke.sh", target_wrapper)
+        self.assertIn("release_local_direct_target_smoke_report.py", target_wrapper)
+        self.assertIn("MA_RELEASE_LOCAL_DIRECT_TARGET_SMOKE_REPORT", target_wrapper)
+        self.assertIn("MA_RELEASE_LOCAL_DIRECT_TARGET_ID", target_wrapper)
+        self.assertIn("--target-id", target_wrapper)
+        self.assertIn("release-local-direct-target-smoke", target_report)
+        self.assertIn("local-direct-same-chain-smoke", target_report)
+        self.assertIn("single-target-machine", target_report)
+        self.assertIn("not_release_readiness", target_report)
+        self.assertIn("release_local_direct_repeatability_report.py", repeatability_wrapper)
+        self.assertIn("MA_RELEASE_LOCAL_DIRECT_TARGET_SMOKE_REPORTS", repeatability_wrapper)
+        self.assertIn("MA_RELEASE_LOCAL_DIRECT_EXPECTED_TARGETS", repeatability_wrapper)
+        self.assertIn("release-local-direct-repeatability", repeatability_report)
+        self.assertIn("incomplete-target-set", repeatability_report)
+        self.assertIn("all-target-machines", repeatability_report)
+        self.assertIn("not_release_readiness", repeatability_report)
+        self.assertIn("release-local-direct-target-smoke.sh", dev_commands)
+        self.assertIn("release-local-direct-repeatability-report.sh", dev_commands)
+        self.assertIn("release-local-direct-target-smoke.sh", e2e_readme)
+        self.assertIn("release-local-direct-repeatability-report.sh", e2e_readme)
+        self.assertIn("release-local-direct-repeatability", matrix)
+        self.assertIn("release-local-direct-repeatability", plan)
 
     def test_product_validation_current_phase_rejects_missing_status(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
