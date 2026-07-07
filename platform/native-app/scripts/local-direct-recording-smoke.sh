@@ -14,6 +14,7 @@ runner_log="$report_dir/run-local-app.log"
 audio_path="${MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_AUDIO:-${MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO:-}}"
 workspace_dir="${MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_WORKSPACE:-}"
 workspace_temp_dir=""
+ax_helper="$report_dir/local-app-ax-helper"
 
 usage() {
   cat <<'USAGE'
@@ -42,6 +43,7 @@ for arg in "$@"; do
 done
 
 mkdir -p "$report_dir"
+swiftc "$component_dir/scripts/local-app-ax.swift" -o "$ax_helper"
 
 if [[ -z "$workspace_dir" ]]; then
   workspace_temp_dir="$(mktemp -d)"
@@ -112,7 +114,7 @@ if [[ -z "$app_pid" ]]; then
   exit 1
 fi
 
-python3 - "$report_file" "$snapshot_file" "$runner_log" "$app_pid" "$workspace_dir" "$timeout_seconds" "$recording_seconds" "$audio_path" <<'PY'
+python3 - "$report_file" "$snapshot_file" "$runner_log" "$app_pid" "$workspace_dir" "$timeout_seconds" "$recording_seconds" "$audio_path" "$ax_helper" <<'PY'
 import json
 import os
 import subprocess
@@ -129,6 +131,7 @@ workspace_dir = Path(sys.argv[5])
 timeout_seconds = int(sys.argv[6])
 recording_seconds = float(sys.argv[7])
 audio_path = sys.argv[8].strip()
+AX_HELPER = Path(sys.argv[9])
 
 start_time = time.monotonic()
 last_snapshot = ""
@@ -241,9 +244,31 @@ def run_osascript(script: str, args: list[str], timeout: int) -> str:
     return completed.stdout
 
 
+def run_ax_helper(command: str, args: list[str], timeout: int) -> str:
+    if not AX_HELPER.is_file():
+        raise SmokeFailure("accessibility_error", f"missing AX helper: {AX_HELPER}")
+    try:
+        completed = subprocess.run(
+            [str(AX_HELPER), command, str(timeout), str(app_pid), *args],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout + 30,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SmokeFailure("accessibility_timeout", f"AX helper timed out after {timeout}s") from exc
+    if completed.returncode != 0:
+        raise SmokeFailure(
+            "accessibility_error",
+            (completed.stderr or completed.stdout or "AX helper failed").strip(),
+        )
+    return completed.stdout
+
+
 def snapshot(timeout: int = 30) -> str:
     global last_snapshot
-    text = run_osascript(SNAPSHOT_SCRIPT, [str(app_pid)], timeout)
+    text = run_ax_helper("snapshot", [], timeout)
     last_snapshot = text
     snapshot_path.write_text(text, encoding="utf-8")
     return text
@@ -285,7 +310,7 @@ def wait_for_marker(marker: str, timeout: int) -> str:
 
 
 def press(identifier: str) -> None:
-    run_osascript(PRESS_SCRIPT, [str(app_pid), identifier], timeout=20)
+    run_ax_helper("press", [identifier], timeout=20)
     pressed_controls.append(identifier)
 
 

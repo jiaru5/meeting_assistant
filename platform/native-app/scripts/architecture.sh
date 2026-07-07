@@ -50,6 +50,7 @@ test -x scripts/local-direct-smoke.sh
 test -x scripts/local-direct-recording-smoke.sh
 test -x scripts/local-direct-processing-smoke.sh
 test -x scripts/local-direct-actions-smoke.sh
+test -x scripts/local-direct-same-chain-smoke.sh
 test -f App/MeetingAssistantNativeApp.swift
 test -f Sources/MeetingAssistantNative/DependencyCheckContract.swift
 test -f Sources/MeetingAssistantNative/PermissionDependencyStatusViewModel.swift
@@ -296,6 +297,7 @@ fi
 grep -q "run-local-app.sh" scripts/local-direct-smoke.sh
 grep -q "local-app-ax.swift" scripts/local-direct-smoke.sh
 grep -q "AXUIElementCreateApplication" scripts/local-app-ax.swift
+grep -q "concreteWindows.isEmpty ? values : concreteWindows" scripts/local-app-ax.swift
 grep -q "kAXWindowsAttribute" scripts/local-app-ax.swift
 grep -q "kAXPressAction" scripts/local-app-ax.swift
 grep -q "AXUIElementSetAttributeValue" scripts/local-app-ax.swift
@@ -389,6 +391,28 @@ grep -q '"requires_developer_id_or_notarization": False' scripts/local-direct-ac
 grep -q '"not_release_readiness": True' scripts/local-direct-actions-smoke.sh
 if grep -q "CGRequestScreenCaptureAccess\\|AVCaptureDevice\\.requestAccess\\|x-apple.systempreferences\\|tccutil\\|security authorizationdb\\|notarytool\\|stapler\\|cosign" scripts/local-direct-actions-smoke.sh; then
   echo "native-app architecture check failed: local-direct actions smoke must not request permissions, open System Settings, modify TCC, or require distribution gates." >&2
+  exit 1
+fi
+grep -q "run-local-app.sh" scripts/local-direct-same-chain-smoke.sh
+grep -q "local-direct-same-chain-smoke" scripts/local-direct-same-chain-smoke.sh
+grep -q "local-direct-recording-smoke.sh" scripts/local-direct-same-chain-smoke.sh
+grep -q "local-direct-processing-smoke.sh" scripts/local-direct-same-chain-smoke.sh
+grep -q "local-direct-actions-smoke.sh" scripts/local-direct-same-chain-smoke.sh
+grep -q "local-direct-same-chain-smoke-report.json" scripts/local-direct-same-chain-smoke.sh
+grep -q "same_chain_boundary" scripts/local-direct-same-chain-smoke.sh
+grep -q "stage_reports" scripts/local-direct-same-chain-smoke.sh
+grep -q "same_app_identity" scripts/local-direct-same-chain-smoke.sh
+grep -q "launch_modes" scripts/local-direct-same-chain-smoke.sh
+grep -q "requires_clean_app_processes" scripts/local-direct-same-chain-smoke.sh
+grep -q '"starts_recording": True' scripts/local-direct-same-chain-smoke.sh
+grep -q '"starts_processing": True' scripts/local-direct-same-chain-smoke.sh
+grep -q '"uses_system_pasteboard": True' scripts/local-direct-same-chain-smoke.sh
+grep -q '"uses_save_panel": True' scripts/local-direct-same-chain-smoke.sh
+grep -q '"may_request_macos_permissions": True' scripts/local-direct-same-chain-smoke.sh
+grep -q '"requires_developer_id_or_notarization": False' scripts/local-direct-same-chain-smoke.sh
+grep -q '"not_release_readiness": True' scripts/local-direct-same-chain-smoke.sh
+if grep -q "x-apple.systempreferences\\|tccutil\\|security authorizationdb\\|notarytool\\|stapler\\|cosign" scripts/local-direct-same-chain-smoke.sh; then
+  echo "native-app architecture check failed: local-direct same-chain smoke must not open System Settings, modify TCC, or require distribution gates." >&2
   exit 1
 fi
 grep -q "Production/default app runtime may pass an explicitly configured" tests/ArchitectureTest.md

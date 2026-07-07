@@ -70,8 +70,9 @@ func windows(for app: AXUIElement, pid: pid_t, timeout: TimeInterval) throws -> 
     let deadline = Date().addingTimeInterval(timeout)
     repeat {
         if let values = attribute(app, kAXWindowsAttribute) as? [AXUIElement],
-           values.contains(where: { !CFEqual($0, app) }) {
-            return values
+           !values.isEmpty {
+            let concreteWindows = values.filter { !CFEqual($0, app) }
+            return concreteWindows.isEmpty ? values : concreteWindows
         }
         Thread.sleep(forTimeInterval: 0.25)
     } while Date() < deadline
