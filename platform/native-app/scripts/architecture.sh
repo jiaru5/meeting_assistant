@@ -44,6 +44,7 @@ test -f MeetingAssistantNative.xcodeproj/xcshareddata/xcschemes/MeetingAssistant
 test -x scripts/native-capture-smoke.sh
 test -x scripts/run-local-app.sh
 test -x scripts/install-local-app.sh
+test -x scripts/local-app-permission-diagnostics.sh
 test -x scripts/local-direct-smoke.sh
 test -x scripts/local-direct-recording-smoke.sh
 test -f App/MeetingAssistantNativeApp.swift
@@ -249,6 +250,21 @@ grep -q '"not_release_readiness": True' scripts/install-local-app.sh
 grep -q "codesign --verify --deep --strict" scripts/install-local-app.sh
 if grep -q "x-apple.systempreferences\\|tccutil\\|security authorizationdb\\|notarytool\\|stapler\\|cosign" scripts/install-local-app.sh; then
   echo "native-app architecture check failed: local app installer must not open System Settings, modify TCC, or require distribution gates." >&2
+  exit 1
+fi
+grep -q "local-app-permission-diagnostics" scripts/local-app-permission-diagnostics.sh
+grep -q "local-app-install-report.json" scripts/local-app-permission-diagnostics.sh
+grep -q "local-direct-recording-smoke-report.json" scripts/local-app-permission-diagnostics.sh
+grep -q '"release_gate": "local-app-permission-diagnostics"' scripts/local-app-permission-diagnostics.sh
+grep -q '"recommended_tcc_target"' scripts/local-app-permission-diagnostics.sh
+grep -q '"same_app_as_recording_smoke"' scripts/local-app-permission-diagnostics.sh
+grep -q '"screen_recording_permission_denied"' scripts/local-app-permission-diagnostics.sh
+grep -q '"user_action_required"' scripts/local-app-permission-diagnostics.sh
+grep -q '"modifies_tcc_or_system_settings": False' scripts/local-app-permission-diagnostics.sh
+grep -q '"requires_developer_id_or_notarization": False' scripts/local-app-permission-diagnostics.sh
+grep -q '"not_release_readiness": True' scripts/local-app-permission-diagnostics.sh
+if grep -q "x-apple.systempreferences\\|tccutil\\|security authorizationdb\\|notarytool\\|stapler\\|cosign" scripts/local-app-permission-diagnostics.sh; then
+  echo "native-app architecture check failed: local app permission diagnostics must be read-only and must not require distribution gates." >&2
   exit 1
 fi
 grep -q "run-local-app.sh" scripts/local-direct-smoke.sh

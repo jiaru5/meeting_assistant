@@ -21,6 +21,7 @@ required = [
     "scripts/test-app-bundle.sh",
     "scripts/native-capture-smoke.sh",
     "scripts/install-local-app.sh",
+    "scripts/local-app-permission-diagnostics.sh",
     "App/MeetingAssistantNativeApp.swift",
     "tests/ArchitectureTest.md",
     "Sources/MeetingAssistantNative/DependencyCheckContract.swift",
