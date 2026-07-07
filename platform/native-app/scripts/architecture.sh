@@ -311,6 +311,9 @@ grep -q '"release_gate": "local-app-permission-diagnostics"' scripts/local-app-p
 grep -q '"recommended_tcc_target"' scripts/local-app-permission-diagnostics.sh
 grep -q '"same_app_as_recording_smoke"' scripts/local-app-permission-diagnostics.sh
 grep -q '"screen_recording_permission_denied"' scripts/local-app-permission-diagnostics.sh
+grep -q '"latest_matching_direct_success_recording_report"' scripts/local-app-permission-diagnostics.sh
+grep -q '"latest_matching_open_permission_denied_recording_report"' scripts/local-app-permission-diagnostics.sh
+grep -q '"launchservices_tcc_attribution_suspected"' scripts/local-app-permission-diagnostics.sh
 grep -q "CFBundleDisplayName" scripts/local-app-permission-diagnostics.sh
 grep -q "local_tcc_identity_strategy" scripts/local-app-permission-diagnostics.sh
 grep -q '"user_action_required"' scripts/local-app-permission-diagnostics.sh

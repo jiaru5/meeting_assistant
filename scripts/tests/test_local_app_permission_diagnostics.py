@@ -44,6 +44,16 @@ class LocalAppPermissionDiagnosticsTests(unittest.TestCase):
             )
 
             old_report = native_root / "local-direct-recording-smoke" / "local-direct-recording-smoke-report.json"
+            malformed_report = (
+                native_root
+                / "local-direct-recording-smoke-malformed"
+                / "local-direct-recording-smoke-report.json"
+            )
+            direct_report = (
+                native_root
+                / "local-direct-recording-smoke-direct"
+                / "local-direct-recording-smoke-report.json"
+            )
             new_report = (
                 e2e_root
                 / "release-local-direct-target-smoke"
@@ -62,19 +72,40 @@ class LocalAppPermissionDiagnosticsTests(unittest.TestCase):
                     "permission_failure_details": [],
                 },
             )
+            malformed_report.parent.mkdir(parents=True, exist_ok=True)
+            malformed_report.write_text("[", encoding="utf-8")
             self.write_json(
-                new_report,
+                direct_report,
                 {
+                    "passed": True,
                     "app_identity": {
                         "path": installed_path,
                         "codesign": {"CDHash": "new-cdhash"},
                     },
+                    "runner_configuration": {"launch_mode": "direct"},
+                    "permission_failure_details": [],
+                },
+            )
+            self.write_json(
+                new_report,
+                {
+                    "passed": False,
+                    "blocker_type": "permission_denied",
+                    "app_identity": {
+                        "path": installed_path,
+                        "codesign": {"CDHash": "new-cdhash"},
+                    },
+                    "runner_configuration": {"launch_mode": "open"},
                     "permission_failure_details": ["Screen Recording permission is denied."],
                 },
             )
             old_time = time.time() - 120
+            malformed_time = time.time() - 90
+            direct_time = time.time() - 60
             new_time = time.time()
             os.utime(old_report, (old_time, old_time))
+            os.utime(malformed_report, (malformed_time, malformed_time))
+            os.utime(direct_report, (direct_time, direct_time))
             os.utime(new_report, (new_time, new_time))
 
             env = os.environ.copy()
@@ -104,6 +135,16 @@ class LocalAppPermissionDiagnosticsTests(unittest.TestCase):
             self.assertTrue(diagnostics["recording_report_found"])
             self.assertTrue(diagnostics["screen_recording_permission_denied"])
             self.assertTrue(diagnostics["same_app_as_recording_smoke"])
+            self.assertEqual(
+                diagnostics["latest_matching_direct_success_recording_report"],
+                str(direct_report.resolve()),
+            )
+            self.assertEqual(
+                diagnostics["latest_matching_open_permission_denied_recording_report"],
+                str(new_report.resolve()),
+            )
+            self.assertTrue(diagnostics["launchservices_tcc_attribution_suspected"])
+            self.assertIn("LaunchServices open", diagnostics["launchservices_tcc_attribution_summary"])
             self.assertTrue(diagnostics["user_action_required"])
 
 

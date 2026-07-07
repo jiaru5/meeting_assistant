@@ -119,10 +119,11 @@ report_file="$(resolve_path "$report_file")"
 
 mkdir -p "$(dirname "$report_file")"
 
-python3 - "$install_report" "$recording_report" "$report_file" "$recording_report_explicit" <<'PY'
+python3 - "$install_report" "$recording_report" "$report_file" "$recording_report_explicit" "$recording_report_search_roots" <<'PY'
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -132,6 +133,7 @@ install_report_path = Path(sys.argv[1])
 recording_report_path = Path(sys.argv[2])
 report_file = Path(sys.argv[3])
 recording_report_explicit = sys.argv[4] == "1"
+recording_report_search_roots = sys.argv[5]
 
 
 def load_json(path: Path, *, required: bool) -> dict[str, Any]:
@@ -143,6 +145,72 @@ def load_json(path: Path, *, required: bool) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise SystemExit(f"report must be a JSON object: {path}")
     return payload
+
+
+def load_candidate_report(path: Path) -> dict[str, Any]:
+    try:
+        return load_json(path, required=False)
+    except (json.JSONDecodeError, OSError, SystemExit):
+        return {}
+
+
+def same_app_identity(report: dict[str, Any], *, installed_path: str, installed_cdhash: str) -> bool:
+    app = report.get("app_identity")
+    if not isinstance(app, dict):
+        return False
+    path = str(app.get("path", "")).strip()
+    if path != installed_path:
+        return False
+    codesign = app.get("codesign")
+    if not isinstance(codesign, dict):
+        codesign = {}
+    cdhash = str(codesign.get("CDHash", "")).strip()
+    return not installed_cdhash or not cdhash or cdhash == installed_cdhash
+
+
+def report_sort_key(path: Path) -> tuple[float, str]:
+    try:
+        return (path.stat().st_mtime, str(path))
+    except OSError:
+        return (0.0, str(path))
+
+
+def matching_reports(*, installed_path: str, installed_cdhash: str) -> tuple[Path | None, Path | None]:
+    roots = [Path(item).expanduser() for item in recording_report_search_roots.split(os.pathsep) if item]
+    candidates: list[Path] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        candidates.extend(
+            path
+            for path in root.rglob("local-direct-recording-smoke-report.json")
+            if path.is_file()
+        )
+
+    direct_success: list[Path] = []
+    open_denied: list[Path] = []
+    for path in candidates:
+        report = load_candidate_report(path)
+        if not report:
+            continue
+        if not same_app_identity(report, installed_path=installed_path, installed_cdhash=installed_cdhash):
+            continue
+        runner = report.get("runner_configuration")
+        if not isinstance(runner, dict):
+            runner = {}
+        launch_mode = str(runner.get("launch_mode", "")).strip()
+        if report.get("passed") is True and launch_mode == "direct":
+            direct_success.append(path)
+        if (
+            report.get("passed") is False
+            and launch_mode == "open"
+            and report.get("blocker_type") == "permission_denied"
+        ):
+            open_denied.append(path)
+
+    latest_direct = max(direct_success, key=report_sort_key) if direct_success else None
+    latest_open_denied = max(open_denied, key=report_sort_key) if open_denied else None
+    return latest_direct, latest_open_denied
 
 
 install_report = load_json(install_report_path, required=True)
@@ -181,6 +249,13 @@ same_app_as_recording_smoke = (
     and recording_path == installed_path
     and (not installed_cdhash or not recording_cdhash or recording_cdhash == installed_cdhash)
 )
+latest_direct_success_report, latest_open_permission_denied_report = matching_reports(
+    installed_path=installed_path,
+    installed_cdhash=installed_cdhash,
+)
+launchservices_tcc_attribution_suspected = bool(
+    latest_direct_success_report and latest_open_permission_denied_report
+)
 
 recommended_target = {
     "path": installed_path,
@@ -204,9 +279,26 @@ report = {
     "recording_smoke_app_identity": recording_app,
     "same_app_as_recording_smoke": same_app_as_recording_smoke,
     "screen_recording_permission_denied": screen_recording_denied,
+    "latest_matching_direct_success_recording_report": (
+        str(latest_direct_success_report.resolve()) if latest_direct_success_report else ""
+    ),
+    "latest_matching_open_permission_denied_recording_report": (
+        str(latest_open_permission_denied_report.resolve()) if latest_open_permission_denied_report else ""
+    ),
+    "launchservices_tcc_attribution_suspected": launchservices_tcc_attribution_suspected,
+    "launchservices_tcc_attribution_summary": (
+        "A direct executable launch succeeded for the same installed app identity while LaunchServices open "
+        "was denied; re-add recommended_tcc_target.path in Screen Recording / Screen & System Audio Recording."
+        if launchservices_tcc_attribution_suspected
+        else ""
+    ),
     "permission_failure_details": permission_details,
     "local_tcc_identity_strategy": local_tcc_identity_strategy,
-    "user_action_required": screen_recording_denied or not same_app_as_recording_smoke,
+    "user_action_required": (
+        screen_recording_denied
+        or not same_app_as_recording_smoke
+        or launchservices_tcc_attribution_suspected
+    ),
     "user_action_summary": (
         "Grant Screen Recording / Screen & System Audio Recording to the recommended_tcc_target.path, "
         "then rerun recommended_recording_smoke_command."
@@ -242,6 +334,7 @@ print(f"  display name: {installed_app.get('CFBundleDisplayName', '') or install
 print(f"  cdhash: {installed_cdhash or 'unknown'}")
 print(f"  screen recording denied: {str(screen_recording_denied).lower()}")
 print(f"  same app as recording smoke: {str(same_app_as_recording_smoke).lower()}")
+print(f"  launchservices/tcc attribution suspected: {str(launchservices_tcc_attribution_suspected).lower()}")
 print("  direct diagnostic: MA_NATIVE_LOCAL_APP_LAUNCH_MODE=direct ./platform/native-app/scripts/local-direct-recording-smoke.sh --no-build")
 print(f"  report: {report_file}")
 PY
