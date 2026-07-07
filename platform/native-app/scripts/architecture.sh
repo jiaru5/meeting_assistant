@@ -43,6 +43,7 @@ test -f MeetingAssistantNative.xcodeproj/project.pbxproj
 test -f MeetingAssistantNative.xcodeproj/xcshareddata/xcschemes/MeetingAssistantNative.xcscheme
 test -x scripts/native-capture-smoke.sh
 test -x scripts/run-local-app.sh
+test -x scripts/local-direct-smoke.sh
 test -f App/MeetingAssistantNativeApp.swift
 test -f Sources/MeetingAssistantNative/DependencyCheckContract.swift
 test -f Sources/MeetingAssistantNative/PermissionDependencyStatusViewModel.swift
@@ -222,6 +223,19 @@ grep -q "local-direct" scripts/run-local-app.sh
 grep -q "unset MA_NATIVE_APP_XCTEST" scripts/run-local-app.sh
 if grep -q "Developer ID\\|notarytool\\|stapler\\|sigstore\\|cosign" scripts/run-local-app.sh; then
   echo "native-app architecture check failed: run-local-app.sh must not require Developer ID, notarization, stapling or Sigstore." >&2
+  exit 1
+fi
+grep -q "run-local-app.sh" scripts/local-direct-smoke.sh
+grep -q "System Events" scripts/local-direct-smoke.sh
+grep -q "local-direct-ui-smoke" scripts/local-direct-smoke.sh
+grep -q '"opens_system_settings": False' scripts/local-direct-smoke.sh
+grep -q '"starts_recording": False' scripts/local-direct-smoke.sh
+grep -q '"requires_developer_id_or_notarization": False' scripts/local-direct-smoke.sh
+grep -q "Preflight: Ready" scripts/local-direct-smoke.sh
+grep -q "Recording readiness is ready." scripts/local-direct-smoke.sh
+grep -q "Processing is ready to run." scripts/local-direct-smoke.sh
+if grep -q "CGRequestScreenCaptureAccess\\|AVCaptureDevice\\.requestAccess\\|x-apple.systempreferences\\|tccutil\\|security authorizationdb\\|notarytool\\|stapler\\|cosign" scripts/local-direct-smoke.sh; then
+  echo "native-app architecture check failed: local-direct smoke must not request permissions, open System Settings, or require distribution gates." >&2
   exit 1
 fi
 grep -q "Production/default app runtime may pass an explicitly configured" tests/ArchitectureTest.md

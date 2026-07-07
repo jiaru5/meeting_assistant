@@ -151,6 +151,8 @@ VS-MA-23 local-direct app run boundary:
 6. The app root must use an AppKit-owned main `NSWindow` with `NSHostingController(rootView:)`, frame autosave name `meeting-assistant-main`, and `window.makeKeyAndOrderFront(nil)` on launch/reopen, so stale macOS window restoration state or suppressed SwiftUI automatic launch policy cannot leave local-direct runs with a live process and no primary window.
 7. `MA_NATIVE_LOCAL_APP_LAUNCH_MODE=direct` is allowed only as a low-level executable diagnostic; the default local-direct user path must remain LaunchServices `open`.
 8. This launcher is local functional evidence only. It does not prove XCUITest Automation Mode, Developer ID signing, notarization, App Store distribution, all target-machine repeatability, real user Save Panel interaction or final product-validation release readiness.
+9. `scripts/local-direct-smoke.sh` may wrap `run-local-app.sh`, read the launched Release app's visible UI through macOS Accessibility/System Events, and verify the designed shell, Preflight, Recording and Processing controls are present without clicking recording controls.
+10. The local-direct smoke must not open System Settings, request or modify macOS permissions, call `CGRequestScreenCaptureAccess`, call `AVCaptureDevice.requestAccess`, change TCC, require Developer ID/notarization, or claim release readiness.
 
 VS-MA-22 opt-in real runtime native bridge smoke boundary:
 

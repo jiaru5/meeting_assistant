@@ -971,6 +971,7 @@ class HarnessValidationTests(unittest.TestCase):
 
     def test_vs_ma_23_local_direct_app_run_entrypoint_is_documented_and_guarded(self) -> None:
         script = (ROOT / "platform/native-app/scripts/run-local-app.sh").read_text(encoding="utf-8")
+        smoke_script = (ROOT / "platform/native-app/scripts/local-direct-smoke.sh").read_text(encoding="utf-8")
         app_source = (ROOT / "platform/native-app/App/MeetingAssistantNativeApp.swift").read_text(encoding="utf-8")
         shell_source = (
             ROOT / "platform/native-app/Sources/MeetingAssistantNative/DesignedNativeShellView.swift"
@@ -1002,6 +1003,18 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertNotIn("notarytool", script)
         self.assertNotIn("stapler", script)
         self.assertNotIn("cosign", script)
+        self.assertIn("run-local-app.sh", smoke_script)
+        self.assertIn("System Events", smoke_script)
+        self.assertIn("local-direct-ui-smoke", smoke_script)
+        self.assertIn('"opens_system_settings": False', smoke_script)
+        self.assertIn('"starts_recording": False', smoke_script)
+        self.assertIn('"requires_developer_id_or_notarization": False', smoke_script)
+        self.assertIn("Preflight: Ready", smoke_script)
+        self.assertIn("Recording readiness is ready.", smoke_script)
+        self.assertIn("Processing is ready to run.", smoke_script)
+        self.assertNotIn("CGRequestScreenCaptureAccess", smoke_script)
+        self.assertNotIn("AVCaptureDevice.requestAccess", smoke_script)
+        self.assertNotIn("x-apple.systempreferences", smoke_script)
 
         self.assertIn("ProcessingCLIDependencyCheckRunner(environment: environment)", app_source)
         self.assertIn("usesStaticDependencyFixture", app_source)
@@ -1021,14 +1034,18 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("autoRefreshPreflightIfNeeded", shell_source)
 
         self.assertIn("run-local-app.sh", architecture)
+        self.assertIn("local-direct-smoke.sh", architecture)
         self.assertIn("VS-MA-23 local-direct app run boundary", architecture_doc)
         self.assertIn("LaunchServices `open -n -W -F`", architecture_doc)
         self.assertIn("scoped `launchctl setenv`", architecture_doc)
         self.assertIn("AppKit-owned main `NSWindow`", architecture_doc)
         self.assertIn("NSHostingController(rootView:)", architecture_doc)
         self.assertIn("auto-refresh Preflight once on first shell appearance", architecture_doc)
+        self.assertIn("macOS Accessibility/System Events", architecture_doc)
         self.assertIn("run-local-app.sh", dev_commands)
+        self.assertIn("local-direct-smoke.sh", dev_commands)
         self.assertIn("run-local-app.sh", e2e_readme)
+        self.assertIn("local-direct-smoke.sh", e2e_readme)
         self.assertIn("LaunchServices", dev_commands)
         self.assertIn("LaunchServices", e2e_readme)
         self.assertIn("local-direct app run", matrix)
