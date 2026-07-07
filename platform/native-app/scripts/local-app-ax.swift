@@ -15,7 +15,7 @@ enum AXSmokeError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .usage:
-            return "usage: local-app-ax.swift snapshot <timeout-seconds> <pid> | press <timeout-seconds> <pid> <AXIdentifier> | set-value <timeout-seconds> <pid> <AXIdentifier> <value> | window <timeout-seconds> <pid>"
+            return "usage: local-app-ax.swift snapshot <timeout-seconds> <pid> | press <timeout-seconds> <pid> <AXIdentifier> | confirm <timeout-seconds> <pid> <AXIdentifier> | set-value <timeout-seconds> <pid> <AXIdentifier> <value> | window <timeout-seconds> <pid>"
         case .invalidPID(let raw):
             return "invalid pid: \(raw)"
         case .noWindows(let pid):
@@ -25,7 +25,7 @@ enum AXSmokeError: Error, CustomStringConvertible {
         case .missingIdentifier(let identifier):
             return "Missing AXIdentifier \(identifier)"
         case .actionFailed(let identifier, let error):
-            return "AXPress failed for \(identifier): \(error.rawValue)"
+            return "AX action failed for \(identifier): \(error.rawValue)"
         }
     }
 }
@@ -65,15 +65,63 @@ func children(of element: AXUIElement) -> [AXUIElement] {
     return values
 }
 
+func activateApp(pid: pid_t) {
+    NSRunningApplication(processIdentifier: pid)?.activate(
+        options: [.activateAllWindows]
+    )
+}
+
+func isWindowElement(_ element: AXUIElement) -> Bool {
+    stringAttribute(element, kAXRoleAttribute) == "AXWindow"
+        || stringAttribute(element, kAXRoleAttribute) == "AXSheet"
+}
+
+func focusedOrMainWindows(for app: AXUIElement) -> [AXUIElement] {
+    [kAXFocusedWindowAttribute, kAXMainWindowAttribute]
+        .compactMap { name -> AXUIElement? in
+            guard let value = attribute(app, name) else {
+                return nil
+            }
+            return (value as! AXUIElement)
+        }
+        .filter(isWindowElement)
+}
+
+func raiseWindows(_ windows: [AXUIElement]) {
+    for window in windows {
+        _ = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+    }
+}
+
+func focus(_ element: AXUIElement) {
+    _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+}
+
+func setStringValue(_ value: String, on element: AXUIElement) -> AXError {
+    focus(element)
+    return AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, value as NSString)
+}
+
 func windows(for app: AXUIElement, pid: pid_t, timeout: TimeInterval) throws -> [AXUIElement] {
-    NSRunningApplication(processIdentifier: pid)?.activate(options: [.activateAllWindows])
+    activateApp(pid: pid)
     let deadline = Date().addingTimeInterval(timeout)
     repeat {
         if let values = attribute(app, kAXWindowsAttribute) as? [AXUIElement],
            !values.isEmpty {
             let concreteWindows = values.filter { !CFEqual($0, app) }
-            return concreteWindows.isEmpty ? values : concreteWindows
+            let rawCandidates = concreteWindows.isEmpty ? values : concreteWindows
+            let windowCandidates = rawCandidates.filter(isWindowElement)
+            if !windowCandidates.isEmpty {
+                raiseWindows(windowCandidates)
+                return windowCandidates
+            }
         }
+        let fallbackWindows = focusedOrMainWindows(for: app)
+        if !fallbackWindows.isEmpty {
+            raiseWindows(fallbackWindows)
+            return fallbackWindows
+        }
+        _ = try? visibleWindow(for: pid, timeout: 0.25)
         Thread.sleep(forTimeInterval: 0.25)
     } while Date() < deadline
     throw AXSmokeError.noWindows(pid)
@@ -257,17 +305,36 @@ func main() throws {
             }
         }
         throw AXSmokeError.missingIdentifier(identifier)
+    case "confirm":
+        guard arguments.count == 5 else {
+            throw AXSmokeError.usage
+        }
+        let appWindows = try windows(for: app, pid: targetPID, timeout: timeout)
+        let identifier = arguments[4]
+        var visited: Set<CFHashCode> = []
+        for window in appWindows {
+            if let element = find(identifier: identifier, in: window, visited: &visited) {
+                focus(element)
+                let error = AXUIElementPerformAction(element, kAXConfirmAction as CFString)
+                guard error == .success else {
+                    throw AXSmokeError.actionFailed(identifier, error)
+                }
+                print("confirmed \(identifier)")
+                return
+            }
+        }
+        throw AXSmokeError.missingIdentifier(identifier)
     case "set-value":
         guard arguments.count == 6 else {
             throw AXSmokeError.usage
         }
         let appWindows = try windows(for: app, pid: targetPID, timeout: timeout)
         let identifier = arguments[4]
-        let value = arguments[5] as NSString
+        let value = arguments[5]
         var visited: Set<CFHashCode> = []
         for window in appWindows {
             if let element = find(identifier: identifier, in: window, visited: &visited) {
-                let error = AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, value)
+                let error = setStringValue(value, on: element)
                 guard error == .success else {
                     throw AXSmokeError.actionFailed(identifier, error)
                 }

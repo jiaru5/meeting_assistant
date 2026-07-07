@@ -299,6 +299,13 @@ grep -q "local-app-ax.swift" scripts/local-direct-smoke.sh
 grep -q "AXUIElementCreateApplication" scripts/local-app-ax.swift
 grep -q "concreteWindows.isEmpty ? values : concreteWindows" scripts/local-app-ax.swift
 grep -q "kAXWindowsAttribute" scripts/local-app-ax.swift
+grep -q "kAXFocusedWindowAttribute" scripts/local-app-ax.swift
+grep -q "kAXMainWindowAttribute" scripts/local-app-ax.swift
+grep -q "kAXRaiseAction" scripts/local-app-ax.swift
+grep -q "kAXConfirmAction" scripts/local-app-ax.swift
+grep -q "kAXFocusedAttribute" scripts/local-app-ax.swift
+grep -q 'stringAttribute(element, kAXRoleAttribute) == "AXWindow"' scripts/local-app-ax.swift
+grep -q 'stringAttribute(element, kAXRoleAttribute) == "AXSheet"' scripts/local-app-ax.swift
 grep -q "kAXPressAction" scripts/local-app-ax.swift
 grep -q "AXUIElementSetAttributeValue" scripts/local-app-ax.swift
 grep -q "CGWindowListCopyWindowInfo" scripts/local-app-ax.swift
@@ -367,13 +374,16 @@ if grep -q "CGRequestScreenCaptureAccess\\|AVCaptureDevice\\.requestAccess\\|x-a
 fi
 grep -q "run-local-app.sh" scripts/local-direct-actions-smoke.sh
 grep -q "local-direct-actions-smoke" scripts/local-direct-actions-smoke.sh
-grep -q "System Events" scripts/local-direct-actions-smoke.sh
 grep -q "AXIdentifier" scripts/local-direct-actions-smoke.sh
 grep -q "AXPress" scripts/local-direct-actions-smoke.sh
 grep -q "ma.transcriptAction.copyButton" scripts/local-direct-actions-smoke.sh
 grep -q "ma.transcriptAction.exportButton" scripts/local-direct-actions-smoke.sh
 grep -q "ma.transcriptAction.deleteButton" scripts/local-direct-actions-smoke.sh
 grep -q "ma.transcriptAction.deleteConfirmButton" scripts/local-direct-actions-smoke.sh
+grep -q "requested_export_path" scripts/local-direct-actions-smoke.sh
+grep -q "actual_export_path" scripts/local-direct-actions-smoke.sh
+grep -q "Exported markdown transcript to" scripts/local-direct-actions-smoke.sh
+grep -q "exported_path_from_snapshot" scripts/local-direct-actions-smoke.sh
 grep -q "Transcript actions are ready." scripts/local-direct-actions-smoke.sh
 grep -q "Copy complete." scripts/local-direct-actions-smoke.sh
 grep -q "Export complete." scripts/local-direct-actions-smoke.sh

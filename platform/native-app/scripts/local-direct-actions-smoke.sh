@@ -52,7 +52,8 @@ done
 
 mkdir -p "$report_dir" "$export_dir"
 swiftc "$component_dir/scripts/local-app-ax.swift" -o "$ax_helper"
-export_path="$export_dir/$session_id.md"
+export_run_id="${MA_NATIVE_LOCAL_APP_ACTIONS_SMOKE_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+export_path="$export_dir/$session_id-$export_run_id.md"
 rm -f "$export_path"
 
 collect_pids() {
@@ -139,6 +140,7 @@ session_id = sys.argv[6]
 timeout_seconds = int(sys.argv[7])
 export_dir = Path(sys.argv[8])
 export_path = Path(sys.argv[9])
+actual_export_path = export_path
 expected_terms_raw = sys.argv[10].strip()
 AX_HELPER = Path(sys.argv[11])
 
@@ -149,17 +151,6 @@ blocker_type = "none"
 blocker_detail = ""
 clipboard_excerpt = ""
 delete_event_path = ""
-
-
-SAVE_PANEL_SCRIPT = r'''
-on run argv
-  tell application "System Events"
-    key code 36
-    delay 0.8
-    return "selected save panel directory"
-  end tell
-end run
-'''
 
 
 class SmokeFailure(Exception):
@@ -301,16 +292,39 @@ def wait_for_pasteboard(transcript: str, timeout: int) -> str:
     raise SmokeFailure("clipboard_mismatch", "system pasteboard does not contain transcript content")
 
 
+def exported_path_from_snapshot(text: str) -> Optional[Path]:
+    marker = "value=Exported markdown transcript to "
+    for line in text.splitlines():
+        if marker not in line:
+            continue
+        raw_path = line.split(marker, 1)[1].strip()
+        if raw_path.endswith("."):
+            raw_path = raw_path[:-1]
+        if raw_path:
+            return Path(raw_path)
+    return None
+
+
 def wait_for_export(transcript: str, timeout: int) -> str:
+    global actual_export_path
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if export_path.is_file():
-            content = export_path.read_text(encoding="utf-8", errors="replace")
+        text = snapshot(timeout=120)
+        if "Export complete." not in text:
+            time.sleep(0.5)
+            continue
+        observed_export_path = exported_path_from_snapshot(text)
+        if observed_export_path is None:
+            time.sleep(0.5)
+            continue
+        actual_export_path = observed_export_path
+        if actual_export_path.is_file():
+            content = actual_export_path.read_text(encoding="utf-8", errors="replace")
             validate_action_content(content, transcript, "exported markdown")
             checked_markers.append("Export complete.")
             return content
         time.sleep(0.5)
-    raise SmokeFailure("export_missing", f"expected export file is missing: {export_path}")
+    raise SmokeFailure("export_missing", f"expected export file is missing after Save Panel export: {actual_export_path}")
 
 
 def wait_for_delete(timeout: int) -> tuple[str, str]:
@@ -365,11 +379,6 @@ def press_with_retry(identifier: str, timeout: int) -> None:
 
 def confirm_save_panel() -> None:
     wait_for_marker("identifier=save-panel", 30)
-    wait_for_marker(f"value={export_path.name}", 30)
-    run_osascript(r'tell application "System Events" to keystroke "g" using {command down, shift down}', [], 10)
-    wait_for_marker("identifier=PathTextField", 30)
-    run_ax_helper("set-value", ["PathTextField", str(export_dir)], 30)
-    run_osascript(SAVE_PANEL_SCRIPT, [], 15)
     wait_for_marker("identifier=saveAsNameTextField", 30)
     run_ax_helper("set-value", ["saveAsNameTextField", export_path.name], 30)
     wait_for_marker(f"value={export_path.name}", 30)
@@ -595,8 +604,10 @@ def write_report(passed: bool, transcript_excerpt: str = "") -> None:
         "runner_log": str(runner_log_path),
         "checked_markers": checked_markers,
         "pressed_controls": pressed_controls,
-        "export_path": str(export_path),
-        "export_exists": export_path.is_file(),
+        "requested_export_path": str(export_path),
+        "actual_export_path": str(actual_export_path),
+        "export_path": str(actual_export_path),
+        "export_exists": actual_export_path.is_file(),
         "session_root_exists_after_delete": session_root().exists(),
         "delete_event_path": delete_event_path,
         "clipboard_excerpt": clipboard_excerpt,
@@ -642,7 +653,7 @@ try:
     wait_for_delete_prompt(min(timeout_seconds, 60))
     press_with_retry("ma.transcriptAction.deleteConfirmButton", timeout_seconds)
     found_event_path, delete_event = wait_for_delete(min(timeout_seconds, 60))
-    if not export_path.is_file():
+    if not actual_export_path.is_file():
         raise SmokeFailure("external_export_missing", "external export was not retained after delete")
     delete_event_path = found_event_path
     if transcript[:40] in delete_event:
