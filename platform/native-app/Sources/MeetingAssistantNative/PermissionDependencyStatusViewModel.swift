@@ -95,9 +95,10 @@ public struct PermissionDependencyStatusState: Equatable, Sendable {
         let missingRequired = response.checks
             .filter { $0.required && !$0.isPassing }
             .map(\.id)
-        let blockedPermissions = permissions.filter { $0.state != .granted }
+        let deniedPermissions = permissions.filter { $0.state == .denied }
+        let unconfirmedPermissions = permissions.filter { $0.state == .notConfirmed }
         let canRunProcessing = response.ok
-        let canStartRecording = canRunProcessing && blockedPermissions.isEmpty
+        let canStartRecording = canRunProcessing && deniedPermissions.isEmpty
         let phase: PermissionDependencyPhase = canStartRecording ? .ready : .blocked
 
         return PermissionDependencyStatusState(
@@ -105,7 +106,8 @@ public struct PermissionDependencyStatusState: Equatable, Sendable {
             summary: summary(
                 responseOK: response.ok,
                 hasMissingRequiredDependencies: !missingRequired.isEmpty,
-                hasBlockedPermissions: !blockedPermissions.isEmpty
+                hasDeniedPermissions: !deniedPermissions.isEmpty,
+                hasUnconfirmedPermissions: !unconfirmedPermissions.isEmpty
             ),
             permissions: permissions,
             dependencies: dependencies,
@@ -168,19 +170,24 @@ public struct PermissionDependencyStatusState: Equatable, Sendable {
     private static func summary(
         responseOK: Bool,
         hasMissingRequiredDependencies: Bool,
-        hasBlockedPermissions: Bool
+        hasDeniedPermissions: Bool,
+        hasUnconfirmedPermissions: Bool
     ) -> String {
-        if !responseOK && !hasMissingRequiredDependencies && !hasBlockedPermissions {
+        if !responseOK && !hasMissingRequiredDependencies && !hasDeniedPermissions {
             return "Recording and processing are blocked by dependency check failure."
         }
-        switch (hasMissingRequiredDependencies, hasBlockedPermissions) {
-        case (false, false):
+        switch (hasMissingRequiredDependencies, hasDeniedPermissions, hasUnconfirmedPermissions) {
+        case (false, false, false):
             return "Permissions and required dependencies are ready."
-        case (true, true):
+        case (false, false, true):
+            return "Recording can be started to confirm macOS permissions; denied permissions still fail closed."
+        case (true, true, _):
             return "Recording and processing are blocked by missing permissions and dependencies."
-        case (false, true):
+        case (false, true, _):
             return "Recording is blocked until macOS permissions are granted."
-        case (true, false):
+        case (true, false, true):
+            return "Processing is blocked until required dependencies are available; recording permissions still need confirmation."
+        case (true, false, false):
             return "Processing is blocked until required dependencies are available."
         }
     }
