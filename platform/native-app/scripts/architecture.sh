@@ -48,6 +48,7 @@ test -x scripts/install-local-app.sh
 test -x scripts/local-app-permission-diagnostics.sh
 test -x scripts/local-direct-smoke.sh
 test -x scripts/local-direct-recording-smoke.sh
+test -x scripts/local-direct-processing-smoke.sh
 test -f App/MeetingAssistantNativeApp.swift
 test -f Sources/MeetingAssistantNative/DependencyCheckContract.swift
 test -f Sources/MeetingAssistantNative/PermissionDependencyStatusViewModel.swift
@@ -311,6 +312,29 @@ grep -q '"may_request_macos_permissions": True' scripts/local-direct-recording-s
 grep -q '"not_release_readiness": True' scripts/local-direct-recording-smoke.sh
 if grep -q "x-apple.systempreferences\\|tccutil\\|security authorizationdb\\|notarytool\\|stapler\\|cosign" scripts/local-direct-recording-smoke.sh; then
   echo "native-app architecture check failed: local-direct recording smoke must not open System Settings, modify TCC, or require distribution gates." >&2
+  exit 1
+fi
+grep -q "run-local-app.sh" scripts/local-direct-processing-smoke.sh
+grep -q "local-direct-processing-smoke" scripts/local-direct-processing-smoke.sh
+grep -q "System Events" scripts/local-direct-processing-smoke.sh
+grep -q "AXIdentifier" scripts/local-direct-processing-smoke.sh
+grep -q "AXPress" scripts/local-direct-processing-smoke.sh
+grep -q "ma.processing.startButton" scripts/local-direct-processing-smoke.sh
+grep -q "Processing is ready to run." scripts/local-direct-processing-smoke.sh
+grep -q "Processing complete." scripts/local-direct-processing-smoke.sh
+grep -q "Processing completed with transcript-only speaker labels." scripts/local-direct-processing-smoke.sh
+grep -q "normalized_audio" scripts/local-direct-processing-smoke.sh
+grep -q "transcript_text" scripts/local-direct-processing-smoke.sh
+grep -q "speaker_labels" scripts/local-direct-processing-smoke.sh
+grep -q "workspace_precondition" scripts/local-direct-processing-smoke.sh
+grep -q "recording_input_boundary" scripts/local-direct-processing-smoke.sh
+grep -q '"starts_recording": False' scripts/local-direct-processing-smoke.sh
+grep -q '"starts_processing": True' scripts/local-direct-processing-smoke.sh
+grep -q '"may_request_macos_permissions": False' scripts/local-direct-processing-smoke.sh
+grep -q '"requires_developer_id_or_notarization": False' scripts/local-direct-processing-smoke.sh
+grep -q '"not_release_readiness": True' scripts/local-direct-processing-smoke.sh
+if grep -q "CGRequestScreenCaptureAccess\\|AVCaptureDevice\\.requestAccess\\|x-apple.systempreferences\\|tccutil\\|security authorizationdb\\|notarytool\\|stapler\\|cosign" scripts/local-direct-processing-smoke.sh; then
+  echo "native-app architecture check failed: local-direct processing smoke must not request permissions, open System Settings, modify TCC, or require distribution gates." >&2
   exit 1
 fi
 grep -q "Production/default app runtime may pass an explicitly configured" tests/ArchitectureTest.md

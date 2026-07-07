@@ -22,6 +22,7 @@ required = [
     "scripts/native-capture-smoke.sh",
     "scripts/install-local-app.sh",
     "scripts/local-app-permission-diagnostics.sh",
+    "scripts/local-direct-processing-smoke.sh",
     "App/MeetingAssistantNativeApp.swift",
     "tests/ArchitectureTest.md",
     "Sources/MeetingAssistantNative/DependencyCheckContract.swift",
