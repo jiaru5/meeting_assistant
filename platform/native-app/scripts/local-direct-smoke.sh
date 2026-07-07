@@ -132,6 +132,12 @@ on run argv
           set outputText to outputText & " role=" & (role of elementRef as text)
         end try
         try
+          set outputText to outputText & " identifier=" & (value of attribute "AXIdentifier" of elementRef as text)
+        end try
+        try
+          set outputText to outputText & " enabled=" & (value of attribute "AXEnabled" of elementRef as text)
+        end try
+        try
           set outputText to outputText & " subrole=" & (subrole of elementRef as text)
         end try
         try
@@ -179,6 +185,7 @@ fi
 python3 - "$report_file" "$ui_tree_file" "$runner_log" "$app_pid" <<'PY'
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -186,6 +193,40 @@ report_path = Path(sys.argv[1])
 ui_tree_path = Path(sys.argv[2])
 runner_log = Path(sys.argv[3])
 app_pid = int(sys.argv[4])
+ui_tree = ui_tree_path.read_text(encoding="utf-8")
+required_controls = {
+    "ma.recording.startButton": True,
+    "ma.recording.stopButton": False,
+    "ma.processing.startButton": True,
+    "ma.processing.retryButton": False,
+}
+controls = {}
+for line in ui_tree.splitlines():
+    identifier_match = re.search(r"\bidentifier=([^ ]+)", line)
+    if not identifier_match:
+        continue
+    enabled_match = re.search(r"\benabled=(true|false)", line)
+    controls[identifier_match.group(1)] = {
+        "enabled": enabled_match.group(1) == "true" if enabled_match else None,
+    }
+
+control_errors = []
+for identifier, expected_enabled in required_controls.items():
+    control = controls.get(identifier)
+    if control is None:
+        control_errors.append(f"{identifier} missing")
+        continue
+    actual_enabled = control["enabled"]
+    if actual_enabled is not expected_enabled:
+        control_errors.append(
+            f"{identifier} enabled={actual_enabled!r}, expected {expected_enabled!r}"
+        )
+if control_errors:
+    for error in control_errors:
+        print(f"local-direct smoke failed: {error}", file=sys.stderr)
+    print(f"UI tree: {ui_tree_path}", file=sys.stderr)
+    sys.exit(1)
+
 report = {
     "report_schema": 1,
     "release_gate": "local-direct-ui-smoke",
@@ -200,6 +241,14 @@ report = {
         "Recording readiness is ready.",
         "Processing is ready to run.",
     ],
+    "checked_controls": [
+        {
+            "identifier": identifier,
+            "enabled": controls[identifier]["enabled"],
+        }
+        for identifier in required_controls
+    ],
+    "verifies_action_control_identifiers": True,
     "modifies_tcc_or_system_settings": False,
     "opens_system_settings": False,
     "starts_recording": False,

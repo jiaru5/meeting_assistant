@@ -228,6 +228,13 @@ fi
 grep -q "run-local-app.sh" scripts/local-direct-smoke.sh
 grep -q "System Events" scripts/local-direct-smoke.sh
 grep -q "local-direct-ui-smoke" scripts/local-direct-smoke.sh
+grep -q "AXIdentifier" scripts/local-direct-smoke.sh
+grep -q "AXEnabled" scripts/local-direct-smoke.sh
+grep -q "ma.recording.startButton" scripts/local-direct-smoke.sh
+grep -q "ma.recording.stopButton" scripts/local-direct-smoke.sh
+grep -q "ma.processing.startButton" scripts/local-direct-smoke.sh
+grep -q "ma.processing.retryButton" scripts/local-direct-smoke.sh
+grep -q "verifies_action_control_identifiers" scripts/local-direct-smoke.sh
 grep -q '"opens_system_settings": False' scripts/local-direct-smoke.sh
 grep -q '"starts_recording": False' scripts/local-direct-smoke.sh
 grep -q '"requires_developer_id_or_notarization": False' scripts/local-direct-smoke.sh
