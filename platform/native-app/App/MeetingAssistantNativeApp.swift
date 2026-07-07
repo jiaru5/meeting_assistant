@@ -83,6 +83,8 @@ private struct NativeControlPlaneRootView: View {
     private let transcriptViewModel: TranscriptReviewViewModel
     private let preflightWorkspaceURL: URL?
     private let autoRefreshPreflightOnAppear: Bool
+    private let captureSystemAudio: Bool
+    private let captureMicrophoneAudio: Bool
 
     init(configuration: NativeControlPlaneFixtureConfiguration) {
         let readinessState = configuration.initialReadinessState()
@@ -95,6 +97,8 @@ private struct NativeControlPlaneRootView: View {
         let transcriptActionOSClients = configuration.makeTranscriptActionOSClients()
         self.preflightWorkspaceURL = recordingWorkspaceURL
         self.autoRefreshPreflightOnAppear = autoRefreshPreflightOnAppear
+        self.captureSystemAudio = configuration.captureSystemAudio
+        self.captureMicrophoneAudio = configuration.captureMicrophoneAudio
         _shellViewModel = StateObject(wrappedValue: DesignedNativeShellViewModel())
         _permissionViewModel = StateObject(
             wrappedValue: PermissionDependencyStatusViewModel(
@@ -143,7 +147,9 @@ private struct NativeControlPlaneRootView: View {
             transcriptViewModel: transcriptViewModel,
             transcriptActionViewModel: transcriptActionViewModel,
             preflightWorkspaceURL: preflightWorkspaceURL,
-            autoRefreshPreflightOnAppear: autoRefreshPreflightOnAppear
+            autoRefreshPreflightOnAppear: autoRefreshPreflightOnAppear,
+            captureSystemAudio: captureSystemAudio,
+            captureMicrophoneAudio: captureMicrophoneAudio
         )
     }
 }

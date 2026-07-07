@@ -1018,12 +1018,19 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("ma.processing.startButton", smoke_script)
         self.assertIn("ma.processing.retryButton", smoke_script)
         self.assertIn("verifies_action_control_identifiers", smoke_script)
+        self.assertIn("recording_setup_marker_for_request", smoke_script)
+        self.assertIn("checked_recording_setup_text", smoke_script)
+        self.assertIn(
+            "System audio capture is requested; microphone capture is not requested for this run.",
+            smoke_script,
+        )
         self.assertIn('"opens_system_settings": False', smoke_script)
         self.assertIn('"starts_recording": False', smoke_script)
         self.assertIn('"requires_developer_id_or_notarization": False', smoke_script)
         self.assertIn("Preflight: Ready", smoke_script)
         self.assertIn("Recording readiness is ready.", smoke_script)
         self.assertIn("Processing is ready to run.", smoke_script)
+        self.assertIn("checked_recording_setup_text", architecture)
         self.assertNotIn("CGRequestScreenCaptureAccess", smoke_script)
         self.assertNotIn("AVCaptureDevice.requestAccess", smoke_script)
         self.assertNotIn("x-apple.systempreferences", smoke_script)
@@ -1084,6 +1091,7 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("LaunchServices", e2e_readme)
         self.assertIn("local-direct app run", matrix)
         self.assertIn("自动刷新 Preflight", matrix)
+        self.assertIn("checked_recording_setup_text", matrix)
 
     def test_release_preflight_registers_release_bundle_gate_before_supply_chain(self) -> None:
         release_preflight = (ROOT / "scripts/release-preflight.sh").read_text(encoding="utf-8")

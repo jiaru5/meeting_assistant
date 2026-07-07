@@ -144,11 +144,20 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
                 recordingViewModel: recordingViewModel,
                 processingViewModel: processingViewModel,
                 transcriptViewModel: transcriptViewModel,
-                transcriptActionViewModel: actionViewModel
+                transcriptActionViewModel: actionViewModel,
+                captureSystemAudio: true,
+                captureMicrophoneAudio: false
             )
         )
 
         host.assertHosted()
+        XCTAssertEqual(
+            DesignedNativeShellViewModel.recordingSetupText(
+                captureSystemAudio: true,
+                captureMicrophoneAudio: false
+            ),
+            "Capture target: screen. System audio capture is requested; microphone capture is not requested for this run."
+        )
         XCTAssertEqual(shellViewModel.selectedSectionLabel, "Preflight selected.")
         shellViewModel.select(.actions)
         host.flush()
@@ -1128,6 +1137,9 @@ private enum SwiftUIViewSourceContract {
                 ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.commandRail)",
                 ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.workspaceBoundary)",
                 ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.recordingSetup)",
+                "DesignedNativeShellViewModel.recordingSetupText(",
+                "captureSystemAudio: captureSystemAudio",
+                "captureMicrophoneAudio: captureMicrophoneAudio",
                 ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.navButton(section))",
                 ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.section(section))",
                 ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.artifactStatus(row.artifactType))",
@@ -1163,6 +1175,8 @@ private enum SwiftUIViewSourceContract {
                 "_shellViewModel = StateObject(wrappedValue: DesignedNativeShellViewModel())",
                 "let readinessState = configuration.initialReadinessState()",
                 "let autoRefreshPreflightOnAppear = configuration.autoRefreshPreflightOnAppear()",
+                "self.captureSystemAudio = configuration.captureSystemAudio",
+                "self.captureMicrophoneAudio = configuration.captureMicrophoneAudio",
                 "let dependencyCheckRunner = configuration.makeDependencyCheckRunner()",
                 "runner: dependencyCheckRunner",
                 "NSApplicationDelegateAdaptor(MeetingAssistantNativeAppDelegate.self)",
@@ -1179,6 +1193,8 @@ private enum SwiftUIViewSourceContract {
                 "transcriptActionViewModel: transcriptActionViewModel",
                 "preflightWorkspaceURL: preflightWorkspaceURL",
                 "autoRefreshPreflightOnAppear: autoRefreshPreflightOnAppear",
+                "captureSystemAudio: captureSystemAudio",
+                "captureMicrophoneAudio: captureMicrophoneAudio",
                 "contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760)",
             ],
             file: file,

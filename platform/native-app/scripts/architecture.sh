@@ -238,6 +238,9 @@ grep -q "ma.recording.stopButton" scripts/local-direct-smoke.sh
 grep -q "ma.processing.startButton" scripts/local-direct-smoke.sh
 grep -q "ma.processing.retryButton" scripts/local-direct-smoke.sh
 grep -q "verifies_action_control_identifiers" scripts/local-direct-smoke.sh
+grep -q "recording_setup_marker_for_request" scripts/local-direct-smoke.sh
+grep -q "checked_recording_setup_text" scripts/local-direct-smoke.sh
+grep -q "System audio capture is requested; microphone capture is not requested for this run." scripts/local-direct-smoke.sh
 grep -q '"opens_system_settings": False' scripts/local-direct-smoke.sh
 grep -q '"starts_recording": False' scripts/local-direct-smoke.sh
 grep -q '"requires_developer_id_or_notarization": False' scripts/local-direct-smoke.sh

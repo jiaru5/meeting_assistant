@@ -11,6 +11,8 @@ report_file="$report_dir/local-direct-smoke-report.json"
 ui_tree_file="$report_dir/local-direct-ui-tree.txt"
 runner_log="$report_dir/run-local-app.log"
 reuse_existing="${MA_NATIVE_LOCAL_APP_SMOKE_REUSE_EXISTING:-0}"
+capture_system_audio="${MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO:-true}"
+capture_microphone_audio="${MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO:-false}"
 
 usage() {
   cat <<'USAGE'
@@ -37,12 +39,29 @@ is_truthy() {
   esac
 }
 
+recording_setup_marker_for_request() {
+  local capture_system="$1"
+  local capture_microphone="$2"
+  if is_truthy "$capture_system" && is_truthy "$capture_microphone"; then
+    printf '%s\n' "Capture target: screen. System audio and microphone capture are requested through the recording command client."
+  elif is_truthy "$capture_system"; then
+    printf '%s\n' "Capture target: screen. System audio capture is requested; microphone capture is not requested for this run."
+  elif is_truthy "$capture_microphone"; then
+    printf '%s\n' "Capture target: screen. Microphone capture is requested; system audio capture is not requested for this run."
+  else
+    printf '%s\n' "Capture target: screen. Audio capture is not requested for this run; unavailable audio artifacts must stay missing with reasons."
+  fi
+}
+
 if [[ "${1:-}" == "--help" ]]; then
   usage
   exit 0
 fi
 
 mkdir -p "$report_dir"
+expected_recording_setup_marker="$(
+  recording_setup_marker_for_request "$capture_system_audio" "$capture_microphone_audio"
+)"
 
 collect_pids() {
   /usr/bin/pgrep -x MeetingAssistantNative 2>/dev/null || true
@@ -167,6 +186,7 @@ required_markers=(
   "Processing: Ready"
   "Recording readiness is ready."
   "Processing is ready to run."
+  "$expected_recording_setup_marker"
 )
 
 missing_markers=()
@@ -182,7 +202,8 @@ if [[ ${#missing_markers[@]} -gt 0 ]]; then
   exit 1
 fi
 
-python3 - "$report_file" "$ui_tree_file" "$runner_log" "$app_pid" <<'PY'
+python3 - "$report_file" "$ui_tree_file" "$runner_log" "$app_pid" \
+  "$expected_recording_setup_marker" "$capture_system_audio" "$capture_microphone_audio" <<'PY'
 import json
 import os
 import re
@@ -193,7 +214,16 @@ report_path = Path(sys.argv[1])
 ui_tree_path = Path(sys.argv[2])
 runner_log = Path(sys.argv[3])
 app_pid = int(sys.argv[4])
+expected_recording_setup_marker = sys.argv[5]
+capture_system_audio = sys.argv[6]
+capture_microphone_audio = sys.argv[7]
 ui_tree = ui_tree_path.read_text(encoding="utf-8")
+
+
+def is_truthy(value):
+    return value in {"1", "true", "TRUE", "yes", "YES"}
+
+
 required_controls = {
     "ma.recording.startButton": True,
     "ma.recording.stopButton": False,
@@ -240,7 +270,13 @@ report = {
         "Processing: Ready",
         "Recording readiness is ready.",
         "Processing is ready to run.",
+        expected_recording_setup_marker,
     ],
+    "checked_recording_setup_text": expected_recording_setup_marker,
+    "recording_request": {
+        "capture_system_audio": is_truthy(capture_system_audio),
+        "capture_microphone_audio": is_truthy(capture_microphone_audio),
+    },
     "checked_controls": [
         {
             "identifier": identifier,

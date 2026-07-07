@@ -9,6 +9,8 @@ public struct DesignedNativeShellView: View {
     private let transcriptViewModel: TranscriptReviewViewModel
     private let preflightWorkspaceURL: URL?
     private let autoRefreshPreflightOnAppear: Bool
+    private let captureSystemAudio: Bool
+    private let captureMicrophoneAudio: Bool
     @State private var didAutoRefreshPreflight = false
 
     public init(
@@ -19,7 +21,9 @@ public struct DesignedNativeShellView: View {
         transcriptViewModel: TranscriptReviewViewModel,
         transcriptActionViewModel: TranscriptReviewActionsViewModel,
         preflightWorkspaceURL: URL? = nil,
-        autoRefreshPreflightOnAppear: Bool = false
+        autoRefreshPreflightOnAppear: Bool = false,
+        captureSystemAudio: Bool = true,
+        captureMicrophoneAudio: Bool = true
     ) {
         self.shellViewModel = shellViewModel
         self.permissionViewModel = permissionViewModel
@@ -29,6 +33,8 @@ public struct DesignedNativeShellView: View {
         self.transcriptActionViewModel = transcriptActionViewModel
         self.preflightWorkspaceURL = preflightWorkspaceURL
         self.autoRefreshPreflightOnAppear = autoRefreshPreflightOnAppear
+        self.captureSystemAudio = captureSystemAudio
+        self.captureMicrophoneAudio = captureMicrophoneAudio
     }
 
     public var body: some View {
@@ -60,7 +66,12 @@ public struct DesignedNativeShellView: View {
                         }
                         section(.recording) {
                             VStack(alignment: .leading, spacing: 12) {
-                                Text("Capture target: screen. System audio and microphone capture are requested through the recording command client.")
+                                Text(
+                                    DesignedNativeShellViewModel.recordingSetupText(
+                                        captureSystemAudio: captureSystemAudio,
+                                        captureMicrophoneAudio: captureMicrophoneAudio
+                                    )
+                                )
                                     .font(.callout)
                                     .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)

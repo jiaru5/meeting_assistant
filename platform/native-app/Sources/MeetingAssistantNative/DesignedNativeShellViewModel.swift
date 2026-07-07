@@ -239,6 +239,22 @@ public final class DesignedNativeShellViewModel: ObservableObject {
         ]
     }
 
+    public static func recordingSetupText(
+        captureSystemAudio: Bool,
+        captureMicrophoneAudio: Bool
+    ) -> String {
+        switch (captureSystemAudio, captureMicrophoneAudio) {
+        case (true, true):
+            return "Capture target: screen. System audio and microphone capture are requested through the recording command client."
+        case (true, false):
+            return "Capture target: screen. System audio capture is requested; microphone capture is not requested for this run."
+        case (false, true):
+            return "Capture target: screen. Microphone capture is requested; system audio capture is not requested for this run."
+        case (false, false):
+            return "Capture target: screen. Audio capture is not requested for this run; unavailable audio artifacts must stay missing with reasons."
+        }
+    }
+
     public static let artifactTypes = [
         "screen_video",
         "system_audio",

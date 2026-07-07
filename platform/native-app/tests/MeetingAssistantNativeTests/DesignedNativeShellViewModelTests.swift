@@ -130,6 +130,38 @@ struct DesignedNativeShellViewModelTests {
         #expect(failed[0].status == "Retained for retry; original media remains protected.")
         #expect(failed[3].status == "Export blocked until processing succeeds or transcript is loaded.")
     }
+
+    @Test
+    func recordingSetupTextMatchesRequestedAudioFlags() {
+        #expect(
+            DesignedNativeShellViewModel.recordingSetupText(
+                captureSystemAudio: true,
+                captureMicrophoneAudio: true
+            )
+            == "Capture target: screen. System audio and microphone capture are requested through the recording command client."
+        )
+        #expect(
+            DesignedNativeShellViewModel.recordingSetupText(
+                captureSystemAudio: true,
+                captureMicrophoneAudio: false
+            )
+            == "Capture target: screen. System audio capture is requested; microphone capture is not requested for this run."
+        )
+        #expect(
+            DesignedNativeShellViewModel.recordingSetupText(
+                captureSystemAudio: false,
+                captureMicrophoneAudio: true
+            )
+            == "Capture target: screen. Microphone capture is requested; system audio capture is not requested for this run."
+        )
+        #expect(
+            DesignedNativeShellViewModel.recordingSetupText(
+                captureSystemAudio: false,
+                captureMicrophoneAudio: false
+            )
+            == "Capture target: screen. Audio capture is not requested for this run; unavailable audio artifacts must stay missing with reasons."
+        )
+    }
 }
 
 private func readyReadinessState() -> PermissionDependencyStatusState {
