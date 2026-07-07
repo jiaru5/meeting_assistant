@@ -122,7 +122,7 @@ Phase 2 以后按“大阶段管理、纵切交付、契约验收”的方式推
 1. 用 `~/Applications/MeetingAssistantNativeLocal.app` 和 `local.meeting-assistant.native.localdirect` 稳定身份复跑 `install-local-app.sh` 与 `local-direct-smoke.sh`，证明本机 app 能通过 LaunchServices 普通路径启动、显示主窗口并进入 ready 状态。
 2. 复跑 `local-direct-recording-smoke.sh`，目标是同一 installed app 通过用户授权路径完成 Start/Stop、`Recording saved.`、`screen_video: available` 和 `mixed_audio: available`。
 3. 用上一步同一 workspace/session 复跑 `local-direct-processing-smoke.sh`，目标是经本机 `whisper.cpp` runtime/model 生成 `normalized_audio`、`transcript.json` 和 `speaker_labels.json`。
-4. 在本机 app 路径上补齐 transcript review、copy/export/delete 的普通用户链路证据；只有这些功能链路稳定后，再回到跨机器重复性、PV covered 和 release-preflight。
+4. 在本机 app 路径上用 `local-direct-actions-smoke.sh` 补齐 transcript review、copy/export/delete 的普通用户链路证据；只有这些功能链路稳定后，再回到跨机器重复性、PV covered 和 release-preflight。
 
 2026-07-07 07:04 CST 复跑 `MA_NATIVE_CAPTURE_ARTIFACT_SMOKE_ATTEMPTS=1 MA_NATIVE_CAPTURE_SMOKE_DURATION_SECONDS=2 MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO=true MEETING_ASSISTANT_FFMPEG_PATH="$(command -v ffmpeg || true)" ./platform/e2e/release-native-capture-artifact-smoke.sh` 通过，report `platform/e2e/build/native-capture-artifact-smoke/reports/native-capture-report-20260706T230405Z-33420.json` 声明 `release_gate=release-scope-native-capture`、`not_release_readiness=true`。本次 artifact 结果：`screen_video` available、563219 bytes、checksum verified；`system_audio` available、1872 bytes、checksum verified；`mixed_audio` available、1895 bytes、checksum verified；`microphone_audio` missing 且有 `degradation_reason`；processing contract 因已有可用音频而跳过 no-audio `artifact_missing` 分支。这证明 VS-MA-14/15 的本机真实 capture + stop artifact registry 当前可复跑，但不证明独立 microphone artifact、跨机器 TCC/display 重复性、真实 native-to-processing 成功 transcript 链或 VS-MA-23 release readiness。
 

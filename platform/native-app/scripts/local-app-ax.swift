@@ -15,7 +15,7 @@ enum AXSmokeError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .usage:
-            return "usage: local-app-ax.swift snapshot <timeout-seconds> <pid> | press <timeout-seconds> <pid> <AXIdentifier> | window <timeout-seconds> <pid>"
+            return "usage: local-app-ax.swift snapshot <timeout-seconds> <pid> | press <timeout-seconds> <pid> <AXIdentifier> | set-value <timeout-seconds> <pid> <AXIdentifier> <value> | window <timeout-seconds> <pid>"
         case .invalidPID(let raw):
             return "invalid pid: \(raw)"
         case .noWindows(let pid):
@@ -217,7 +217,7 @@ func find(identifier: String, in element: AXUIElement, depth: Int = 0, visited: 
 
 func main() throws {
     let arguments = CommandLine.arguments
-    guard arguments.count == 4 || arguments.count == 5 else {
+    guard arguments.count == 4 || arguments.count == 5 || arguments.count == 6 else {
         throw AXSmokeError.usage
     }
     let command = arguments[1]
@@ -252,6 +252,25 @@ func main() throws {
                     throw AXSmokeError.actionFailed(identifier, error)
                 }
                 print("pressed \(identifier)")
+                return
+            }
+        }
+        throw AXSmokeError.missingIdentifier(identifier)
+    case "set-value":
+        guard arguments.count == 6 else {
+            throw AXSmokeError.usage
+        }
+        let appWindows = try windows(for: app, pid: targetPID, timeout: timeout)
+        let identifier = arguments[4]
+        let value = arguments[5] as NSString
+        var visited: Set<CFHashCode> = []
+        for window in appWindows {
+            if let element = find(identifier: identifier, in: window, visited: &visited) {
+                let error = AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, value)
+                guard error == .success else {
+                    throw AXSmokeError.actionFailed(identifier, error)
+                }
+                print("set \(identifier)")
                 return
             }
         }

@@ -49,6 +49,7 @@ test -x scripts/local-app-permission-diagnostics.sh
 test -x scripts/local-direct-smoke.sh
 test -x scripts/local-direct-recording-smoke.sh
 test -x scripts/local-direct-processing-smoke.sh
+test -x scripts/local-direct-actions-smoke.sh
 test -f App/MeetingAssistantNativeApp.swift
 test -f Sources/MeetingAssistantNative/DependencyCheckContract.swift
 test -f Sources/MeetingAssistantNative/PermissionDependencyStatusViewModel.swift
@@ -297,6 +298,7 @@ grep -q "local-app-ax.swift" scripts/local-direct-smoke.sh
 grep -q "AXUIElementCreateApplication" scripts/local-app-ax.swift
 grep -q "kAXWindowsAttribute" scripts/local-app-ax.swift
 grep -q "kAXPressAction" scripts/local-app-ax.swift
+grep -q "AXUIElementSetAttributeValue" scripts/local-app-ax.swift
 grep -q "CGWindowListCopyWindowInfo" scripts/local-app-ax.swift
 grep -q "MA_NATIVE_LOCAL_APP_SMOKE_STATE_REPORT" scripts/local-direct-smoke.sh
 grep -q "local-direct-app-state-report.json" scripts/local-direct-smoke.sh
@@ -359,6 +361,34 @@ grep -q '"requires_developer_id_or_notarization": False' scripts/local-direct-pr
 grep -q '"not_release_readiness": True' scripts/local-direct-processing-smoke.sh
 if grep -q "CGRequestScreenCaptureAccess\\|AVCaptureDevice\\.requestAccess\\|x-apple.systempreferences\\|tccutil\\|security authorizationdb\\|notarytool\\|stapler\\|cosign" scripts/local-direct-processing-smoke.sh; then
   echo "native-app architecture check failed: local-direct processing smoke must not request permissions, open System Settings, modify TCC, or require distribution gates." >&2
+  exit 1
+fi
+grep -q "run-local-app.sh" scripts/local-direct-actions-smoke.sh
+grep -q "local-direct-actions-smoke" scripts/local-direct-actions-smoke.sh
+grep -q "System Events" scripts/local-direct-actions-smoke.sh
+grep -q "AXIdentifier" scripts/local-direct-actions-smoke.sh
+grep -q "AXPress" scripts/local-direct-actions-smoke.sh
+grep -q "ma.transcriptAction.copyButton" scripts/local-direct-actions-smoke.sh
+grep -q "ma.transcriptAction.exportButton" scripts/local-direct-actions-smoke.sh
+grep -q "ma.transcriptAction.deleteButton" scripts/local-direct-actions-smoke.sh
+grep -q "ma.transcriptAction.deleteConfirmButton" scripts/local-direct-actions-smoke.sh
+grep -q "Transcript actions are ready." scripts/local-direct-actions-smoke.sh
+grep -q "Copy complete." scripts/local-direct-actions-smoke.sh
+grep -q "Export complete." scripts/local-direct-actions-smoke.sh
+grep -q "Delete complete." scripts/local-direct-actions-smoke.sh
+grep -q "pbpaste" scripts/local-direct-actions-smoke.sh
+grep -q "NSSavePanel" scripts/local-direct-actions-smoke.sh
+grep -q "workspace_precondition" scripts/local-direct-actions-smoke.sh
+grep -q "actions_boundary" scripts/local-direct-actions-smoke.sh
+grep -q '"starts_recording": False' scripts/local-direct-actions-smoke.sh
+grep -q '"starts_processing": False' scripts/local-direct-actions-smoke.sh
+grep -q '"uses_system_pasteboard": True' scripts/local-direct-actions-smoke.sh
+grep -q '"uses_save_panel": True' scripts/local-direct-actions-smoke.sh
+grep -q '"may_request_macos_permissions": False' scripts/local-direct-actions-smoke.sh
+grep -q '"requires_developer_id_or_notarization": False' scripts/local-direct-actions-smoke.sh
+grep -q '"not_release_readiness": True' scripts/local-direct-actions-smoke.sh
+if grep -q "CGRequestScreenCaptureAccess\\|AVCaptureDevice\\.requestAccess\\|x-apple.systempreferences\\|tccutil\\|security authorizationdb\\|notarytool\\|stapler\\|cosign" scripts/local-direct-actions-smoke.sh; then
+  echo "native-app architecture check failed: local-direct actions smoke must not request permissions, open System Settings, modify TCC, or require distribution gates." >&2
   exit 1
 fi
 grep -q "Production/default app runtime may pass an explicitly configured" tests/ArchitectureTest.md
