@@ -8,6 +8,8 @@ default_source_app="$root_dir/.harness/release-build/native-app/DerivedData/Buil
 install_dir="${MA_NATIVE_LOCAL_APP_INSTALL_DIR:-$HOME/Applications}"
 install_path="${MA_NATIVE_LOCAL_APP_INSTALL_PATH:-$install_dir/MeetingAssistantNative.app}"
 source_app="${MA_NATIVE_LOCAL_APP_SOURCE_APP:-$default_source_app}"
+report_dir="${MA_NATIVE_LOCAL_APP_INSTALL_REPORT_DIR:-$component_dir/build/local-app-install}"
+report_file="${MA_NATIVE_LOCAL_APP_INSTALL_REPORT:-$report_dir/local-app-install-report.json}"
 build_if_missing="${MA_NATIVE_LOCAL_APP_BUILD_IF_MISSING:-1}"
 rebuild="${MA_NATIVE_LOCAL_APP_REBUILD:-0}"
 dry_run="${MA_NATIVE_LOCAL_APP_DRY_RUN:-0}"
@@ -23,6 +25,7 @@ Options:
   --source-app PATH    Copy from an existing MeetingAssistantNative.app bundle.
   --install-path PATH  Install to this exact .app path.
   --install-dir DIR    Install as MeetingAssistantNative.app inside DIR.
+  --report-file PATH   Write the install identity report to this JSON file.
   --no-build           Require the source app bundle to already exist.
   --rebuild            Rebuild the local-direct Release app before installing.
   --dry-run            Print the resolved install plan without copying.
@@ -113,6 +116,14 @@ while [[ $# -gt 0 ]]; do
       install_path="$install_dir/MeetingAssistantNative.app"
       shift 2
       ;;
+    --report-file)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "error: --report-file requires a path" >&2
+        exit 2
+      fi
+      report_file="$2"
+      shift 2
+      ;;
     --no-build)
       build_if_missing="0"
       shift
@@ -139,6 +150,7 @@ done
 
 source_app="$(resolve_path "$source_app")"
 install_path="$(resolve_path "$install_path")"
+report_file="$(resolve_path "$report_file")"
 install_dir="$(dirname "$install_path")"
 
 if [[ "${install_path##*.}" != "app" ]]; then
@@ -162,6 +174,7 @@ fi
 echo "MeetingAssistantNative local install:"
 echo "  source: $source_app"
 echo "  install: $install_path"
+echo "  report: $report_file"
 echo "  distribution mode: local-direct"
 echo "  modifies tcc or system settings: false"
 echo "  requires developer id or notarization: false"
@@ -186,5 +199,78 @@ fi
 mv "$tmp_app" "$install_path"
 trap - EXIT INT TERM
 
+mkdir -p "$(dirname "$report_file")"
+python3 - "$source_app" "$install_path" "$report_file" <<'PY'
+from __future__ import annotations
+
+import json
+import plistlib
+import re
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+source_app = Path(sys.argv[1])
+install_app = Path(sys.argv[2])
+report_file = Path(sys.argv[3])
+
+
+def info_plist(app: Path) -> dict[str, object]:
+    with (app / "Contents/Info.plist").open("rb") as handle:
+        return plistlib.load(handle)
+
+
+def codesign_details(app: Path) -> dict[str, str]:
+    completed = subprocess.run(
+        ["/usr/bin/codesign", "-dv", "--verbose=4", str(app)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    output = completed.stdout + completed.stderr
+    if completed.returncode != 0:
+        raise SystemExit(f"codesign details failed for {app}: {output.strip()}")
+    details: dict[str, str] = {}
+    for key in ("Identifier", "Format", "CDHash", "Signature", "TeamIdentifier"):
+        match = re.search(rf"(?m)^{key}=(.+)$", output)
+        if match:
+            details[key] = match.group(1).strip()
+    return details
+
+
+plist = info_plist(install_app)
+report = {
+    "report_schema": 1,
+    "release_gate": "local-direct-app-install",
+    "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    "source_app": str(source_app),
+    "installed_app": {
+        "path": str(install_app),
+        "CFBundleIdentifier": plist.get("CFBundleIdentifier", ""),
+        "CFBundleName": plist.get("CFBundleName", ""),
+        "CFBundleShortVersionString": plist.get("CFBundleShortVersionString", ""),
+        "codesign": codesign_details(install_app),
+    },
+    "distribution_mode": "local-direct",
+    "install_method": "user-applications-copy",
+    "opens_system_settings": False,
+    "modifies_tcc_or_system_settings": False,
+    "requires_developer_id_or_notarization": False,
+    "requires_app_store_distribution": False,
+    "not_release_readiness": True,
+    "recommended_visible_smoke_command": (
+        f'MA_NATIVE_LOCAL_APP_PATH="{install_app}" '
+        "./platform/native-app/scripts/local-direct-smoke.sh --no-build"
+    ),
+    "recommended_recording_smoke_command": (
+        f'MA_NATIVE_LOCAL_APP_PATH="{install_app}" '
+        "./platform/native-app/scripts/local-direct-recording-smoke.sh --no-build"
+    ),
+}
+report_file.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
+
 echo "local app installed: $install_path"
+echo "report: $report_file"
 echo "run with: MA_NATIVE_LOCAL_APP_PATH=\"$install_path\" ./platform/native-app/scripts/run-local-app.sh --no-build"

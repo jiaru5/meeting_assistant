@@ -233,12 +233,19 @@ grep -q "release-bundle-create.py" scripts/install-local-app.sh
 grep -q "local-direct" scripts/install-local-app.sh
 grep -q "MA_NATIVE_LOCAL_APP_INSTALL_PATH" scripts/install-local-app.sh
 grep -q "MA_NATIVE_LOCAL_APP_SOURCE_APP" scripts/install-local-app.sh
+grep -q "MA_NATIVE_LOCAL_APP_INSTALL_REPORT" scripts/install-local-app.sh
+grep -q "local-app-install-report.json" scripts/install-local-app.sh
+grep -q '"release_gate": "local-direct-app-install"' scripts/install-local-app.sh
+grep -q '"installed_app"' scripts/install-local-app.sh
 grep -q "CFBundleIdentifier" scripts/install-local-app.sh
 grep -q "local.meeting-assistant.native" scripts/install-local-app.sh
 grep -q "CFBundleName" scripts/install-local-app.sh
 grep -q "MeetingAssistantNative" scripts/install-local-app.sh
 grep -q "modifies tcc or system settings: false" scripts/install-local-app.sh
 grep -q "requires developer id or notarization: false" scripts/install-local-app.sh
+grep -q '"modifies_tcc_or_system_settings": False' scripts/install-local-app.sh
+grep -q '"requires_developer_id_or_notarization": False' scripts/install-local-app.sh
+grep -q '"not_release_readiness": True' scripts/install-local-app.sh
 grep -q "codesign --verify --deep --strict" scripts/install-local-app.sh
 if grep -q "x-apple.systempreferences\\|tccutil\\|security authorizationdb\\|notarytool\\|stapler\\|cosign" scripts/install-local-app.sh; then
   echo "native-app architecture check failed: local app installer must not open System Settings, modify TCC, or require distribution gates." >&2
