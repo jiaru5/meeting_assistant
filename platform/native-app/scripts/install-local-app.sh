@@ -1,0 +1,190 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+component_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root_dir="$(cd "$component_dir/../.." && pwd)"
+
+default_source_app="$root_dir/.harness/release-build/native-app/DerivedData/Build/Products/Release/MeetingAssistantNative.app"
+install_dir="${MA_NATIVE_LOCAL_APP_INSTALL_DIR:-$HOME/Applications}"
+install_path="${MA_NATIVE_LOCAL_APP_INSTALL_PATH:-$install_dir/MeetingAssistantNative.app}"
+source_app="${MA_NATIVE_LOCAL_APP_SOURCE_APP:-$default_source_app}"
+build_if_missing="${MA_NATIVE_LOCAL_APP_BUILD_IF_MISSING:-1}"
+rebuild="${MA_NATIVE_LOCAL_APP_REBUILD:-0}"
+dry_run="${MA_NATIVE_LOCAL_APP_DRY_RUN:-0}"
+
+usage() {
+  cat <<'USAGE'
+Usage: platform/native-app/scripts/install-local-app.sh [options]
+
+Build or reuse the local-direct Release MeetingAssistantNative.app and install it
+to a stable user-owned app path, defaulting to ~/Applications/MeetingAssistantNative.app.
+
+Options:
+  --source-app PATH    Copy from an existing MeetingAssistantNative.app bundle.
+  --install-path PATH  Install to this exact .app path.
+  --install-dir DIR    Install as MeetingAssistantNative.app inside DIR.
+  --no-build           Require the source app bundle to already exist.
+  --rebuild            Rebuild the local-direct Release app before installing.
+  --dry-run            Print the resolved install plan without copying.
+  --help               Show this help.
+
+This script does not open System Settings, modify TCC, or require Developer ID,
+notarization, stapling, Sigstore, or App Store distribution.
+USAGE
+}
+
+is_truthy() {
+  case "${1:-0}" in
+    1 | true | TRUE | yes | YES)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+resolve_path() {
+  python3 - "$1" <<'PY'
+from pathlib import Path
+import sys
+print(Path(sys.argv[1]).expanduser().resolve(strict=False))
+PY
+}
+
+plist_value() {
+  local app="$1"
+  local key="$2"
+  /usr/libexec/PlistBuddy -c "Print :$key" "$app/Contents/Info.plist" 2>/dev/null
+}
+
+require_meeting_assistant_app() {
+  local app="$1"
+  if [[ ! -d "$app" ]]; then
+    echo "error: app bundle does not exist: $app" >&2
+    exit 1
+  fi
+  if [[ ! -f "$app/Contents/Info.plist" ]]; then
+    echo "error: app bundle is missing Contents/Info.plist: $app" >&2
+    exit 1
+  fi
+  local bundle_id
+  local bundle_name
+  bundle_id="$(plist_value "$app" "CFBundleIdentifier" || true)"
+  bundle_name="$(plist_value "$app" "CFBundleName" || true)"
+  if [[ "$bundle_id" != "local.meeting-assistant.native" ]]; then
+    echo "error: expected CFBundleIdentifier local.meeting-assistant.native, got ${bundle_id:-missing}: $app" >&2
+    exit 1
+  fi
+  if [[ "$bundle_name" != "MeetingAssistantNative" ]]; then
+    echo "error: expected CFBundleName MeetingAssistantNative, got ${bundle_name:-missing}: $app" >&2
+    exit 1
+  fi
+  if [[ ! -x "$app/Contents/MacOS/MeetingAssistantNative" ]]; then
+    echo "error: app executable is missing or not executable: $app/Contents/MacOS/MeetingAssistantNative" >&2
+    exit 1
+  fi
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --source-app)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "error: --source-app requires a path" >&2
+        exit 2
+      fi
+      source_app="$2"
+      shift 2
+      ;;
+    --install-path)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "error: --install-path requires a path" >&2
+        exit 2
+      fi
+      install_path="$2"
+      shift 2
+      ;;
+    --install-dir)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "error: --install-dir requires a path" >&2
+        exit 2
+      fi
+      install_dir="$2"
+      install_path="$install_dir/MeetingAssistantNative.app"
+      shift 2
+      ;;
+    --no-build)
+      build_if_missing="0"
+      shift
+      ;;
+    --rebuild)
+      rebuild="1"
+      shift
+      ;;
+    --dry-run)
+      dry_run="1"
+      shift
+      ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "error: unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+source_app="$(resolve_path "$source_app")"
+install_path="$(resolve_path "$install_path")"
+install_dir="$(dirname "$install_path")"
+
+if [[ "${install_path##*.}" != "app" ]]; then
+  echo "error: --install-path must end with .app: $install_path" >&2
+  exit 2
+fi
+
+if is_truthy "$rebuild" || { [[ ! -d "$source_app" ]] && is_truthy "$build_if_missing"; }; then
+  "$root_dir/scripts/release-bundle-create.py" \
+    --distribution-mode local-direct \
+    --builder "${MEETING_ASSISTANT_RELEASE_BUILDER:-local-direct-app-install}" \
+    --source-repository "${MEETING_ASSISTANT_RELEASE_SOURCE_REPOSITORY:-local/meeting_assistant}"
+fi
+
+require_meeting_assistant_app "$source_app"
+
+if [[ -e "$install_path" ]]; then
+  require_meeting_assistant_app "$install_path"
+fi
+
+echo "MeetingAssistantNative local install:"
+echo "  source: $source_app"
+echo "  install: $install_path"
+echo "  distribution mode: local-direct"
+echo "  modifies tcc or system settings: false"
+echo "  requires developer id or notarization: false"
+
+if is_truthy "$dry_run"; then
+  echo "dry run: app not copied"
+  exit 0
+fi
+
+mkdir -p "$install_dir"
+tmp_app="$install_dir/.MeetingAssistantNative.app.install.$$"
+rm -rf "$tmp_app"
+trap 'rm -rf "$tmp_app"' EXIT INT TERM
+
+/usr/bin/ditto "$source_app" "$tmp_app"
+require_meeting_assistant_app "$tmp_app"
+/usr/bin/codesign --verify --deep --strict --verbose=2 "$tmp_app" >/dev/null
+
+if [[ -e "$install_path" ]]; then
+  rm -rf "$install_path"
+fi
+mv "$tmp_app" "$install_path"
+trap - EXIT INT TERM
+
+echo "local app installed: $install_path"
+echo "run with: MA_NATIVE_LOCAL_APP_PATH=\"$install_path\" ./platform/native-app/scripts/run-local-app.sh --no-build"

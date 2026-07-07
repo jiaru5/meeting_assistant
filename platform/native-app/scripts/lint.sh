@@ -20,6 +20,7 @@ required = [
     "MeetingAssistantNative.xcodeproj/xcshareddata/xcschemes/MeetingAssistantNative.xcscheme",
     "scripts/test-app-bundle.sh",
     "scripts/native-capture-smoke.sh",
+    "scripts/install-local-app.sh",
     "App/MeetingAssistantNativeApp.swift",
     "tests/ArchitectureTest.md",
     "Sources/MeetingAssistantNative/DependencyCheckContract.swift",

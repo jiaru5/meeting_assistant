@@ -43,6 +43,7 @@ test -f MeetingAssistantNative.xcodeproj/project.pbxproj
 test -f MeetingAssistantNative.xcodeproj/xcshareddata/xcschemes/MeetingAssistantNative.xcscheme
 test -x scripts/native-capture-smoke.sh
 test -x scripts/run-local-app.sh
+test -x scripts/install-local-app.sh
 test -x scripts/local-direct-smoke.sh
 test -x scripts/local-direct-recording-smoke.sh
 test -f App/MeetingAssistantNativeApp.swift
@@ -226,6 +227,21 @@ grep -q "local-direct" scripts/run-local-app.sh
 grep -q "unset MA_NATIVE_APP_XCTEST" scripts/run-local-app.sh
 if grep -q "Developer ID\\|notarytool\\|stapler\\|sigstore\\|cosign" scripts/run-local-app.sh; then
   echo "native-app architecture check failed: run-local-app.sh must not require Developer ID, notarization, stapling or Sigstore." >&2
+  exit 1
+fi
+grep -q "release-bundle-create.py" scripts/install-local-app.sh
+grep -q "local-direct" scripts/install-local-app.sh
+grep -q "MA_NATIVE_LOCAL_APP_INSTALL_PATH" scripts/install-local-app.sh
+grep -q "MA_NATIVE_LOCAL_APP_SOURCE_APP" scripts/install-local-app.sh
+grep -q "CFBundleIdentifier" scripts/install-local-app.sh
+grep -q "local.meeting-assistant.native" scripts/install-local-app.sh
+grep -q "CFBundleName" scripts/install-local-app.sh
+grep -q "MeetingAssistantNative" scripts/install-local-app.sh
+grep -q "modifies tcc or system settings: false" scripts/install-local-app.sh
+grep -q "requires developer id or notarization: false" scripts/install-local-app.sh
+grep -q "codesign --verify --deep --strict" scripts/install-local-app.sh
+if grep -q "x-apple.systempreferences\\|tccutil\\|security authorizationdb\\|notarytool\\|stapler\\|cosign" scripts/install-local-app.sh; then
+  echo "native-app architecture check failed: local app installer must not open System Settings, modify TCC, or require distribution gates." >&2
   exit 1
 fi
 grep -q "run-local-app.sh" scripts/local-direct-smoke.sh
