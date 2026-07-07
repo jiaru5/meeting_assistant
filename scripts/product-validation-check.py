@@ -88,6 +88,8 @@ def extract_blocker(evidence: str) -> str:
     match = re.search(r"阻塞缺口[:：](.*?)(?:。关闭条件|关闭条件[:：]|$)", evidence)
     if match:
         return " ".join(match.group(1).split())
+    if "当前证据" in evidence:
+        return "non-covered row has no explicit blocker; add 阻塞缺口/关闭条件 or mark the row covered"
     text = re.sub(r"`", "", evidence)
     text = " ".join(text.split())
     return text[:180] + ("..." if len(text) > 180 else "")

@@ -480,7 +480,7 @@ ADR 记录决策背景、取舍和历史原因。当前可执行规则必须维�
 影响：
 - `08-implementation-guidance.md` 和 `09-acceptance-criteria.md` 明确当前本机安装候选边界。
 - `docs/engineering/02-dev-commands.md`、`10-security-and-supply-chain.md`、`11-production-readiness.md` 和 `07-development-plan.md` 需要把 Developer ID/notary/Sigstore 从默认 `VS-MA-23` 前置条件移到显式 `developer-id` 分发模式。
-- 验证矩阵继续保持未完整 covered 的 `PV-MA-*` 为 `partial`；local-direct bundle 通过不能外推为商业分发 readiness。
+- 验证矩阵只能在 local-direct 功能链路、当前声明目标集合、Release bundle、供应链和顶层 release preflight 均有可复跑证据时推进 `PV-MA-*` 到 `covered`；covered 只代表当前本机直接安装候选，不外推为商业分发 readiness。
 
 备选方案：
 - 继续要求 Developer ID/notarization 作为 VS-MA-23 默认门槛：拒绝，因为与当前 MVP 范围和用户明确目标不一致。

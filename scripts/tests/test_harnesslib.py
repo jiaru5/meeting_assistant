@@ -705,7 +705,7 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
             self.assertIn("product validation local-functional passed", result.stdout)
             self.assertIn("Local functional scope is not release readiness", result.stdout)
-            self.assertIn("partial=", result.stdout)
+            self.assertIn("covered=", result.stdout)
 
     def test_product_validation_local_functional_rejects_stale_report(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

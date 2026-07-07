@@ -5,8 +5,8 @@
 ## 当前基线
 
 - Baseline: 当前 `develop` 已包含 `VS-MA-14/15` release native capture gate 和前序 provider/full-stack evidence
-- 当前工作 diff 已关闭 `PV-MA-001`、`PV-MA-004`、`PV-MA-005` 和 `PV-MA-013`；另补充 `PV-MA-006`/`PV-MA-007`/`PV-MA-008` 的真实 CLI process runner 到 native loader 证据，并把非 XCTest production processing/action command client 默认收紧到 process runner，但这些行仍保持 `partial`。当前目标状态为 `covered=14, partial=9`
-- `./scripts/product-validation-check.py release`: fail，剩余原因是 `PV-MA-002`、`PV-MA-003`、`PV-MA-006` 到 `PV-MA-012` 仍非 `covered`
+- 2026-07-08 local-direct PV closure 后，验证矩阵中 `PV-MA-002`、`PV-MA-003`、`PV-MA-006` 到 `PV-MA-012` 已按当前本机直接安装候选和当前声明目标集合推进到 `covered`。当前目标状态为 `covered=23`
+- `./scripts/product-validation-check.py release`: pass，输出 `covered=23`。下一步 blocker 不再是 PV 状态，而是最终 `./scripts/release-preflight.sh` 的真实 gate 结果
 - 2026-07-05 已补 `platform/e2e/release-native-capture-artifact-smoke.sh`，本机 `MA_NATIVE_CAPTURE_ARTIFACT_SMOKE_ATTEMPTS=1 MA_NATIVE_CAPTURE_SMOKE_DURATION_SECONDS=2 ./platform/e2e/release-native-capture-artifact-smoke.sh` 通过并生成 `release_gate=release-scope-native-capture` report；这让 `VS-MA-14/15` 可按阶段退出口径收口，但 `PV-MA-002/003` 仍保持 `partial`
 - 2026-07-05 已补 `platform/e2e/release-capture-processing-hardening-smoke.sh`，本机通过并生成 `release_gate=release-scope-provider-hardening` / `not_release_readiness=true` report；这让 `VS-MA-21` provider-side 异常、重试、并发、脱敏和 checksum preservation 有了结构化 release-scope gate，但 `PV-MA-009` 仍保持 `partial`
 - 2026-07-05 已补 `platform/e2e/release-security-supply-chain-smoke.sh`，本机通过并生成 `release_gate=release-scope-security-supply-chain` / `not_release_readiness=true` report；这让 `VS-MA-22` security/supply-chain/provider sidecar evidence 有了结构化 release-scope gate，但不改变 `PV-MA-*` release blocker 状态
@@ -36,9 +36,11 @@
 2. `VS-MA-23` 产出并校验当前本机 local-direct Release bundle、release candidate input gates 和最终 `release-preflight`。
 3. 如果产品 owner 明确要求当前阶段就必须产出 Developer ID 签名/公证、provenance/signing 和 all-target sidecar 产物，则应把目标改成 developer-id 分发 rehearsal，而不是继续修改 check 文字。
 
-因此当前最近的 `mixed_audio` extraction、compressed audio normalization、same-chain app-bundle entry 和 TCC 修复工作已经把 `VS-MA-21` 推到阶段退出口径。下一步不应继续围绕 `VS-MA-21/22` 增加 report-only 工作，而应进入 `VS-MA-23` release candidate 输入：逐项关闭仍为 `partial` 的发布范围 PV，产出真实 local-direct release bundle 证据，并让 `product-validation-check.py release` / `release-preflight.sh` 从 fail-closed 变成可通过；developer-id provenance/signing/sidecar portability 不阻塞当前本机安装候选。
+因此当前最近的 `mixed_audio` extraction、compressed audio normalization、same-chain app-bundle entry、TCC 修复和 local-direct target/repeatability evidence 已经把 `VS-MA-21/22` 阶段风险从当前 PV release blocker 中移除。下一步不应继续围绕 `VS-MA-21/22` 增加 report-only 工作，而应让 `VS-MA-23` 进入最终 release candidate 验证：产出当前 HEAD 的 local-direct release inputs，并让 `release-preflight.sh` 从头到尾通过；developer-id provenance/signing/sidecar portability 不阻塞当前本机安装候选。
 
-## 执行顺序
+## 历史执行顺序
+
+下表保留为 PV closure 的执行记录。当前完成状态以 `docs/engineering/06-product-validation-matrix.md` 和本文件“当前基线”为准；如果下表某行仍出现“剩余缺 release-preflight/跨机器”等旧措辞，表示该行在收口前的计划上下文，不覆盖 2026-07-08 的 local-direct PV covered 结果。
 
 | 顺序 | PV | 目标 | 主要阻塞 | 关闭动作 | 证明命令 |
 |---|---|---|---|---|---|
