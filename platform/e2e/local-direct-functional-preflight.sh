@@ -48,20 +48,27 @@ if is_truthy "$build_source"; then
     --report "$release_bundle_report"
 fi
 
+set +e
 MA_RELEASE_LOCAL_DIRECT_TARGET_ID="$target_id" \
 MA_RELEASE_LOCAL_DIRECT_TARGET_OS="$target_os" \
 MA_RELEASE_LOCAL_DIRECT_TARGET_ARCH="$target_arch" \
 MA_RELEASE_LOCAL_DIRECT_TARGET_SMOKE_REPORT="$target_smoke_report" \
 MA_RELEASE_LOCAL_DIRECT_TARGET_SMOKE_OUTPUT="$target_smoke_output" \
 ./platform/e2e/release-local-direct-target-smoke.sh "$@"
+target_smoke_exit=$?
+set -e
 
+set +e
 MA_RELEASE_LOCAL_DIRECT_TARGET_SMOKE_REPORTS="$target_smoke_report" \
 MA_RELEASE_LOCAL_DIRECT_EXPECTED_TARGETS="$target_id" \
 MA_RELEASE_LOCAL_DIRECT_REPEATABILITY_REPORT="$repeatability_report" \
 MA_RELEASE_LOCAL_DIRECT_BUILDER="${MA_LOCAL_DIRECT_FUNCTIONAL_BUILDER:-local-direct-functional-preflight}" \
 MA_RELEASE_LOCAL_DIRECT_SOURCE_REPOSITORY="${source_repository:-local/meeting_assistant}" \
 ./platform/e2e/release-local-direct-repeatability-report.sh
+repeatability_exit=$?
+set -e
 
+set +e
 python3 "$ROOT_DIR/platform/e2e/local_direct_functional_preflight_report.py" \
   --root "$ROOT_DIR" \
   --target-smoke-report "$target_smoke_report" \
@@ -69,5 +76,20 @@ python3 "$ROOT_DIR/platform/e2e/local_direct_functional_preflight_report.py" \
   --source-app "$source_app" \
   --release-bundle-report "$release_bundle_report" \
   --report "$report_path"
+report_exit=$?
+set -e
+
+if ((target_smoke_exit != 0)); then
+  echo "local-direct functional preflight failed: target smoke failed with exit code $target_smoke_exit; failure report: $report_path" >&2
+  exit "$target_smoke_exit"
+fi
+if ((repeatability_exit != 0)); then
+  echo "local-direct functional preflight failed: repeatability report failed with exit code $repeatability_exit; failure report: $report_path" >&2
+  exit "$repeatability_exit"
+fi
+if ((report_exit != 0)); then
+  echo "local-direct functional preflight failed: structured preflight report failed validation; failure report: $report_path" >&2
+  exit "$report_exit"
+fi
 
 echo "local-direct functional preflight passed."

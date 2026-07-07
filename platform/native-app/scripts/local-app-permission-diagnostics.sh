@@ -22,7 +22,8 @@ Usage: platform/native-app/scripts/local-app-permission-diagnostics.sh [options]
 
 Read the local app install report and the latest local-direct recording smoke
 report, then write a machine-readable diagnostic that identifies the exact
-installed app path and codesign CDHash that should be authorized by the user.
+installed app path and stable codesign requirement that should be authorized by
+the user.
 
 Options:
   --install-report PATH   Read this local app install report.
@@ -154,7 +155,13 @@ def load_candidate_report(path: Path) -> dict[str, Any]:
         return {}
 
 
-def same_app_identity(report: dict[str, Any], *, installed_path: str, installed_cdhash: str) -> bool:
+def same_app_identity(
+    report: dict[str, Any],
+    *,
+    installed_path: str,
+    installed_cdhash: str,
+    installed_requirement: str,
+) -> bool:
     app = report.get("app_identity")
     if not isinstance(app, dict):
         return False
@@ -165,6 +172,9 @@ def same_app_identity(report: dict[str, Any], *, installed_path: str, installed_
     if not isinstance(codesign, dict):
         codesign = {}
     cdhash = str(codesign.get("CDHash", "")).strip()
+    requirement = str(codesign.get("DesignatedRequirement", "")).strip()
+    if installed_requirement and requirement:
+        return requirement == installed_requirement
     return not installed_cdhash or not cdhash or cdhash == installed_cdhash
 
 
@@ -175,7 +185,12 @@ def report_sort_key(path: Path) -> tuple[float, str]:
         return (0.0, str(path))
 
 
-def matching_reports(*, installed_path: str, installed_cdhash: str) -> tuple[Path | None, Path | None]:
+def matching_reports(
+    *,
+    installed_path: str,
+    installed_cdhash: str,
+    installed_requirement: str,
+) -> tuple[Path | None, Path | None]:
     roots = [Path(item).expanduser() for item in recording_report_search_roots.split(os.pathsep) if item]
     candidates: list[Path] = []
     for root in roots:
@@ -193,7 +208,12 @@ def matching_reports(*, installed_path: str, installed_cdhash: str) -> tuple[Pat
         report = load_candidate_report(path)
         if not report:
             continue
-        if not same_app_identity(report, installed_path=installed_path, installed_cdhash=installed_cdhash):
+        if not same_app_identity(
+            report,
+            installed_path=installed_path,
+            installed_cdhash=installed_cdhash,
+            installed_requirement=installed_requirement,
+        ):
             continue
         runner = report.get("runner_configuration")
         if not isinstance(runner, dict):
@@ -224,11 +244,15 @@ if not installed_path:
     raise SystemExit(f"install report is missing installed_app.path: {install_report_path}")
 
 local_tcc_identity_strategy = str(install_report.get("local_tcc_identity_strategy", "")).strip()
+local_signing = install_report.get("local_signing")
+if not isinstance(local_signing, dict):
+    local_signing = {}
 
 codesign = installed_app.get("codesign")
 if not isinstance(codesign, dict):
     codesign = {}
 installed_cdhash = str(codesign.get("CDHash", "")).strip()
+installed_requirement = str(codesign.get("DesignatedRequirement", "")).strip()
 
 recording_app = recording_report.get("app_identity")
 if not isinstance(recording_app, dict):
@@ -238,20 +262,35 @@ recording_codesign = recording_app.get("codesign")
 if not isinstance(recording_codesign, dict):
     recording_codesign = {}
 recording_cdhash = str(recording_codesign.get("CDHash", "")).strip()
+recording_requirement = str(recording_codesign.get("DesignatedRequirement", "")).strip()
 
 permission_details = recording_report.get("permission_failure_details")
 if not isinstance(permission_details, list):
     permission_details = []
 permission_text = "\n".join(str(item) for item in permission_details)
-screen_recording_denied = "Screen Recording permission is denied" in permission_text
+screen_recording_denied = (
+    "Screen Recording permission is denied" in permission_text
+    or recording_report.get("blocker_type") == "permission_denied"
+)
 same_app_as_recording_smoke = (
     bool(recording_path)
     and recording_path == installed_path
-    and (not installed_cdhash or not recording_cdhash or recording_cdhash == installed_cdhash)
+    and (
+        (
+            bool(installed_requirement)
+            and bool(recording_requirement)
+            and recording_requirement == installed_requirement
+        )
+        or (
+            (not installed_requirement or not recording_requirement)
+            and (not installed_cdhash or not recording_cdhash or recording_cdhash == installed_cdhash)
+        )
+    )
 )
 latest_direct_success_report, latest_open_permission_denied_report = matching_reports(
     installed_path=installed_path,
     installed_cdhash=installed_cdhash,
+    installed_requirement=installed_requirement,
 )
 launchservices_tcc_attribution_suspected = bool(
     latest_direct_success_report and latest_open_permission_denied_report
@@ -265,6 +304,14 @@ recommended_target = {
     "CDHash": installed_cdhash,
     "Signature": codesign.get("Signature", ""),
     "TeamIdentifier": codesign.get("TeamIdentifier", ""),
+    "Authority": codesign.get("Authority", ""),
+    "DesignatedRequirement": installed_requirement,
+    "local_signing": {
+        "mode": local_signing.get("mode", ""),
+        "identity_name": local_signing.get("identity_name", ""),
+        "identity_hash": local_signing.get("identity_hash", ""),
+        "stable_tcc_identity": local_signing.get("stable_tcc_identity", False),
+    },
 }
 
 report = {
@@ -294,14 +341,15 @@ report = {
     ),
     "permission_failure_details": permission_details,
     "local_tcc_identity_strategy": local_tcc_identity_strategy,
+    "stable_tcc_identity": bool(local_signing.get("stable_tcc_identity", False)),
     "user_action_required": (
         screen_recording_denied
         or not same_app_as_recording_smoke
         or launchservices_tcc_attribution_suspected
     ),
     "user_action_summary": (
-        "Grant Screen Recording / Screen & System Audio Recording to the recommended_tcc_target.path, "
-        "then rerun recommended_recording_smoke_command."
+        "Grant Screen Recording / Screen & System Audio Recording to the recommended_tcc_target.path "
+        "for the reported DesignatedRequirement, then rerun recommended_recording_smoke_command."
     ),
     "recommended_visible_smoke_command": (
         f'MA_NATIVE_LOCAL_APP_PATH="{installed_path}" '
@@ -332,6 +380,8 @@ print("local app permission diagnostics:")
 print(f"  target: {installed_path}")
 print(f"  display name: {installed_app.get('CFBundleDisplayName', '') or installed_app.get('CFBundleName', '') or 'unknown'}")
 print(f"  cdhash: {installed_cdhash or 'unknown'}")
+print(f"  designated requirement: {installed_requirement or 'unknown'}")
+print(f"  stable tcc identity: {str(bool(local_signing.get('stable_tcc_identity', False))).lower()}")
 print(f"  screen recording denied: {str(screen_recording_denied).lower()}")
 print(f"  same app as recording smoke: {str(same_app_as_recording_smoke).lower()}")
 print(f"  launchservices/tcc attribution suspected: {str(launchservices_tcc_attribution_suspected).lower()}")

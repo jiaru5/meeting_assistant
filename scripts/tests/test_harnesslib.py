@@ -543,6 +543,8 @@ class HarnessValidationTests(unittest.TestCase):
         subject_commit: str | None = None,
         target_scope: str = "local-machine-only",
         not_release_readiness: bool = True,
+        passed: bool = True,
+        findings: list[str] | None = None,
     ) -> Path:
         report_path = fixture / "local-functional-preflight.json"
         subject_commit = subject_commit or subprocess.check_output(
@@ -558,7 +560,7 @@ class HarnessValidationTests(unittest.TestCase):
                     "target_scope": target_scope,
                     "subject_commit": subject_commit,
                     "target_id": "macos-arm64-local",
-                    "passed": True,
+                    "passed": passed,
                     "not_release_readiness": not_release_readiness,
                     "release_blockers": [
                         "local-direct functional preflight does not run product-validation release or release-preflight"
@@ -607,6 +609,7 @@ class HarnessValidationTests(unittest.TestCase):
                             "Delete complete.",
                         ],
                     },
+                    "findings": findings or [],
                 }
             ),
             encoding="utf-8",
@@ -748,6 +751,41 @@ class HarnessValidationTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("installed app unsigned executable content matches the current source app", result.stderr + result.stdout)
+
+    def test_product_validation_local_functional_reports_preflight_findings_without_schema_noise(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            report = self.write_local_functional_preflight_report(
+                fixture,
+                passed=False,
+                findings=[
+                    "local-direct-same-chain-smoke exited 1",
+                    "release local-direct target smoke report must set passed=True",
+                ],
+            )
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            payload.pop("local_direct_app_source")
+            payload.pop("functional_checks")
+            report.write_text(json.dumps(payload), encoding="utf-8")
+            env = os.environ.copy()
+            env["MA_LOCAL_DIRECT_FUNCTIONAL_PREFLIGHT_REPORT"] = str(report)
+
+            result = subprocess.run(
+                [sys.executable, str(fixture / "scripts/product-validation-check.py"), "local-functional"],
+                cwd=fixture,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("local-functional report is not passing", output)
+            self.assertIn("local-functional finding: local-direct-same-chain-smoke exited 1", output)
+            self.assertNotIn("must include local_direct_app_source", output)
+            self.assertNotIn("must include functional_checks", output)
 
     def test_product_validation_local_functional_rejects_release_scope_report(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1200,12 +1238,19 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("MA_NATIVE_LOCAL_APP_INSTALL_DISPLAY_NAME", install_script)
         self.assertIn("MA_NATIVE_LOCAL_APP_SOURCE_APP", install_script)
         self.assertIn("MA_NATIVE_LOCAL_APP_INSTALL_REPORT", install_script)
+        self.assertIn("MA_NATIVE_LOCAL_APP_SIGNING_MODE", install_script)
+        self.assertIn("MA_NATIVE_LOCAL_APP_SIGNING_KEYCHAIN", install_script)
+        self.assertIn("MA_NATIVE_LOCAL_APP_SIGNING_PASSWORD_FILE", install_script)
+        self.assertIn("Meeting Assistant Local Code Signing", install_script)
         self.assertIn("local-app-install-report.json", install_script)
         self.assertIn('"release_gate": "local-direct-app-install"', install_script)
         self.assertIn('"recommended_direct_recording_smoke_command"', install_script)
         self.assertIn('"direct_launch_diagnostic"', install_script)
         self.assertIn('"installed_app"', install_script)
         self.assertIn('"source_app_identity"', install_script)
+        self.assertIn('"local_signing"', install_script)
+        self.assertIn('"stable_tcc_identity"', install_script)
+        self.assertIn("certificate root", install_script)
         self.assertIn("local_tcc_identity_strategy", install_script)
         self.assertIn("~/Applications/MeetingAssistantNativeLocal.app", install_script)
         self.assertIn("CFBundleIdentifier", install_script)
@@ -1214,7 +1259,10 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("CFBundleName", install_script)
         self.assertIn("MeetingAssistantNativeLocal", install_script)
         self.assertIn("Meeting Assistant Native Local", install_script)
-        self.assertIn("codesign --force --deep --sign -", install_script)
+        self.assertIn("codesign --force --deep --keychain", install_script)
+        self.assertIn("security create-keychain", install_script)
+        self.assertIn("security add-trusted-cert", install_script)
+        self.assertIn("MA_NATIVE_LOCAL_APP_SIGNING_MODE=ad-hoc", install_script)
         self.assertIn("codesign --verify --deep --strict", install_script)
         self.assertIn("modifies tcc or system settings: false", install_script)
         self.assertIn("requires developer id or notarization: false", install_script)
@@ -1654,6 +1702,9 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("release-local-direct-target-smoke.sh", wrapper)
         self.assertIn("release-local-direct-repeatability-report.sh", wrapper)
         self.assertIn("release-bundle-create.py", wrapper)
+        self.assertIn("target_smoke_exit", wrapper)
+        self.assertIn("repeatability_exit", wrapper)
+        self.assertIn("failure report", wrapper)
         self.assertIn("--source-app", wrapper)
         self.assertIn("--release-bundle-report", wrapper)
         self.assertIn("local_direct_functional_preflight_report.py", wrapper)

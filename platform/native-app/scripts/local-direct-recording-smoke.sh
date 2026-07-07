@@ -476,8 +476,23 @@ def app_identity(config: dict[str, str]) -> dict[str, object]:
             if "=" in line:
                 key, value = line.split("=", 1)
                 key = key.strip()
-                if key in {"Identifier", "Format", "Signature", "TeamIdentifier", "CDHash"}:
+                if key in {"Identifier", "Format", "Signature", "TeamIdentifier", "CDHash", "Authority"}:
                     fields[key] = value.strip()
+            elif line.startswith("Signature size="):
+                fields.setdefault("Signature", "signed")
+                fields["SignatureSize"] = line.split("=", 1)[1].strip()
+        requirement = subprocess.run(
+            ["/usr/bin/codesign", "-dr", "-", app_path],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        requirement_output = requirement.stdout + requirement.stderr
+        for line in requirement_output.splitlines():
+            if line.startswith("designated => "):
+                fields["DesignatedRequirement"] = line.removeprefix("designated => ").strip()
+                break
         identity["codesign"] = fields
     return identity
 
@@ -505,12 +520,21 @@ def failure_summary(kind: str, detail: str) -> str:
     reason = "; ".join(permission_details) or "recording permission was denied or unknown"
     app_path = str(identity.get("path") or config.get("app") or "unknown app")
     cdhash = "unknown"
+    designated_requirement = ""
+    authority = ""
     if isinstance(codesign, dict):
         cdhash = str(codesign.get("CDHash") or "unknown")
+        designated_requirement = str(codesign.get("DesignatedRequirement") or "").strip()
+        authority = str(codesign.get("Authority") or "").strip()
+    identity_hint = f"CDHash={cdhash}"
+    if designated_requirement:
+        identity_hint = f"designated_requirement={designated_requirement}; current CDHash={cdhash}"
+    if authority:
+        identity_hint = f"{identity_hint}; authority={authority}"
     launch_mode = config.get("launch_mode", "unknown")
     return (
         f"{reason}; launch_mode={launch_mode}; authorize exact app {app_path} "
-        f"(CDHash={cdhash}) in Screen Recording / Screen & System Audio Recording. "
+        f"({identity_hint}) in Screen Recording / Screen & System Audio Recording. "
         "Full UI tree is written to the report ui_tree path."
     )
 
@@ -551,7 +575,7 @@ def write_report(passed: bool) -> None:
         "modifies_tcc_or_system_settings": False,
         "may_request_macos_permissions": True,
         "tcc_remediation": "Grant Screen & System Audio Recording and Microphone permissions to the exact app_identity.path, then relaunch and retry.",
-        "tcc_identity_mismatch_hint": "If System Settings shows MeetingAssistantNative enabled but this report still says permission_denied, remove the stale entry and add the exact app_identity.path again.",
+        "tcc_identity_mismatch_hint": "If System Settings shows MeetingAssistantNative enabled but this report still says permission_denied, verify the exact app_identity.path and stable codesign DesignatedRequirement; remove stale ad-hoc/path entries and add the exact installed app again.",
         "direct_launch_diagnostic_hint": (
             "If LaunchServices open is denied but the exact app appears authorized, rerun with "
             "MA_NATIVE_LOCAL_APP_LAUNCH_MODE=direct to distinguish local capture functionality "

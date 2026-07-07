@@ -165,8 +165,6 @@ def validate_local_functional_report(root: Path, report_path: Path | None) -> li
         failures.append("local-functional report must set release_gate='local-direct-functional-preflight'")
     if report.get("target_scope") != "local-machine-only":
         failures.append("local-functional report must set target_scope='local-machine-only'")
-    if report.get("passed") is not True:
-        failures.append("local-functional report must set passed=True")
     if report.get("not_release_readiness") is not True:
         failures.append("local-functional report must keep not_release_readiness=True")
 
@@ -176,6 +174,18 @@ def validate_local_functional_report(root: Path, report_path: Path | None) -> li
         for item in release_blockers
     ):
         failures.append("local-functional report must state that it does not run product-validation release or release-preflight")
+
+    if report.get("passed") is not True:
+        findings = report.get("findings")
+        if isinstance(findings, list) and any(isinstance(item, str) and item for item in findings):
+            failures.append("local-functional report is not passing; inspect the current preflight findings")
+            failures.extend(
+                f"local-functional finding: {item}"
+                for item in findings
+                if isinstance(item, str) and item
+            )
+            return failures
+        failures.append("local-functional report must set passed=True")
 
     app_identity = report.get("local_direct_app")
     if not isinstance(app_identity, dict):
