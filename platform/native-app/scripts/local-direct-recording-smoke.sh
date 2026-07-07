@@ -255,6 +255,8 @@ def classify_snapshot(text: str) -> Tuple[Optional[str], Optional[str]]:
         return "permission_denied", "recording permission was denied or unknown"
     if "capture_failed" in lowered or "recording failed." in text:
         return "capture_failed", "recording command failed"
+    if "path_conflict" in lowered or "recording session already exists" in lowered:
+        return "path_conflict", "recording session path already exists"
     if "dependency_missing" in lowered:
         return "dependency_missing", "required local dependency is missing"
     return None, None
@@ -387,6 +389,8 @@ def permission_failure_details(text: str) -> list[str]:
 
 def write_report(passed: bool) -> None:
     config = runner_configuration()
+    launch_mode = config.get("launch_mode", "")
+    permission_denied = blocker_type == "permission_denied"
     report = {
         "report_schema": 1,
         "release_gate": "local-direct-recording-smoke",
@@ -409,12 +413,25 @@ def write_report(passed: bool) -> None:
         "recording_duration_seconds": recording_seconds,
         "audio_playback_requested": bool(audio_path),
         "workspace_files": workspace_files()[:80],
+        "workspace_precondition": "Use an empty smoke workspace or leave MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_WORKSPACE unset for a temporary workspace.",
         "starts_recording": True,
         "opens_system_settings": False,
         "modifies_tcc_or_system_settings": False,
         "may_request_macos_permissions": True,
         "tcc_remediation": "Grant Screen & System Audio Recording and Microphone permissions to the exact app_identity.path, then relaunch and retry.",
         "tcc_identity_mismatch_hint": "If System Settings shows MeetingAssistantNative enabled but this report still says permission_denied, remove the stale entry and add the exact app_identity.path again.",
+        "direct_launch_diagnostic_hint": (
+            "If LaunchServices open is denied but the exact app appears authorized, rerun with "
+            "MA_NATIVE_LOCAL_APP_LAUNCH_MODE=direct to distinguish local capture functionality "
+            "from LaunchServices/TCC attribution."
+            if permission_denied and launch_mode != "direct"
+            else ""
+        ),
+        "launch_attribution_boundary": (
+            "direct launch is executable diagnostic evidence only; the default local user path remains LaunchServices open."
+            if launch_mode == "direct"
+            else "LaunchServices open is the default local user path."
+        ),
         "requires_developer_id_or_notarization": False,
         "not_release_readiness": True,
     }

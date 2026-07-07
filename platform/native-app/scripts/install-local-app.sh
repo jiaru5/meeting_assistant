@@ -267,6 +267,15 @@ report = {
         f'MA_NATIVE_LOCAL_APP_PATH="{install_app}" '
         "./platform/native-app/scripts/local-direct-recording-smoke.sh --no-build"
     ),
+    "recommended_direct_recording_smoke_command": (
+        f'MA_NATIVE_LOCAL_APP_PATH="{install_app}" '
+        "MA_NATIVE_LOCAL_APP_LAUNCH_MODE=direct "
+        "./platform/native-app/scripts/local-direct-recording-smoke.sh --no-build"
+    ),
+    "direct_launch_diagnostic": (
+        "Use only to distinguish local capture functionality from LaunchServices/TCC attribution; "
+        "the default local app path remains LaunchServices open."
+    ),
 }
 report_file.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
@@ -274,3 +283,4 @@ PY
 echo "local app installed: $install_path"
 echo "report: $report_file"
 echo "run with: MA_NATIVE_LOCAL_APP_PATH=\"$install_path\" ./platform/native-app/scripts/run-local-app.sh --no-build"
+echo "direct recording diagnostic: MA_NATIVE_LOCAL_APP_PATH=\"$install_path\" MA_NATIVE_LOCAL_APP_LAUNCH_MODE=direct ./platform/native-app/scripts/local-direct-recording-smoke.sh --no-build"

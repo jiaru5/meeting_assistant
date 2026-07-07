@@ -172,6 +172,15 @@ report = {
         f'MA_NATIVE_LOCAL_APP_PATH="{installed_path}" '
         "./platform/native-app/scripts/local-direct-recording-smoke.sh --no-build"
     ),
+    "recommended_direct_recording_smoke_command": (
+        f'MA_NATIVE_LOCAL_APP_PATH="{installed_path}" '
+        "MA_NATIVE_LOCAL_APP_LAUNCH_MODE=direct "
+        "./platform/native-app/scripts/local-direct-recording-smoke.sh --no-build"
+    ),
+    "direct_launch_diagnostic": (
+        "Use only to separate local capture functionality from LaunchServices/TCC attribution; "
+        "the default local user path remains LaunchServices open."
+    ),
     "opens_system_settings": False,
     "modifies_tcc_or_system_settings": False,
     "requires_developer_id_or_notarization": False,
@@ -185,5 +194,6 @@ print(f"  target: {installed_path}")
 print(f"  cdhash: {installed_cdhash or 'unknown'}")
 print(f"  screen recording denied: {str(screen_recording_denied).lower()}")
 print(f"  same app as recording smoke: {str(same_app_as_recording_smoke).lower()}")
+print("  direct diagnostic: MA_NATIVE_LOCAL_APP_LAUNCH_MODE=direct ./platform/native-app/scripts/local-direct-recording-smoke.sh --no-build")
 print(f"  report: {report_file}")
 PY
