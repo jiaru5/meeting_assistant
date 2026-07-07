@@ -44,6 +44,7 @@ test -f MeetingAssistantNative.xcodeproj/xcshareddata/xcschemes/MeetingAssistant
 test -x scripts/native-capture-smoke.sh
 test -x scripts/run-local-app.sh
 test -x scripts/local-direct-smoke.sh
+test -x scripts/local-direct-recording-smoke.sh
 test -f App/MeetingAssistantNativeApp.swift
 test -f Sources/MeetingAssistantNative/DependencyCheckContract.swift
 test -f Sources/MeetingAssistantNative/PermissionDependencyStatusViewModel.swift
@@ -217,6 +218,8 @@ grep -q "MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME" scripts/run-local-app.sh
 grep -q "MEETING_ASSISTANT_TRANSCRIPTION_MODEL" scripts/run-local-app.sh
 grep -q "MA_NATIVE_PROCESSING_RUNTIME" scripts/run-local-app.sh
 grep -q "MA_NATIVE_PROCESSING_LANGUAGE" scripts/run-local-app.sh
+grep -q 'MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO="${MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO:-true}"' scripts/run-local-app.sh
+grep -q 'MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO="${MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO:-false}"' scripts/run-local-app.sh
 grep -q "MA_NATIVE_LOCAL_APP_REQUIRE_REAL_RUNTIME" scripts/run-local-app.sh
 grep -q "MA_NATIVE_LOCAL_APP_DRY_RUN" scripts/run-local-app.sh
 grep -q "local-direct" scripts/run-local-app.sh
@@ -243,6 +246,24 @@ grep -q "Recording readiness is ready." scripts/local-direct-smoke.sh
 grep -q "Processing is ready to run." scripts/local-direct-smoke.sh
 if grep -q "CGRequestScreenCaptureAccess\\|AVCaptureDevice\\.requestAccess\\|x-apple.systempreferences\\|tccutil\\|security authorizationdb\\|notarytool\\|stapler\\|cosign" scripts/local-direct-smoke.sh; then
   echo "native-app architecture check failed: local-direct smoke must not request permissions, open System Settings, or require distribution gates." >&2
+  exit 1
+fi
+grep -q "run-local-app.sh" scripts/local-direct-recording-smoke.sh
+grep -q "local-direct-recording-smoke" scripts/local-direct-recording-smoke.sh
+grep -q "AXIdentifier" scripts/local-direct-recording-smoke.sh
+grep -q "AXPress" scripts/local-direct-recording-smoke.sh
+grep -q "ma.recording.startButton" scripts/local-direct-recording-smoke.sh
+grep -q "ma.recording.stopButton" scripts/local-direct-recording-smoke.sh
+grep -q "Recording in progress." scripts/local-direct-recording-smoke.sh
+grep -q "Recording saved." scripts/local-direct-recording-smoke.sh
+grep -q "recording_request" scripts/local-direct-recording-smoke.sh
+grep -q "permission_failure_details" scripts/local-direct-recording-smoke.sh
+grep -q "tcc_identity_mismatch_hint" scripts/local-direct-recording-smoke.sh
+grep -q '"starts_recording": True' scripts/local-direct-recording-smoke.sh
+grep -q '"may_request_macos_permissions": True' scripts/local-direct-recording-smoke.sh
+grep -q '"not_release_readiness": True' scripts/local-direct-recording-smoke.sh
+if grep -q "x-apple.systempreferences\\|tccutil\\|security authorizationdb\\|notarytool\\|stapler\\|cosign" scripts/local-direct-recording-smoke.sh; then
+  echo "native-app architecture check failed: local-direct recording smoke must not open System Settings, modify TCC, or require distribution gates." >&2
   exit 1
 fi
 grep -q "Production/default app runtime may pass an explicitly configured" tests/ArchitectureTest.md
