@@ -87,6 +87,21 @@ func focusedOrMainWindows(for app: AXUIElement) -> [AXUIElement] {
         .filter(isWindowElement)
 }
 
+func elementPID(_ element: AXUIElement) -> pid_t? {
+    var value = pid_t(0)
+    guard AXUIElementGetPid(element, &value) == .success else {
+        return nil
+    }
+    return value
+}
+
+func parent(of element: AXUIElement) -> AXUIElement? {
+    guard let value = attribute(element, kAXParentAttribute) else {
+        return nil
+    }
+    return (value as! AXUIElement)
+}
+
 func raiseWindows(_ windows: [AXUIElement]) {
     for window in windows {
         _ = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
@@ -102,6 +117,52 @@ func setStringValue(_ value: String, on element: AXUIElement) -> AXError {
     return AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, value as NSString)
 }
 
+func windowCenterElement(for pid: pid_t, app: AXUIElement, timeout: TimeInterval) -> AXUIElement? {
+    guard let visibleWindow = try? visibleWindow(for: pid, timeout: timeout),
+          let bounds = visibleWindow["bounds"] as? [String: Any],
+          let x = numberValue(bounds["x"]),
+          let y = numberValue(bounds["y"]),
+          let width = numberValue(bounds["width"]),
+          let height = numberValue(bounds["height"]) else {
+        return nil
+    }
+
+    let systemWide = AXUIElementCreateSystemWide()
+    var hitElement: AXUIElement?
+    let error = AXUIElementCopyElementAtPosition(
+        systemWide,
+        Float(x + width / 2),
+        Float(y + height / 2),
+        &hitElement
+    )
+    guard error == .success,
+          let hitElement,
+          elementPID(hitElement) == pid else {
+        return nil
+    }
+
+    var current = hitElement
+    var bestCandidate = hitElement
+    var visited: Set<CFHashCode> = []
+    while !visited.contains(CFHash(current)) {
+        visited.insert(CFHash(current))
+        if isWindowElement(current) {
+            return current
+        }
+        if !CFEqual(current, app) {
+            bestCandidate = current
+        }
+        guard let parent = parent(of: current) else {
+            break
+        }
+        if CFEqual(parent, app) {
+            break
+        }
+        current = parent
+    }
+    return bestCandidate
+}
+
 func windows(for app: AXUIElement, pid: pid_t, timeout: TimeInterval) throws -> [AXUIElement] {
     activateApp(pid: pid)
     let deadline = Date().addingTimeInterval(timeout)
@@ -115,13 +176,24 @@ func windows(for app: AXUIElement, pid: pid_t, timeout: TimeInterval) throws -> 
                 raiseWindows(windowCandidates)
                 return windowCandidates
             }
+            if (try? visibleWindow(for: pid, timeout: 0.25)) != nil {
+                if let centerElement = windowCenterElement(for: pid, app: app, timeout: 0.25) {
+                    return [centerElement]
+                }
+                return rawCandidates
+            }
         }
         let fallbackWindows = focusedOrMainWindows(for: app)
         if !fallbackWindows.isEmpty {
             raiseWindows(fallbackWindows)
             return fallbackWindows
         }
-        _ = try? visibleWindow(for: pid, timeout: 0.25)
+        if (try? visibleWindow(for: pid, timeout: 0.25)) != nil {
+            if let centerElement = windowCenterElement(for: pid, app: app, timeout: 0.25) {
+                return [centerElement]
+            }
+            return [app]
+        }
         Thread.sleep(forTimeInterval: 0.25)
     } while Date() < deadline
     throw AXSmokeError.noWindows(pid)

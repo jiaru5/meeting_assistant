@@ -107,6 +107,13 @@ private final class MeetingAssistantNativeMainWindow {
         window.title = "Meeting Assistant Native"
         window.contentViewController = hostingController
         window.isReleasedWhenClosed = false
+        window.setAccessibilityElement(true)
+        window.setAccessibilityRole(.window)
+        window.setAccessibilitySubrole(.standardWindow)
+        window.setAccessibilityTitle("Meeting Assistant Native")
+        hostingController.view.setAccessibilityElement(true)
+        hostingController.view.setAccessibilityRole(.group)
+        hostingController.view.setAccessibilityLabel("Meeting Assistant")
         window.setFrameAutosaveName("meeting-assistant-main")
         window.center()
 
@@ -206,6 +213,64 @@ private struct NativeControlPlaneRootView: View {
             captureMicrophoneAudio: captureMicrophoneAudio
         )
         .background {
+            NativeLocalAppKeyboardShortcutView(
+                startRecording: {
+                    guard recordingViewModel.canStart else {
+                        return
+                    }
+                    Task {
+                        await recordingViewModel.start()
+                    }
+                },
+                stopRecording: {
+                    guard recordingViewModel.canStop else {
+                        return
+                    }
+                    Task {
+                        await recordingViewModel.stop()
+                    }
+                },
+                startProcessing: {
+                    guard processingViewModel.canStart else {
+                        return
+                    }
+                    Task {
+                        await processingViewModel.start()
+                    }
+                },
+                copyTranscript: {
+                    guard transcriptActionViewModel.state.canCopy else {
+                        return
+                    }
+                    Task {
+                        await transcriptActionViewModel.copyTranscript()
+                    }
+                },
+                exportTranscript: {
+                    guard transcriptActionViewModel.state.canExport else {
+                        return
+                    }
+                    Task {
+                        await transcriptActionViewModel.exportTranscript()
+                    }
+                },
+                requestDelete: {
+                    guard transcriptActionViewModel.state.canRequestDelete else {
+                        return
+                    }
+                    transcriptActionViewModel.requestDeleteConfirmation()
+                },
+                confirmDelete: {
+                    guard transcriptActionViewModel.state.canConfirmDelete else {
+                        return
+                    }
+                    Task {
+                        await transcriptActionViewModel.confirmDelete()
+                    }
+                }
+            )
+        }
+        .background {
             smokeStateReportView
         }
     }
@@ -224,6 +289,116 @@ private struct NativeControlPlaneRootView: View {
             )
         } else {
             EmptyView()
+        }
+    }
+}
+
+private struct NativeLocalAppKeyboardShortcutView: NSViewRepresentable {
+    let startRecording: () -> Void
+    let stopRecording: () -> Void
+    let startProcessing: () -> Void
+    let copyTranscript: () -> Void
+    let exportTranscript: () -> Void
+    let requestDelete: () -> Void
+    let confirmDelete: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            startRecording: startRecording,
+            stopRecording: stopRecording,
+            startProcessing: startProcessing,
+            copyTranscript: copyTranscript,
+            exportTranscript: exportTranscript,
+            requestDelete: requestDelete,
+            confirmDelete: confirmDelete
+        )
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        context.coordinator.install()
+        return NSView(frame: .zero)
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.startRecording = startRecording
+        context.coordinator.stopRecording = stopRecording
+        context.coordinator.startProcessing = startProcessing
+        context.coordinator.copyTranscript = copyTranscript
+        context.coordinator.exportTranscript = exportTranscript
+        context.coordinator.requestDelete = requestDelete
+        context.coordinator.confirmDelete = confirmDelete
+    }
+
+    final class Coordinator {
+        var startRecording: () -> Void
+        var stopRecording: () -> Void
+        var startProcessing: () -> Void
+        var copyTranscript: () -> Void
+        var exportTranscript: () -> Void
+        var requestDelete: () -> Void
+        var confirmDelete: () -> Void
+        private var monitor: Any?
+
+        init(
+            startRecording: @escaping () -> Void,
+            stopRecording: @escaping () -> Void,
+            startProcessing: @escaping () -> Void,
+            copyTranscript: @escaping () -> Void,
+            exportTranscript: @escaping () -> Void,
+            requestDelete: @escaping () -> Void,
+            confirmDelete: @escaping () -> Void
+        ) {
+            self.startRecording = startRecording
+            self.stopRecording = stopRecording
+            self.startProcessing = startProcessing
+            self.copyTranscript = copyTranscript
+            self.exportTranscript = exportTranscript
+            self.requestDelete = requestDelete
+            self.confirmDelete = confirmDelete
+        }
+
+        deinit {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+            }
+        }
+
+        func install() {
+            guard monitor == nil else {
+                return
+            }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                self?.handle(event) ?? event
+            }
+        }
+
+        private func handle(_ event: NSEvent) -> NSEvent? {
+            if event.keyCode == 36 || event.keyCode == 76 {
+                confirmDelete()
+                return nil
+            }
+
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard flags.contains(.command), flags.contains(.option) else {
+                return event
+            }
+            switch event.charactersIgnoringModifiers?.lowercased() {
+            case "r":
+                startRecording()
+            case "s":
+                stopRecording()
+            case "p":
+                startProcessing()
+            case "c":
+                copyTranscript()
+            case "e":
+                exportTranscript()
+            case "d":
+                requestDelete()
+            default:
+                return event
+            }
+            return nil
         }
     }
 }
@@ -370,6 +545,11 @@ private struct NativeLocalAppSmokeStateReporter {
             "recording": [
                 "phase": recordingState.phase.rawValue,
                 "status_text": recordingState.statusText,
+                "session_id": recordingState.sessionID ?? "",
+                "error_code": recordingState.errorCode?.rawValue ?? "",
+                "error_message": recordingState.errorMessage ?? "",
+                "warnings": recordingState.warnings,
+                "artifacts": recordingState.artifacts.map(recordingArtifactPayload),
                 "can_start": recordingViewModel.canStart,
                 "can_stop": recordingViewModel.canStop,
                 "start_button_identifier": RecordingControlAccessibilityID.startButton,
@@ -455,6 +635,17 @@ private struct NativeLocalAppSmokeStateReporter {
             "required": item.required,
             "is_passing": item.isPassing,
             "message": item.message,
+        ]
+    }
+
+    private func recordingArtifactPayload(_ item: RecordingCommandArtifact) -> [String: Any] {
+        [
+            "artifact_id": item.id,
+            "artifact_type": item.artifactType,
+            "capture_status": item.captureStatus,
+            "relative_path": item.path ?? "",
+            "checksum": item.checksum ?? "",
+            "degradation_reason": item.degradationReason ?? "",
         ]
     }
 }

@@ -11,6 +11,7 @@ audio_grace_seconds="${MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_AUDIO_GRACE_SECONDS:-
 report_dir="${MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_REPORT_DIR:-$component_dir/build/local-direct-recording-smoke}"
 report_file="$report_dir/local-direct-recording-smoke-report.json"
 snapshot_file="$report_dir/local-direct-recording-ui-tree.txt"
+app_state_report_file="$report_dir/local-direct-recording-app-state-report.json"
 runner_log="$report_dir/run-local-app.log"
 audio_path="${MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_AUDIO:-${MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO:-}}"
 workspace_dir="${MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_WORKSPACE:-}"
@@ -86,6 +87,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+MA_NATIVE_LOCAL_APP_SMOKE_STATE_REPORT="$app_state_report_file" \
 "$component_dir/scripts/run-local-app.sh" --workspace "$workspace_dir" "$@" >"$runner_log" 2>&1 &
 runner_pid=$!
 
@@ -115,7 +117,7 @@ if [[ -z "$app_pid" ]]; then
   exit 1
 fi
 
-python3 - "$report_file" "$snapshot_file" "$runner_log" "$app_pid" "$workspace_dir" "$timeout_seconds" "$recording_seconds" "$audio_grace_seconds" "$audio_path" "$ax_helper" <<'PY'
+python3 - "$report_file" "$snapshot_file" "$app_state_report_file" "$runner_log" "$app_pid" "$workspace_dir" "$timeout_seconds" "$recording_seconds" "$audio_grace_seconds" "$audio_path" "$ax_helper" <<'PY'
 import json
 import os
 import subprocess
@@ -126,14 +128,15 @@ from typing import Optional, Tuple
 
 report_path = Path(sys.argv[1])
 snapshot_path = Path(sys.argv[2])
-runner_log_path = Path(sys.argv[3])
-app_pid = int(sys.argv[4])
-workspace_dir = Path(sys.argv[5])
-timeout_seconds = int(sys.argv[6])
-recording_seconds = float(sys.argv[7])
-audio_grace_seconds = float(sys.argv[8])
-audio_path = sys.argv[9].strip()
-AX_HELPER = Path(sys.argv[10])
+app_state_report_path = Path(sys.argv[3])
+runner_log_path = Path(sys.argv[4])
+app_pid = int(sys.argv[5])
+workspace_dir = Path(sys.argv[6])
+timeout_seconds = int(sys.argv[7])
+recording_seconds = float(sys.argv[8])
+audio_grace_seconds = float(sys.argv[9])
+audio_path = sys.argv[10].strip()
+AX_HELPER = Path(sys.argv[11])
 
 start_time = time.monotonic()
 last_snapshot = ""
@@ -277,10 +280,41 @@ def snapshot(timeout: int = 30) -> str:
     return text
 
 
+def read_app_state() -> dict:
+    try:
+        return json.loads(app_state_report_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def app_state_text(state: dict) -> str:
+    if not state:
+        return ""
+    parts: list[str] = []
+    parts.extend(str(item) for item in state.get("checked_markers", []) if item)
+    recording = state.get("recording", {})
+    if isinstance(recording, dict):
+        parts.extend(
+            str(recording.get(key, ""))
+            for key in ("phase", "status_text", "session_id", "error_code", "error_message")
+            if recording.get(key)
+        )
+        for artifact in recording.get("artifacts", []):
+            if isinstance(artifact, dict):
+                parts.append(
+                    " ".join(
+                        str(artifact.get(key, ""))
+                        for key in ("artifact_type", "capture_status", "degradation_reason")
+                        if artifact.get(key)
+                    )
+                )
+    return "\n".join(parts)
+
+
 def classify_snapshot(text: str) -> Tuple[Optional[str], Optional[str]]:
     lowered = text.lower()
     if "permission_denied" in lowered or "permissions are denied" in lowered:
-        return "permission_denied", "recording permission was denied or unknown"
+        return "permission_denied", text.strip() or "recording permission was denied or unknown"
     if "capture_failed" in lowered or "recording failed." in text:
         return "capture_failed", "recording command failed"
     if "path_conflict" in lowered or "recording session already exists" in lowered:
@@ -294,6 +328,17 @@ def wait_for_marker(marker: str, timeout: int) -> str:
     deadline = time.monotonic() + timeout
     last_error = None
     while time.monotonic() < deadline:
+        state_text = app_state_text(read_app_state())
+        if state_text:
+            global last_snapshot
+            last_snapshot = state_text
+            snapshot_path.write_text(state_text, encoding="utf-8")
+            failure_kind, failure_detail = classify_snapshot(state_text)
+            if failure_kind:
+                raise SmokeFailure(failure_kind, failure_detail or failure_kind)
+            if marker in state_text:
+                checked_markers.append(marker)
+                return state_text
         try:
             text = snapshot()
         except SmokeFailure as exc:
@@ -313,7 +358,25 @@ def wait_for_marker(marker: str, timeout: int) -> str:
 
 
 def press(identifier: str) -> None:
-    run_ax_helper("press", [identifier], timeout=20)
+    try:
+        run_ax_helper("press", [identifier], timeout=20)
+    except SmokeFailure as exc:
+        shortcuts = {
+            "ma.recording.startButton": "r",
+            "ma.recording.stopButton": "s",
+        }
+        key = shortcuts.get(identifier)
+        if key is None:
+            raise
+        run_osascript(
+            f'''
+tell application id "local.meeting-assistant.native.localdirect" to activate
+delay 0.2
+tell application "System Events" to keystroke "{key}" using {{command down, option down}}
+''',
+            [],
+            timeout=10,
+        )
     pressed_controls.append(identifier)
 
 
@@ -447,6 +510,7 @@ def write_report(passed: bool) -> None:
         "runner_configuration": config,
         "app_identity": app_identity(config),
         "ui_tree": str(snapshot_path),
+        "app_state_report": str(app_state_report_path),
         "runner_log": str(runner_log_path),
         "recording_request": {
             "capture_system_audio": config.get("capture_system_audio"),

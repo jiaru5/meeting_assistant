@@ -338,6 +338,7 @@ public struct DesignedNativeShellView: View {
                     }
                 }
                 .disabled(!recordingViewModel.canStart)
+                .keyboardShortcut("r", modifiers: [.command, .option])
                 .accessibilityIdentifier(RecordingControlAccessibilityID.startButton)
 
                 Button("Stop Recording") {
@@ -346,6 +347,7 @@ public struct DesignedNativeShellView: View {
                     }
                 }
                 .disabled(!recordingViewModel.canStop)
+                .keyboardShortcut("s", modifiers: [.command, .option])
                 .accessibilityIdentifier(RecordingControlAccessibilityID.stopButton)
 
                 Button("Start Processing") {
@@ -354,6 +356,7 @@ public struct DesignedNativeShellView: View {
                     }
                 }
                 .disabled(!processingViewModel.canStart)
+                .keyboardShortcut("p", modifiers: [.command, .option])
                 .accessibilityIdentifier(ProcessingAccessibilityID.startButton)
 
                 Button("Retry Processing") {
@@ -370,6 +373,7 @@ public struct DesignedNativeShellView: View {
                     }
                 }
                 .disabled(!transcriptActionViewModel.state.canCopy)
+                .keyboardShortcut("c", modifiers: [.command, .option])
                 .accessibilityIdentifier(TranscriptActionAccessibilityID.copyButton)
 
                 Button("Export Markdown") {
@@ -378,12 +382,14 @@ public struct DesignedNativeShellView: View {
                     }
                 }
                 .disabled(!transcriptActionViewModel.state.canExport)
+                .keyboardShortcut("e", modifiers: [.command, .option])
                 .accessibilityIdentifier(TranscriptActionAccessibilityID.exportButton)
 
                 Button("Delete Session") {
                     transcriptActionViewModel.requestDeleteConfirmation()
                 }
                 .disabled(!transcriptActionViewModel.state.canRequestDelete)
+                .keyboardShortcut("d", modifiers: [.command, .option])
                 .accessibilityIdentifier(TranscriptActionAccessibilityID.deleteButton)
             }
 
@@ -403,6 +409,7 @@ public struct DesignedNativeShellView: View {
                             }
                         }
                         .disabled(!transcriptActionViewModel.state.canConfirmDelete)
+                        .keyboardShortcut(.defaultAction)
                         .accessibilityIdentifier(TranscriptActionAccessibilityID.deleteConfirmButton)
 
                         Button("Cancel Delete") {

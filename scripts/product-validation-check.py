@@ -186,6 +186,42 @@ def validate_local_functional_report(root: Path, report_path: Path | None) -> li
     if not isinstance(app_identity.get("path"), str) or not app_identity.get("path"):
         failures.append("local-functional report must include the installed app path")
 
+    app_source = report.get("local_direct_app_source")
+    if not isinstance(app_source, dict):
+        failures.append("local-functional report must include local_direct_app_source")
+        app_source = {}
+    if app_source.get("source_and_installed_executable_match") is not True:
+        failures.append("local-functional report must prove the installed app unsigned executable content matches the current source app")
+    if app_source.get("source_and_installed_unsigned_executable_match") is not True:
+        failures.append("local-functional report must set source_and_installed_unsigned_executable_match=True")
+    release_bundle_report = app_source.get("release_bundle_report")
+    if not isinstance(release_bundle_report, dict):
+        failures.append("local-functional report must include local_direct_app_source.release_bundle_report")
+        release_bundle_report = {}
+    if head is not None and release_bundle_report.get("subject_commit") != head:
+        failures.append(f"local-functional release bundle report must bind current HEAD {head}")
+    if release_bundle_report.get("distribution_mode") != "local-direct":
+        failures.append("local-functional release bundle report must use distribution_mode='local-direct'")
+    if not isinstance(release_bundle_report.get("digest"), str) or not release_bundle_report.get("digest", "").startswith("sha256:"):
+        failures.append("local-functional release bundle report must include a sha256 digest")
+    for source_key in ("source_app", "installed_app"):
+        source_section = app_source.get(source_key)
+        if not isinstance(source_section, dict):
+            failures.append(f"local-functional report must include local_direct_app_source.{source_key}")
+            source_section = {}
+        if not isinstance(source_section.get("path"), str) or not source_section.get("path"):
+            failures.append(f"local-functional report must include local_direct_app_source.{source_key}.path")
+        if (
+            not isinstance(source_section.get("executable_sha256"), str)
+            or not source_section.get("executable_sha256", "").startswith("sha256:")
+        ):
+            failures.append(f"local-functional report must include local_direct_app_source.{source_key}.executable_sha256")
+        if (
+            not isinstance(source_section.get("unsigned_executable_sha256"), str)
+            or not source_section.get("unsigned_executable_sha256", "").startswith("sha256:")
+        ):
+            failures.append(f"local-functional report must include local_direct_app_source.{source_key}.unsigned_executable_sha256")
+
     checks = report.get("functional_checks")
     if not isinstance(checks, dict):
         failures.append("local-functional report must include functional_checks")

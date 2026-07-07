@@ -207,11 +207,28 @@ grep -R -q "NSApplication.didFinishLaunchingNotification" App/MeetingAssistantNa
 grep -R -q "NSApplication.didBecomeActiveNotification" App/MeetingAssistantNativeApp.swift
 grep -R -q "reopenMainWindowIfNeeded()" App/MeetingAssistantNativeApp.swift
 grep -R -q "MeetingAssistantNativeMainWindow.shared.openMainWindow()" App/MeetingAssistantNativeApp.swift
+grep -R -q "NativeLocalAppKeyboardShortcutView" App/MeetingAssistantNativeApp.swift
+grep -R -q "NSEvent.addLocalMonitorForEvents(matching: .keyDown)" App/MeetingAssistantNativeApp.swift
+grep -R -q "event.modifierFlags.intersection(.deviceIndependentFlagsMask)" App/MeetingAssistantNativeApp.swift
+grep -R -q "startRecording()" App/MeetingAssistantNativeApp.swift
+grep -R -q "stopRecording()" App/MeetingAssistantNativeApp.swift
+grep -R -q "startProcessing()" App/MeetingAssistantNativeApp.swift
+grep -R -q "copyTranscript()" App/MeetingAssistantNativeApp.swift
+grep -R -q "exportTranscript()" App/MeetingAssistantNativeApp.swift
+grep -R -q "requestDelete()" App/MeetingAssistantNativeApp.swift
+grep -R -q "confirmDelete()" App/MeetingAssistantNativeApp.swift
 grep -R -q "final class MeetingAssistantNativeMainWindow" App/MeetingAssistantNativeApp.swift
 grep -R -q "private var windowController: NSWindowController" App/MeetingAssistantNativeApp.swift
 grep -R -q "var hasVisibleWindow: Bool" App/MeetingAssistantNativeApp.swift
 grep -R -q "NSHostingController(rootView: rootView)" App/MeetingAssistantNativeApp.swift
 grep -R -q "NSWindow(" App/MeetingAssistantNativeApp.swift
+grep -R -q "window.setAccessibilityElement(true)" App/MeetingAssistantNativeApp.swift
+grep -R -q "window.setAccessibilityRole(.window)" App/MeetingAssistantNativeApp.swift
+grep -R -q "window.setAccessibilitySubrole(.standardWindow)" App/MeetingAssistantNativeApp.swift
+grep -R -q "window.setAccessibilityTitle(\"Meeting Assistant Native\")" App/MeetingAssistantNativeApp.swift
+grep -R -q "hostingController.view.setAccessibilityElement(true)" App/MeetingAssistantNativeApp.swift
+grep -R -q "hostingController.view.setAccessibilityRole(.group)" App/MeetingAssistantNativeApp.swift
+grep -R -q "hostingController.view.setAccessibilityLabel(\"Meeting Assistant\")" App/MeetingAssistantNativeApp.swift
 grep -R -q "window.setFrameAutosaveName(\"meeting-assistant-main\")" App/MeetingAssistantNativeApp.swift
 grep -R -q "window.makeKeyAndOrderFront(nil)" App/MeetingAssistantNativeApp.swift
 if grep -q "NSApplicationDelegateAdaptor\\|MeetingAssistantNativeAppDelegate\\|applicationDidFinishLaunching\\|WindowGroup(\"Meeting Assistant Native" App/MeetingAssistantNativeApp.swift; then
@@ -223,6 +240,13 @@ grep -R -q "preflightWorkspaceURL" App/MeetingAssistantNativeApp.swift Sources/M
 grep -R -q ".onChange(of: permissionViewModel.state)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -R -q "recordingViewModel.updateReadiness(readiness)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -R -q "processingViewModel.updateReadiness(readiness)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -R -q '.keyboardShortcut("r", modifiers: \[.command, .option\])' Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -R -q '.keyboardShortcut("s", modifiers: \[.command, .option\])' Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -R -q '.keyboardShortcut("p", modifiers: \[.command, .option\])' Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -R -q '.keyboardShortcut("c", modifiers: \[.command, .option\])' Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -R -q '.keyboardShortcut("e", modifiers: \[.command, .option\])' Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -R -q '.keyboardShortcut("d", modifiers: \[.command, .option\])' Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -R -q ".keyboardShortcut(.defaultAction)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -R -q "await permissionViewModel.refresh(workspaceURL: preflightWorkspaceURL)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -q "release-bundle-create.py" scripts/run-local-app.sh
 grep -q "Contents/MacOS/MeetingAssistantNative" scripts/run-local-app.sh
@@ -298,9 +322,13 @@ grep -q "run-local-app.sh" scripts/local-direct-smoke.sh
 grep -q "local-app-ax.swift" scripts/local-direct-smoke.sh
 grep -q "AXUIElementCreateApplication" scripts/local-app-ax.swift
 grep -q "concreteWindows.isEmpty ? values : concreteWindows" scripts/local-app-ax.swift
+grep -q "return rawCandidates" scripts/local-app-ax.swift
+grep -q "return \\[app\\]" scripts/local-app-ax.swift
 grep -q "kAXWindowsAttribute" scripts/local-app-ax.swift
 grep -q "kAXFocusedWindowAttribute" scripts/local-app-ax.swift
 grep -q "kAXMainWindowAttribute" scripts/local-app-ax.swift
+grep -q "AXUIElementCopyElementAtPosition" scripts/local-app-ax.swift
+grep -q "windowCenterElement" scripts/local-app-ax.swift
 grep -q "kAXRaiseAction" scripts/local-app-ax.swift
 grep -q "kAXConfirmAction" scripts/local-app-ax.swift
 grep -q "kAXFocusedAttribute" scripts/local-app-ax.swift

@@ -5,12 +5,16 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
 
 EXPECTED_TERMS = ["HTTP", "LLM", "clean architecture"]
+DEFAULT_SOURCE_APP = ".harness/release-build/native-app/DerivedData/Build/Products/Release/MeetingAssistantNative.app"
+DEFAULT_RELEASE_BUNDLE_REPORT = ".harness/release-inputs/bundle/release-bundle-report.json"
 RELEASE_BLOCKERS = [
     "local-direct functional preflight proves only the explicitly tested local machine",
     "local-direct functional preflight does not run product-validation release or release-preflight",
@@ -36,6 +40,33 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return "sha256:" + digest.hexdigest()
+
+
+def resolve_path(root: Path, value: str | Path) -> Path:
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = root / path
+    return path.resolve(strict=False)
+
+
+def executable_path(app: Path) -> Path:
+    return app / "Contents/MacOS/MeetingAssistantNative"
+
+
+def sha256_unsigned_executable(path: Path) -> str:
+    with tempfile.TemporaryDirectory() as directory:
+        copy_path = Path(directory) / path.name
+        shutil.copy2(path, copy_path)
+        try:
+            subprocess.run(
+                ["/usr/bin/codesign", "--remove-signature", str(copy_path)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        except FileNotFoundError:
+            pass
+        return sha256_file(copy_path)
 
 
 def load_json_object(path: Path, label: str, findings: list[str]) -> dict[str, Any] | None:
@@ -179,11 +210,123 @@ def validate_repeatability_report(
     }
 
 
+def validate_local_direct_app_source(
+    *,
+    source_app_path: Path,
+    release_bundle_report_path: Path,
+    installed_app_identity: dict[str, Any],
+    expected_commit: str | None,
+    findings: list[str],
+) -> dict[str, Any]:
+    label = "local-direct source app check"
+    release_bundle_report = load_json_object(
+        release_bundle_report_path,
+        "release bundle report",
+        findings,
+    )
+    release_bundle_summary: dict[str, Any] = {
+        "path": str(release_bundle_report_path),
+    }
+    if release_bundle_report is not None:
+        if release_bundle_report.get("report_schema") != 1:
+            findings.append("release bundle report must set report_schema=1")
+        if release_bundle_report.get("release_gate") != "release-bundle":
+            findings.append("release bundle report must set release_gate='release-bundle'")
+        if expected_commit is not None and release_bundle_report.get("subject_commit") != expected_commit:
+            findings.append(f"release bundle report must bind subject_commit={expected_commit}")
+        bundle = release_bundle_report.get("bundle")
+        if not isinstance(bundle, dict):
+            findings.append("release bundle report must include bundle")
+            bundle = {}
+        if bundle.get("distribution_mode") != "local-direct":
+            findings.append("release bundle report must use distribution_mode='local-direct'")
+        if bundle.get("install_method") != "direct-local-app":
+            findings.append("release bundle report must use install_method='direct-local-app'")
+        if bundle.get("app_bundle") != "MeetingAssistantNative.app":
+            findings.append("release bundle report must describe MeetingAssistantNative.app")
+        for key in ("packages_runtime_or_model", "auto_downloads", "contains_meeting_data"):
+            if bundle.get(key) is not False:
+                findings.append(f"release bundle report bundle must set {key}=False")
+        release_bundle_summary.update(
+            {
+                "digest": sha256_file(release_bundle_report_path),
+                "subject_commit": release_bundle_report.get("subject_commit"),
+                "distribution_mode": bundle.get("distribution_mode"),
+                "bundle_digest": bundle.get("digest"),
+                "archive_path": bundle.get("path"),
+            }
+        )
+    else:
+        release_bundle_summary["digest"] = "sha256:" + ("0" * 64)
+
+    installed_app_path_value = installed_app_identity.get("path")
+    if not isinstance(installed_app_path_value, str) or not installed_app_path_value:
+        findings.append(f"{label} requires installed app path from target smoke report")
+        installed_app_path = Path("")
+    else:
+        installed_app_path = Path(installed_app_path_value).expanduser().resolve(strict=False)
+
+    source_executable = executable_path(source_app_path)
+    installed_executable = executable_path(installed_app_path)
+    source_hash = ""
+    installed_hash = ""
+    source_unsigned_hash = ""
+    installed_unsigned_hash = ""
+
+    if not source_app_path.is_dir():
+        findings.append(f"{label} source app does not exist: {source_app_path}")
+    elif not source_executable.is_file():
+        findings.append(f"{label} source executable does not exist: {source_executable}")
+    else:
+        source_hash = sha256_file(source_executable)
+        source_unsigned_hash = sha256_unsigned_executable(source_executable)
+
+    if not installed_app_path.is_dir():
+        findings.append(f"{label} installed app does not exist: {installed_app_path}")
+    elif not installed_executable.is_file():
+        findings.append(f"{label} installed executable does not exist: {installed_executable}")
+    else:
+        installed_hash = sha256_file(installed_executable)
+        installed_unsigned_hash = sha256_unsigned_executable(installed_executable)
+
+    executable_match = bool(
+        source_unsigned_hash
+        and installed_unsigned_hash
+        and source_unsigned_hash == installed_unsigned_hash
+    )
+    if source_unsigned_hash and installed_unsigned_hash and not executable_match:
+        findings.append(
+            "installed local-direct app unsigned executable content must match the current source Release app; "
+            "rerun platform/native-app/scripts/install-local-app.sh --rebuild"
+        )
+
+    return {
+        "release_bundle_report": release_bundle_summary,
+        "source_app": {
+            "path": str(source_app_path),
+            "executable_path": str(source_executable),
+            "executable_sha256": source_hash,
+            "unsigned_executable_sha256": source_unsigned_hash,
+        },
+        "installed_app": {
+            "path": str(installed_app_path),
+            "executable_path": str(installed_executable),
+            "executable_sha256": installed_hash,
+            "unsigned_executable_sha256": installed_unsigned_hash,
+            "CFBundleIdentifier": installed_app_identity.get("CFBundleIdentifier", ""),
+        },
+        "source_and_installed_executable_match": executable_match,
+        "source_and_installed_unsigned_executable_match": executable_match,
+    }
+
+
 def build_report(
     root: Path,
     *,
     target_smoke_report_path: Path,
     repeatability_report_path: Path,
+    source_app_path: Path | None = None,
+    release_bundle_report_path: Path | None = None,
     report_path: Path | None = None,
 ) -> dict[str, Any]:
     root = root.resolve(strict=False)
@@ -229,6 +372,16 @@ def build_report(
             findings=findings,
         )
 
+    source_app = resolve_path(root, source_app_path or DEFAULT_SOURCE_APP)
+    release_bundle_report = resolve_path(root, release_bundle_report_path or DEFAULT_RELEASE_BUNDLE_REPORT)
+    local_direct_app_source = validate_local_direct_app_source(
+        source_app_path=source_app,
+        release_bundle_report_path=release_bundle_report,
+        installed_app_identity=target_summary.get("local_direct_app", {}),
+        expected_commit=head,
+        findings=findings,
+    )
+
     passed = not findings
     report: dict[str, Any] = {
         "report_schema": 1,
@@ -248,6 +401,7 @@ def build_report(
             "observed_targets": repeatability_summary.get("observed_targets", []),
         },
         "local_direct_app": target_summary.get("local_direct_app", {}),
+        "local_direct_app_source": local_direct_app_source,
         "functional_checks": {
             "launch_modes": target_summary.get("smoke", {}).get("launch_modes", []),
             "same_app_identity": target_summary.get("smoke", {}).get("same_app_identity") is True,
@@ -274,6 +428,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", default=os.environ.get("REPO_ROOT", "."))
     parser.add_argument("--target-smoke-report", required=True)
     parser.add_argument("--repeatability-report", required=True)
+    parser.add_argument("--source-app", default=os.environ.get("MA_LOCAL_DIRECT_FUNCTIONAL_SOURCE_APP"))
+    parser.add_argument(
+        "--release-bundle-report",
+        default=os.environ.get("MA_LOCAL_DIRECT_FUNCTIONAL_RELEASE_BUNDLE_REPORT"),
+    )
     parser.add_argument("--report")
     args = parser.parse_args(argv)
 
@@ -281,6 +440,8 @@ def main(argv: list[str] | None = None) -> int:
         Path(args.root),
         target_smoke_report_path=Path(args.target_smoke_report),
         repeatability_report_path=Path(args.repeatability_report),
+        source_app_path=Path(args.source_app) if args.source_app else None,
+        release_bundle_report_path=Path(args.release_bundle_report) if args.release_bundle_report else None,
         report_path=Path(args.report) if args.report else None,
     )
     print(

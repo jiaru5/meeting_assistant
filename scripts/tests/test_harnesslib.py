@@ -567,6 +567,31 @@ class HarnessValidationTests(unittest.TestCase):
                         "path": "/Users/runner/Applications/MeetingAssistantNativeLocal.app",
                         "CFBundleIdentifier": "local.meeting-assistant.native.localdirect",
                     },
+                    "local_direct_app_source": {
+                        "release_bundle_report": {
+                            "path": "/repo/.harness/release-inputs/bundle/release-bundle-report.json",
+                            "digest": "sha256:" + ("a" * 64),
+                            "subject_commit": subject_commit,
+                            "distribution_mode": "local-direct",
+                            "bundle_digest": "sha256:" + ("b" * 64),
+                            "archive_path": "/repo/.harness/release-inputs/bundle/MeetingAssistantNative-Release.zip",
+                        },
+                        "source_app": {
+                            "path": "/repo/.harness/release-build/native-app/DerivedData/Build/Products/Release/MeetingAssistantNative.app",
+                            "executable_path": "/repo/.harness/release-build/native-app/DerivedData/Build/Products/Release/MeetingAssistantNative.app/Contents/MacOS/MeetingAssistantNative",
+                            "executable_sha256": "sha256:" + ("c" * 64),
+                            "unsigned_executable_sha256": "sha256:" + ("e" * 64),
+                        },
+                        "installed_app": {
+                            "path": "/Users/runner/Applications/MeetingAssistantNativeLocal.app",
+                            "executable_path": "/Users/runner/Applications/MeetingAssistantNativeLocal.app/Contents/MacOS/MeetingAssistantNative",
+                            "executable_sha256": "sha256:" + ("d" * 64),
+                            "unsigned_executable_sha256": "sha256:" + ("e" * 64),
+                            "CFBundleIdentifier": "local.meeting-assistant.native.localdirect",
+                        },
+                        "source_and_installed_executable_match": True,
+                        "source_and_installed_unsigned_executable_match": True,
+                    },
                     "functional_checks": {
                         "launch_modes": ["open"],
                         "same_app_identity": True,
@@ -698,6 +723,31 @@ class HarnessValidationTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("subject_commit must bind current HEAD", result.stderr + result.stdout)
+
+    def test_product_validation_local_functional_rejects_stale_installed_app_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            report = self.write_local_functional_preflight_report(fixture)
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            payload["local_direct_app_source"]["source_and_installed_executable_match"] = False
+            payload["local_direct_app_source"]["source_and_installed_unsigned_executable_match"] = False
+            payload["local_direct_app_source"]["installed_app"]["unsigned_executable_sha256"] = "sha256:" + ("f" * 64)
+            report.write_text(json.dumps(payload), encoding="utf-8")
+            env = os.environ.copy()
+            env["MA_LOCAL_DIRECT_FUNCTIONAL_PREFLIGHT_REPORT"] = str(report)
+
+            result = subprocess.run(
+                [sys.executable, str(fixture / "scripts/product-validation-check.py"), "local-functional"],
+                cwd=fixture,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("installed app unsigned executable content matches the current source app", result.stderr + result.stdout)
 
     def test_product_validation_local_functional_rejects_release_scope_report(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1201,6 +1251,10 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("AXUIElementCreateApplication", (ROOT / "platform/native-app/scripts/local-app-ax.swift").read_text(encoding="utf-8"))
         self.assertIn("kAXWindowsAttribute", (ROOT / "platform/native-app/scripts/local-app-ax.swift").read_text(encoding="utf-8"))
         self.assertIn("concreteWindows.isEmpty ? values : concreteWindows", (ROOT / "platform/native-app/scripts/local-app-ax.swift").read_text(encoding="utf-8"))
+        self.assertIn("return rawCandidates", (ROOT / "platform/native-app/scripts/local-app-ax.swift").read_text(encoding="utf-8"))
+        self.assertIn("return [app]", (ROOT / "platform/native-app/scripts/local-app-ax.swift").read_text(encoding="utf-8"))
+        self.assertIn("AXUIElementCopyElementAtPosition", (ROOT / "platform/native-app/scripts/local-app-ax.swift").read_text(encoding="utf-8"))
+        self.assertIn("windowCenterElement", (ROOT / "platform/native-app/scripts/local-app-ax.swift").read_text(encoding="utf-8"))
         self.assertIn("kAXFocusedWindowAttribute", (ROOT / "platform/native-app/scripts/local-app-ax.swift").read_text(encoding="utf-8"))
         self.assertIn("kAXMainWindowAttribute", (ROOT / "platform/native-app/scripts/local-app-ax.swift").read_text(encoding="utf-8"))
         self.assertIn("kAXRaiseAction", (ROOT / "platform/native-app/scripts/local-app-ax.swift").read_text(encoding="utf-8"))
@@ -1295,10 +1349,27 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("initialReadinessState", app_source)
         self.assertIn("Task { @MainActor in", app_source)
         self.assertIn("MeetingAssistantNativeMainWindow.shared.openMainWindow()", app_source)
+        self.assertIn("NativeLocalAppKeyboardShortcutView", app_source)
+        self.assertIn("NSEvent.addLocalMonitorForEvents(matching: .keyDown)", app_source)
+        self.assertIn("event.modifierFlags.intersection(.deviceIndependentFlagsMask)", app_source)
+        self.assertIn("startRecording()", app_source)
+        self.assertIn("stopRecording()", app_source)
+        self.assertIn("startProcessing()", app_source)
+        self.assertIn("copyTranscript()", app_source)
+        self.assertIn("exportTranscript()", app_source)
+        self.assertIn("requestDelete()", app_source)
+        self.assertIn("confirmDelete()", app_source)
         self.assertIn("final class MeetingAssistantNativeMainWindow", app_source)
         self.assertIn("private var windowController: NSWindowController", app_source)
         self.assertIn("NSHostingController(rootView: rootView)", app_source)
         self.assertIn("NSWindow(", app_source)
+        self.assertIn("window.setAccessibilityElement(true)", app_source)
+        self.assertIn("window.setAccessibilityRole(.window)", app_source)
+        self.assertIn("window.setAccessibilitySubrole(.standardWindow)", app_source)
+        self.assertIn('window.setAccessibilityTitle("Meeting Assistant Native")', app_source)
+        self.assertIn("hostingController.view.setAccessibilityElement(true)", app_source)
+        self.assertIn("hostingController.view.setAccessibilityRole(.group)", app_source)
+        self.assertIn('hostingController.view.setAccessibilityLabel("Meeting Assistant")', app_source)
         self.assertIn('window.setFrameAutosaveName("meeting-assistant-main")', app_source)
         self.assertIn("window.makeKeyAndOrderFront(nil)", app_source)
         self.assertNotIn("NSApplicationDelegateAdaptor", app_source)
@@ -1310,6 +1381,13 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn(".onChange(of: permissionViewModel.state)", shell_source)
         self.assertIn("recordingViewModel.updateReadiness(readiness)", shell_source)
         self.assertIn("processingViewModel.updateReadiness(readiness)", shell_source)
+        self.assertIn('.keyboardShortcut("r", modifiers: [.command, .option])', shell_source)
+        self.assertIn('.keyboardShortcut("s", modifiers: [.command, .option])', shell_source)
+        self.assertIn('.keyboardShortcut("p", modifiers: [.command, .option])', shell_source)
+        self.assertIn('.keyboardShortcut("c", modifiers: [.command, .option])', shell_source)
+        self.assertIn('.keyboardShortcut("e", modifiers: [.command, .option])', shell_source)
+        self.assertIn('.keyboardShortcut("d", modifiers: [.command, .option])', shell_source)
+        self.assertIn(".keyboardShortcut(.defaultAction)", shell_source)
         self.assertIn("await permissionViewModel.refresh(workspaceURL: preflightWorkspaceURL)", shell_source)
         self.assertIn("autoRefreshPreflightIfNeeded", shell_source)
 
@@ -1324,11 +1402,12 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("LaunchServices `open -n -W -F`", architecture_doc)
         self.assertIn("LaunchServices/TCC attribution", architecture_doc)
         self.assertIn("path_conflict", architecture_doc)
-        self.assertIn("ignore AXApplication/menu-only fallbacks", architecture_doc)
-        self.assertIn("raise the focused or main AXWindow", architecture_doc)
+        self.assertIn("prefer concrete `AXWindow` or `AXSheet` roots", architecture_doc)
+        self.assertIn("raise focused or main AXWindow roots", architecture_doc)
         self.assertIn("scoped `launchctl setenv`", architecture_doc)
         self.assertIn("App.init", architecture_doc)
         self.assertIn("retained AppKit window controller", architecture_doc)
+        self.assertIn("standard AX window role/title", architecture_doc)
         self.assertIn("auto-refresh Preflight once on first shell appearance", architecture_doc)
         self.assertIn("MA_NATIVE_CAPTURE_SMOKE_SYSTEM_AUDIO=true", architecture_doc)
         self.assertIn("MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO=false", architecture_doc)
@@ -1337,6 +1416,10 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("local-direct-app-install", architecture_doc)
         self.assertIn("local-app-permission-diagnostics", architecture_doc)
         self.assertIn("repo-owned `local-app-ax.swift` helper's CoreGraphics window check", architecture_doc)
+        self.assertIn("AX exposes only application/root candidates", architecture_doc)
+        self.assertIn("AXUIElementCopyElementAtPosition", architecture_doc)
+        self.assertIn("menu-only", architecture_doc)
+        self.assertIn("stable keyboard shortcuts", architecture_doc)
         self.assertIn("MA_NATIVE_LOCAL_APP_SMOKE_STATE_REPORT", architecture_doc)
         self.assertIn("run-local-app.sh", dev_commands)
         self.assertIn("install-local-app.sh", dev_commands)
@@ -1561,17 +1644,27 @@ class HarnessValidationTests(unittest.TestCase):
 
         self.assertIn("release-local-direct-target-smoke.sh", wrapper)
         self.assertIn("release-local-direct-repeatability-report.sh", wrapper)
+        self.assertIn("release-bundle-create.py", wrapper)
+        self.assertIn("--source-app", wrapper)
+        self.assertIn("--release-bundle-report", wrapper)
         self.assertIn("local_direct_functional_preflight_report.py", wrapper)
         self.assertIn("MA_LOCAL_DIRECT_FUNCTIONAL_TARGET_ID", wrapper)
         self.assertIn("MA_LOCAL_DIRECT_FUNCTIONAL_PREFLIGHT_REPORT", wrapper)
         self.assertIn("local-direct-functional-preflight", report)
         self.assertIn("local-machine-only", report)
+        self.assertIn("local_direct_app_source", report)
+        self.assertIn("source_and_installed_executable_match", report)
+        self.assertIn("source_and_installed_unsigned_executable_match", report)
         self.assertIn("not_release_readiness", report)
         self.assertIn("does not run product-validation release or release-preflight", report)
+        self.assertIn("source/installed unsigned executable SHA256 match", dev_commands)
         self.assertIn("local-direct-functional-preflight.sh", dev_commands)
         self.assertIn("local-direct-functional-preflight.sh", e2e_readme)
+        self.assertIn("installed app unsigned executable content 与当前 source Release app 一致", e2e_readme)
         self.assertIn("local-direct-functional-preflight", matrix)
+        self.assertIn("installed app/source app unsigned executable SHA256 一致", matrix)
         self.assertIn("local-direct-functional-preflight", plan)
+        self.assertIn("installed app unsigned executable content 匹配当前 source Release app", plan)
 
     def test_product_validation_current_phase_rejects_missing_status(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
