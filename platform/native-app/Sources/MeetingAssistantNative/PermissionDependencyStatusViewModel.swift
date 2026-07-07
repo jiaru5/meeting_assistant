@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import SwiftUI
 
 public enum PermissionDependencyPhase: String, Equatable, Sendable {
@@ -29,6 +30,63 @@ public struct DependencyStatusItem: Equatable, Identifiable, Sendable {
     public let required: Bool
     public let isPassing: Bool
     public let message: String
+}
+
+public struct LocalAppPermissionIdentity: Equatable, Sendable {
+    public let bundlePath: String
+    public let bundleIdentifier: String
+    public let codeSignatureHash: String?
+
+    public init(
+        bundlePath: String,
+        bundleIdentifier: String,
+        codeSignatureHash: String? = nil
+    ) {
+        self.bundlePath = bundlePath
+        self.bundleIdentifier = bundleIdentifier
+        self.codeSignatureHash = codeSignatureHash
+    }
+
+    public static func current(bundle: Bundle = .main) -> LocalAppPermissionIdentity {
+        LocalAppPermissionIdentity(
+            bundlePath: bundle.bundlePath,
+            bundleIdentifier: bundle.bundleIdentifier ?? "unknown",
+            codeSignatureHash: currentCodeSignatureHash()
+        )
+    }
+
+    public var permissionRepairSummary: String {
+        let hashSummary = codeSignatureHash.map { ", CDHash: \($0)" } ?? ""
+        return "Authorize this exact app in Screen Recording / Screen & System Audio Recording: \(bundlePath) (bundle id: \(bundleIdentifier)\(hashSummary))."
+    }
+
+    public var staleIdentityRepairSummary: String {
+        "If System Settings already shows MeetingAssistantNative enabled but recording still fails, remove the stale entry and add this exact app again."
+    }
+
+    public var recordingPermissionFailureHint: String {
+        "\(permissionRepairSummary) \(staleIdentityRepairSummary)"
+    }
+
+    private static func currentCodeSignatureHash() -> String? {
+        var code: SecCode?
+        guard SecCodeCopySelf(SecCSFlags(), &code) == errSecSuccess, let code else {
+            return nil
+        }
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(code, SecCSFlags(), &staticCode) == errSecSuccess, let staticCode else {
+            return nil
+        }
+        var information: CFDictionary?
+        let flags = SecCSFlags(rawValue: kSecCSSigningInformation)
+        guard SecCodeCopySigningInformation(staticCode, flags, &information) == errSecSuccess,
+              let dictionary = information as? [String: Any],
+              let unique = dictionary[kSecCodeInfoUnique as String] as? Data
+        else {
+            return nil
+        }
+        return unique.map { String(format: "%02x", $0) }.joined()
+    }
 }
 
 public struct PermissionDependencyStatusState: Equatable, Sendable {

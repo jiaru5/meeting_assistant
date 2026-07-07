@@ -23,6 +23,7 @@ grep -q "MA_NATIVE_TRANSCRIPT_ACTION_CLIENT=process" tests/ArchitectureTest.md
 grep -q "MA_NATIVE_RECORDING_CONTROLLED_MIXED_AUDIO=1" tests/ArchitectureTest.md
 grep -q "Open Privacy Settings" tests/ArchitectureTest.md
 grep -q "NSWorkspace.shared.open" tests/ArchitectureTest.md
+grep -q "ma.permissionDependency.appIdentity" tests/ArchitectureTest.md
 grep -q "must not grant permissions" tests/ArchitectureTest.md
 grep -q "check_dependencies" tests/ArchitectureTest.md
 grep -q "session.json" tests/ArchitectureTest.md
@@ -89,6 +90,10 @@ test -f UITests/MeetingAssistantNativeAppUITests/DesignedNativeShellAppBundleTes
 grep -R -q "check_dependencies" Sources tests App
 grep -R -q "ma.permissionDependency" Sources tests App UITests
 grep -R -q "ma.permissionDependency.openPrivacySettingsButton" Sources tests App UITests
+grep -R -q "ma.permissionDependency.appIdentity" Sources tests App UITests
+grep -R -q "LocalAppPermissionIdentity" Sources tests App UITests
+grep -R -q "bundlePath" Sources tests App UITests
+grep -R -q "codeSignatureHash" Sources tests App UITests
 grep -R -q "start_native_recording" Sources tests
 grep -R -q "stop_recording" Sources tests
 grep -R -q "ma.recording" Sources tests App UITests

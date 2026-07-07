@@ -6,6 +6,7 @@ public enum PermissionDependencyAccessibilityID {
     public static let summary = "ma.permissionDependency.summary"
     public static let checkButton = "ma.permissionDependency.checkButton"
     public static let openPrivacySettingsButton = "ma.permissionDependency.openPrivacySettingsButton"
+    public static let appIdentity = "ma.permissionDependency.appIdentity"
     public static let permissionsSection = "ma.permissionDependency.permissions"
     public static let dependenciesSection = "ma.permissionDependency.dependencies"
 }
@@ -13,13 +14,19 @@ public enum PermissionDependencyAccessibilityID {
 public struct PermissionDependencyStatusView: View {
     @ObservedObject private var viewModel: PermissionDependencyStatusViewModel
     private let openPrivacySettings: () -> Void
+    private let appIdentity: LocalAppPermissionIdentity
 
     public init(viewModel: PermissionDependencyStatusViewModel) {
         self.init(viewModel: viewModel, openPrivacySettings: SystemPrivacySettingsOpener.open)
     }
 
-    public init(viewModel: PermissionDependencyStatusViewModel, openPrivacySettings: @escaping () -> Void) {
+    public init(
+        viewModel: PermissionDependencyStatusViewModel,
+        appIdentity: LocalAppPermissionIdentity = .current(),
+        openPrivacySettings: @escaping () -> Void
+    ) {
         self.viewModel = viewModel
+        self.appIdentity = appIdentity
         self.openPrivacySettings = openPrivacySettings
     }
 
@@ -46,6 +53,16 @@ public struct PermissionDependencyStatusView: View {
                 .accessibilityIdentifier(PermissionDependencyAccessibilityID.checkButton)
 
                 if viewModel.state.hasUnconfirmedOrDeniedPermissions {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(appIdentity.permissionRepairSummary)
+                        Text(appIdentity.staleIdentityRepairSummary)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(appIdentity.recordingPermissionFailureHint)
+                    .accessibilityIdentifier(PermissionDependencyAccessibilityID.appIdentity)
+
                     Button("Open Privacy Settings") {
                         openPrivacySettings()
                     }

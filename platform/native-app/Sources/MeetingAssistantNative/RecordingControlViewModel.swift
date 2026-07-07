@@ -120,6 +120,7 @@ public final class RecordingControlViewModel: ObservableObject {
     private let workspaceURL: URL?
     private let captureSystemAudio: Bool
     private let captureMicrophoneAudio: Bool
+    private let permissionRepairIdentity: LocalAppPermissionIdentity
     private let startTimeoutNanoseconds: UInt64
     private var activeStartAttemptID: UUID?
     private var startTimeoutTask: Task<Void, Never>?
@@ -132,6 +133,7 @@ public final class RecordingControlViewModel: ObservableObject {
         workspaceURL: URL? = nil,
         captureSystemAudio: Bool = true,
         captureMicrophoneAudio: Bool = true,
+        permissionRepairIdentity: LocalAppPermissionIdentity = .current(),
         startTimeoutNanoseconds: UInt64 = 15_000_000_000
     ) {
         self.commandClient = commandClient
@@ -141,6 +143,7 @@ public final class RecordingControlViewModel: ObservableObject {
         self.workspaceURL = workspaceURL
         self.captureSystemAudio = captureSystemAudio
         self.captureMicrophoneAudio = captureMicrophoneAudio
+        self.permissionRepairIdentity = permissionRepairIdentity
         self.startTimeoutNanoseconds = startTimeoutNanoseconds
         self.state = readinessState.canStartRecording ? .ready : .idle
     }
@@ -343,7 +346,7 @@ public final class RecordingControlViewModel: ObservableObject {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty && !failure.message.contains($0) }
         let repairHint = "Open System Settings > Privacy & Security and grant the missing Screen Recording / Screen & System Audio Recording or Microphone permission, then relaunch and retry."
-        return ([failure.message] + details + [repairHint]).joined(separator: " ")
+        return ([failure.message] + details + [repairHint, permissionRepairIdentity.recordingPermissionFailureHint]).joined(separator: " ")
     }
 
     private func armStartTimeout(for attemptID: UUID) {

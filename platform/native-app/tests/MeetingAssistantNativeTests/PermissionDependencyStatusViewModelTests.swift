@@ -181,8 +181,24 @@ struct PermissionDependencyStatusViewModelTests {
         #expect(PermissionDependencyAccessibilityID.heading == "ma.permissionDependency.heading")
         #expect(PermissionDependencyAccessibilityID.summary == "ma.permissionDependency.summary")
         #expect(PermissionDependencyAccessibilityID.checkButton == "ma.permissionDependency.checkButton")
+        #expect(PermissionDependencyAccessibilityID.appIdentity == "ma.permissionDependency.appIdentity")
         #expect(PermissionDependencyAccessibilityID.permissionsSection == "ma.permissionDependency.permissions")
         #expect(PermissionDependencyAccessibilityID.dependenciesSection == "ma.permissionDependency.dependencies")
+    }
+
+    @Test
+    func appPermissionIdentityBuildsExactRepairHint() {
+        let identity = LocalAppPermissionIdentity(
+            bundlePath: "/Users/jerry/Applications/MeetingAssistantNative.app",
+            bundleIdentifier: "local.meeting-assistant.native",
+            codeSignatureHash: "d12037268c3d4ffd101c65b7a614c2cbc6378432"
+        )
+
+        #expect(identity.permissionRepairSummary.contains("/Users/jerry/Applications/MeetingAssistantNative.app"))
+        #expect(identity.permissionRepairSummary.contains("local.meeting-assistant.native"))
+        #expect(identity.permissionRepairSummary.contains("d12037268c3d4ffd101c65b7a614c2cbc6378432"))
+        #expect(identity.staleIdentityRepairSummary.contains("remove the stale entry"))
+        #expect(identity.recordingPermissionFailureHint.contains("add this exact app again"))
     }
 
     @Test

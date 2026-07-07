@@ -75,7 +75,8 @@ struct RecordingControlViewModelTests {
         )
         let viewModel = RecordingControlViewModel(
             commandClient: client,
-            readinessState: readyReadinessState()
+            readinessState: readyReadinessState(),
+            permissionRepairIdentity: installedAppIdentity()
         )
 
         await viewModel.start()
@@ -96,7 +97,8 @@ struct RecordingControlViewModelTests {
         )
         let viewModel = RecordingControlViewModel(
             commandClient: client,
-            readinessState: readyReadinessState()
+            readinessState: readyReadinessState(),
+            permissionRepairIdentity: installedAppIdentity()
         )
 
         await viewModel.start()
@@ -106,6 +108,10 @@ struct RecordingControlViewModelTests {
         #expect(viewModel.state.errorMessage?.contains("Native capture permissions are denied or unknown.") == true)
         #expect(viewModel.state.errorMessage?.contains("Screen Recording permission is denied.") == true)
         #expect(viewModel.state.errorMessage?.contains("System Settings > Privacy & Security") == true)
+        #expect(viewModel.state.errorMessage?.contains("/Users/jerry/Applications/MeetingAssistantNative.app") == true)
+        #expect(viewModel.state.errorMessage?.contains("local.meeting-assistant.native") == true)
+        #expect(viewModel.state.errorMessage?.contains("d12037268c3d4ffd101c65b7a614c2cbc6378432") == true)
+        #expect(viewModel.state.errorMessage?.contains("remove the stale entry") == true)
     }
 
     @Test
@@ -246,6 +252,14 @@ private func readyReadinessState() -> PermissionDependencyStatusState {
                 dependencyCheck("media_tool.ffmpeg", status: "available", required: true, ok: true),
             ]
         )
+    )
+}
+
+private func installedAppIdentity() -> LocalAppPermissionIdentity {
+    LocalAppPermissionIdentity(
+        bundlePath: "/Users/jerry/Applications/MeetingAssistantNative.app",
+        bundleIdentifier: "local.meeting-assistant.native",
+        codeSignatureHash: "d12037268c3d4ffd101c65b7a614c2cbc6378432"
     )
 }
 
