@@ -2,9 +2,17 @@
 set -euo pipefail
 
 component_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root_dir="$(cd "$component_dir/../.." && pwd)"
 
 install_report="${MA_NATIVE_LOCAL_APP_INSTALL_REPORT:-$component_dir/build/local-app-install/local-app-install-report.json}"
-recording_report="${MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_REPORT:-$component_dir/build/local-direct-recording-smoke/local-direct-recording-smoke-report.json}"
+recording_report="${MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_REPORT:-}"
+recording_report_explicit="0"
+if [[ -n "${MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_REPORT:-}" ]]; then
+  recording_report_explicit="1"
+fi
+# Include e2e release-local-direct-target-smoke same-chain reports, because
+# local-functional failures are recorded there rather than in native-app/build.
+recording_report_search_roots="${MA_NATIVE_LOCAL_APP_RECORDING_REPORT_SEARCH_ROOTS:-$component_dir/build:$root_dir/platform/e2e/build}"
 report_dir="${MA_NATIVE_LOCAL_APP_PERMISSION_DIAGNOSTICS_REPORT_DIR:-$component_dir/build/local-app-permission-diagnostics}"
 report_file="${MA_NATIVE_LOCAL_APP_PERMISSION_DIAGNOSTICS_REPORT:-$report_dir/local-app-permission-diagnostics-report.json}"
 
@@ -35,6 +43,31 @@ print(Path(sys.argv[1]).expanduser().resolve(strict=False))
 PY
 }
 
+latest_recording_report() {
+  python3 - "$recording_report_search_roots" <<'PY'
+from pathlib import Path
+import os
+import sys
+
+roots = [Path(item).expanduser() for item in sys.argv[1].split(os.pathsep) if item]
+candidates: list[Path] = []
+for root in roots:
+    if not root.exists():
+        continue
+    candidates.extend(
+        path
+        for path in root.rglob("local-direct-recording-smoke-report.json")
+        if path.is_file()
+    )
+
+if not candidates:
+    raise SystemExit(1)
+
+latest = max(candidates, key=lambda path: path.stat().st_mtime)
+print(latest)
+PY
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --install-report)
@@ -51,6 +84,7 @@ while [[ $# -gt 0 ]]; do
         exit 2
       fi
       recording_report="$2"
+      recording_report_explicit="1"
       shift 2
       ;;
     --report-file)
@@ -74,12 +108,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 install_report="$(resolve_path "$install_report")"
+if [[ -z "$recording_report" ]]; then
+  recording_report="$(latest_recording_report || true)"
+fi
+if [[ -z "$recording_report" ]]; then
+  recording_report="$component_dir/build/local-direct-recording-smoke/local-direct-recording-smoke-report.json"
+fi
 recording_report="$(resolve_path "$recording_report")"
 report_file="$(resolve_path "$report_file")"
 
 mkdir -p "$(dirname "$report_file")"
 
-python3 - "$install_report" "$recording_report" "$report_file" <<'PY'
+python3 - "$install_report" "$recording_report" "$report_file" "$recording_report_explicit" <<'PY'
 from __future__ import annotations
 
 import json
@@ -91,6 +131,7 @@ from typing import Any
 install_report_path = Path(sys.argv[1])
 recording_report_path = Path(sys.argv[2])
 report_file = Path(sys.argv[3])
+recording_report_explicit = sys.argv[4] == "1"
 
 
 def load_json(path: Path, *, required: bool) -> dict[str, Any]:
@@ -157,6 +198,8 @@ report = {
     "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     "install_report": str(install_report_path),
     "recording_report": str(recording_report_path) if recording_report else "",
+    "recording_report_selection": "explicit" if recording_report_explicit else "latest",
+    "recording_report_found": bool(recording_report),
     "recommended_tcc_target": recommended_target,
     "recording_smoke_app_identity": recording_app,
     "same_app_as_recording_smoke": same_app_as_recording_smoke,

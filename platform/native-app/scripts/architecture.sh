@@ -304,6 +304,9 @@ fi
 grep -q "local-app-permission-diagnostics" scripts/local-app-permission-diagnostics.sh
 grep -q "local-app-install-report.json" scripts/local-app-permission-diagnostics.sh
 grep -q "local-direct-recording-smoke-report.json" scripts/local-app-permission-diagnostics.sh
+grep -q "MA_NATIVE_LOCAL_APP_RECORDING_REPORT_SEARCH_ROOTS" scripts/local-app-permission-diagnostics.sh
+grep -q "release-local-direct-target-smoke" scripts/local-app-permission-diagnostics.sh
+grep -q '"recording_report_selection"' scripts/local-app-permission-diagnostics.sh
 grep -q '"release_gate": "local-app-permission-diagnostics"' scripts/local-app-permission-diagnostics.sh
 grep -q '"recommended_tcc_target"' scripts/local-app-permission-diagnostics.sh
 grep -q '"same_app_as_recording_smoke"' scripts/local-app-permission-diagnostics.sh
