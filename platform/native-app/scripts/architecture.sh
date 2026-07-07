@@ -21,6 +21,9 @@ grep -q "VS-MA-19A designed native shell boundary" tests/ArchitectureTest.md
 grep -q "VS-MA-20 opt-in native app-bundle MVP full-stack smoke boundary" tests/ArchitectureTest.md
 grep -q "MA_NATIVE_TRANSCRIPT_ACTION_CLIENT=process" tests/ArchitectureTest.md
 grep -q "MA_NATIVE_RECORDING_CONTROLLED_MIXED_AUDIO=1" tests/ArchitectureTest.md
+grep -q "Open Privacy Settings" tests/ArchitectureTest.md
+grep -q "NSWorkspace.shared.open" tests/ArchitectureTest.md
+grep -q "must not grant permissions" tests/ArchitectureTest.md
 grep -q "check_dependencies" tests/ArchitectureTest.md
 grep -q "session.json" tests/ArchitectureTest.md
 grep -q "screen_video" tests/ArchitectureTest.md
@@ -81,6 +84,7 @@ test -f UITests/MeetingAssistantNativeAppUITests/DesignedNativeShellAppBundleTes
 
 grep -R -q "check_dependencies" Sources tests App
 grep -R -q "ma.permissionDependency" Sources tests App UITests
+grep -R -q "ma.permissionDependency.openPrivacySettingsButton" Sources tests App UITests
 grep -R -q "start_native_recording" Sources tests
 grep -R -q "stop_recording" Sources tests
 grep -R -q "ma.recording" Sources tests App UITests
@@ -326,6 +330,24 @@ grep -R -q "XCUIApplication" UITests/MeetingAssistantNativeAppUITests
 grep -R -q "DesignedNativeShellAppBundleTests" MeetingAssistantNative.xcodeproj/project.pbxproj
 grep -R -q "MA_NATIVE_APP_SMOKE_FIXTURE" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MeetingAssistantNativeAppUITests" MeetingAssistantNative.xcodeproj/project.pbxproj
+
+permission_privacy_settings_file='Sources/MeetingAssistantNative/PermissionDependencyStatusView.swift'
+grep -q 'Button("Open Privacy Settings")' "$permission_privacy_settings_file"
+grep -q 'openPrivacySettings()' "$permission_privacy_settings_file"
+grep -q 'NSWorkspace.shared.open(url)' "$permission_privacy_settings_file"
+grep -q 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture' "$permission_privacy_settings_file"
+grep -q 'PermissionDependencyAccessibilityID.openPrivacySettingsButton' "$permission_privacy_settings_file"
+
+if grep -R --include '*.swift' -n -E 'NSWorkspace\b|x-apple\.systempreferences' Sources tests App UITests |
+  grep -v -F "$permission_privacy_settings_file"; then
+  echo "native-app architecture check failed: opening macOS privacy settings is allowed only from PermissionDependencyStatusView.swift." >&2
+  exit 1
+fi
+
+if grep -n -E 'tccutil|AuthorizationExecute|authorizationdb|SMJobBless|osascript|do shell script|defaults[[:space:]]+write|security[[:space:]]+authorizationdb|Process\b|NSTask\b|posix_spawn|execv|system[[:space:]]*\(|popen[[:space:]]*\(|CGRequestScreenCaptureAccess|AVCaptureDevice\.requestAccess' "$permission_privacy_settings_file"; then
+  echo "native-app architecture check failed: permission remediation may only open System Settings and must not mutate TCC, authorization databases, or system settings." >&2
+  exit 1
+fi
 
 apple_adapter_file='Sources/MeetingAssistantNative/AppleScreenCaptureKitNativeCaptureAdapter.swift'
 native_permission_file='Sources/MeetingAssistantNative/NativeCapturePermissionChecker.swift'

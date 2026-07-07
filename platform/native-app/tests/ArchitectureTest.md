@@ -7,6 +7,8 @@ VS-MA-12 boundary:
 1. This component may implement the permission/dependency status surface for VS-MA-12.
 2. It consumes the `check_dependencies` command contract through stable JSON only.
 3. It may expose SwiftUI status labels and accessibility identifiers for permissions and dependencies.
+4. It may expose an injected `Open Privacy Settings` action that opens the macOS Privacy & Security Screen Recording pane through `NSWorkspace.shared.open` from `PermissionDependencyStatusView.swift` only.
+5. The privacy settings action must not grant permissions, edit TCC, call `tccutil`, mutate authorization databases, run shell/system commands, use AppleScript or change system settings without the user acting in System Settings.
 
 VS-MA-13 fake recording boundary:
 

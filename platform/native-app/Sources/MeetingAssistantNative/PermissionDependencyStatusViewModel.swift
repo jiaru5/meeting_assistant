@@ -41,6 +41,10 @@ public struct PermissionDependencyStatusState: Equatable, Sendable {
     public let canStartRecording: Bool
     public let canRunProcessing: Bool
 
+    public var hasUnconfirmedOrDeniedPermissions: Bool {
+        permissions.contains { $0.state != .granted }
+    }
+
     public static let idle = PermissionDependencyStatusState(
         phase: .idle,
         summary: "Run checks before recording or processing.",

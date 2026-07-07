@@ -1,18 +1,26 @@
+import AppKit
 import SwiftUI
 
 public enum PermissionDependencyAccessibilityID {
     public static let heading = "ma.permissionDependency.heading"
     public static let summary = "ma.permissionDependency.summary"
     public static let checkButton = "ma.permissionDependency.checkButton"
+    public static let openPrivacySettingsButton = "ma.permissionDependency.openPrivacySettingsButton"
     public static let permissionsSection = "ma.permissionDependency.permissions"
     public static let dependenciesSection = "ma.permissionDependency.dependencies"
 }
 
 public struct PermissionDependencyStatusView: View {
     @ObservedObject private var viewModel: PermissionDependencyStatusViewModel
+    private let openPrivacySettings: () -> Void
 
     public init(viewModel: PermissionDependencyStatusViewModel) {
+        self.init(viewModel: viewModel, openPrivacySettings: SystemPrivacySettingsOpener.open)
+    }
+
+    public init(viewModel: PermissionDependencyStatusViewModel, openPrivacySettings: @escaping () -> Void) {
         self.viewModel = viewModel
+        self.openPrivacySettings = openPrivacySettings
     }
 
     public var body: some View {
@@ -36,6 +44,13 @@ public struct PermissionDependencyStatusView: View {
                 }
                 .disabled(viewModel.state.phase == .checking)
                 .accessibilityIdentifier(PermissionDependencyAccessibilityID.checkButton)
+
+                if viewModel.state.hasUnconfirmedOrDeniedPermissions {
+                    Button("Open Privacy Settings") {
+                        openPrivacySettings()
+                    }
+                    .accessibilityIdentifier(PermissionDependencyAccessibilityID.openPrivacySettingsButton)
+                }
 
                 statusSection(
                     title: "Permissions",
@@ -107,5 +122,14 @@ public struct PermissionDependencyStatusView: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(title), \(status), \(message)")
         .accessibilityIdentifier(identifier)
+    }
+}
+
+private enum SystemPrivacySettingsOpener {
+    static func open() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 }

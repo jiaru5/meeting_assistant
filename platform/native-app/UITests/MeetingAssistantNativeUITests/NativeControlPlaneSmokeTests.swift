@@ -602,6 +602,12 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
             line: line
         )
         XCTAssertEqual(
+            PermissionDependencyAccessibilityID.openPrivacySettingsButton,
+            "ma.permissionDependency.openPrivacySettingsButton",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
             PermissionDependencyAccessibilityID.permissionsSection,
             "ma.permissionDependency.permissions",
             file: file,
@@ -974,9 +980,12 @@ private enum SwiftUIViewSourceContract {
             source,
             contains: [
                 "Text(\"Meeting Assistant Readiness\")",
+                "Button(\"Open Privacy Settings\")",
+                "openPrivacySettings()",
                 ".accessibilityIdentifier(PermissionDependencyAccessibilityID.heading)",
                 ".accessibilityIdentifier(PermissionDependencyAccessibilityID.summary)",
                 ".accessibilityIdentifier(PermissionDependencyAccessibilityID.checkButton)",
+                ".accessibilityIdentifier(PermissionDependencyAccessibilityID.openPrivacySettingsButton)",
                 "identifier: PermissionDependencyAccessibilityID.permissionsSection",
                 "identifier: PermissionDependencyAccessibilityID.dependenciesSection",
                 ".accessibilityIdentifier(identifier)",

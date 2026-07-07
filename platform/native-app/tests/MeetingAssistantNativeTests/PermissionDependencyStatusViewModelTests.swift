@@ -145,6 +145,7 @@ struct PermissionDependencyStatusViewModelTests {
         #expect(state.phase == .ready)
         #expect(state.canStartRecording == true)
         #expect(state.permissions.first?.state == .notConfirmed)
+        #expect(state.hasUnconfirmedOrDeniedPermissions)
         #expect(
             state.summary ==
                 "Recording can be started to confirm macOS permissions; denied permissions still fail closed."
@@ -171,6 +172,7 @@ struct PermissionDependencyStatusViewModelTests {
         #expect(state.phase == .ready)
         #expect(state.canRunProcessing == true)
         #expect(state.canStartRecording == true)
+        #expect(state.hasUnconfirmedOrDeniedPermissions == false)
         #expect(state.summary == "Permissions and required dependencies are ready.")
     }
 
