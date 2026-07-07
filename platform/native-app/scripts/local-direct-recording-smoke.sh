@@ -557,11 +557,9 @@ try:
     playback = start_audio_playback()
     wait_for_recording_audio(playback)
     press("ma.recording.stopButton")
-    saved_snapshot = wait_for_marker("Recording saved.", timeout_seconds)
+    wait_for_marker("Recording saved.", timeout_seconds)
     for marker in ("screen_video: available", "mixed_audio: available"):
-        if marker not in saved_snapshot:
-            raise SmokeFailure("artifact_marker_missing", f"missing artifact marker: {marker}")
-        checked_markers.append(marker)
+        wait_for_marker(marker, min(timeout_seconds, 60))
     write_report(True)
 except SmokeFailure as exc:
     blocker_type = exc.kind

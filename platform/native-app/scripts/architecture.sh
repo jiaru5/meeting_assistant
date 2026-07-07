@@ -370,6 +370,7 @@ grep -q "ma.recording.startButton" scripts/local-direct-recording-smoke.sh
 grep -q "ma.recording.stopButton" scripts/local-direct-recording-smoke.sh
 grep -q "Recording in progress." scripts/local-direct-recording-smoke.sh
 grep -q "Recording saved." scripts/local-direct-recording-smoke.sh
+grep -q 'wait_for_marker(marker, min(timeout_seconds, 60))' scripts/local-direct-recording-smoke.sh
 grep -q "recording_request" scripts/local-direct-recording-smoke.sh
 grep -q "permission_failure_details" scripts/local-direct-recording-smoke.sh
 grep -q "tcc_identity_mismatch_hint" scripts/local-direct-recording-smoke.sh

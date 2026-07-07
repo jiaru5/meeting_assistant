@@ -1301,6 +1301,7 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("ma.recording.stopButton", recording_smoke_script)
         self.assertIn("Recording in progress.", recording_smoke_script)
         self.assertIn("Recording saved.", recording_smoke_script)
+        self.assertIn("wait_for_marker(marker, min(timeout_seconds, 60))", recording_smoke_script)
         self.assertIn("recording_request", recording_smoke_script)
         self.assertIn("permission_failure_details", recording_smoke_script)
         self.assertIn("tcc_identity_mismatch_hint", recording_smoke_script)
