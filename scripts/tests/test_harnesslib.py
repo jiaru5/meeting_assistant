@@ -536,6 +536,58 @@ class HarnessValidationTests(unittest.TestCase):
             lines.append(line)
         matrix.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+    def write_local_functional_preflight_report(
+        self,
+        fixture: Path,
+        *,
+        subject_commit: str | None = None,
+        target_scope: str = "local-machine-only",
+        not_release_readiness: bool = True,
+    ) -> Path:
+        report_path = fixture / "local-functional-preflight.json"
+        subject_commit = subject_commit or subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=fixture,
+            text=True,
+        ).strip()
+        report_path.write_text(
+            json.dumps(
+                {
+                    "report_schema": 1,
+                    "release_gate": "local-direct-functional-preflight",
+                    "target_scope": target_scope,
+                    "subject_commit": subject_commit,
+                    "target_id": "macos-arm64-local",
+                    "passed": True,
+                    "not_release_readiness": not_release_readiness,
+                    "release_blockers": [
+                        "local-direct functional preflight does not run product-validation release or release-preflight"
+                    ],
+                    "local_direct_app": {
+                        "path": "/Users/runner/Applications/MeetingAssistantNativeLocal.app",
+                        "CFBundleIdentifier": "local.meeting-assistant.native.localdirect",
+                    },
+                    "functional_checks": {
+                        "launch_modes": ["open"],
+                        "same_app_identity": True,
+                        "stage_passed": {
+                            "recording": True,
+                            "processing": True,
+                            "actions": True,
+                        },
+                        "expected_terms_found": ["HTTP", "LLM", "clean architecture"],
+                        "actions_markers": [
+                            "Copy complete.",
+                            "Export complete.",
+                            "Delete complete.",
+                        ],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return report_path
+
     def write_vs_statuses(
         self,
         fixture: Path,
@@ -604,6 +656,74 @@ class HarnessValidationTests(unittest.TestCase):
             output = result.stderr + result.stdout
             self.assertIn("Release candidate requires every PV-* row to be `covered`.", output)
             self.assertIn("PV-MA-001: partial", output)
+
+    def test_product_validation_local_functional_accepts_current_preflight_report(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            report = self.write_local_functional_preflight_report(fixture)
+            env = os.environ.copy()
+            env["MA_LOCAL_DIRECT_FUNCTIONAL_PREFLIGHT_REPORT"] = str(report)
+
+            result = subprocess.run(
+                [sys.executable, str(fixture / "scripts/product-validation-check.py"), "local-functional"],
+                cwd=fixture,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("product validation local-functional passed", result.stdout)
+            self.assertIn("Local functional scope is not release readiness", result.stdout)
+            self.assertIn("partial=", result.stdout)
+
+    def test_product_validation_local_functional_rejects_stale_report(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            report = self.write_local_functional_preflight_report(fixture, subject_commit="0" * 40)
+            env = os.environ.copy()
+            env["MA_LOCAL_DIRECT_FUNCTIONAL_PREFLIGHT_REPORT"] = str(report)
+
+            result = subprocess.run(
+                [sys.executable, str(fixture / "scripts/product-validation-check.py"), "local-functional"],
+                cwd=fixture,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("subject_commit must bind current HEAD", result.stderr + result.stdout)
+
+    def test_product_validation_local_functional_rejects_release_scope_report(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            self.init_git_baseline(fixture)
+            report = self.write_local_functional_preflight_report(
+                fixture,
+                target_scope="all-target-machines",
+                not_release_readiness=False,
+            )
+            env = os.environ.copy()
+            env["MA_LOCAL_DIRECT_FUNCTIONAL_PREFLIGHT_REPORT"] = str(report)
+
+            result = subprocess.run(
+                [sys.executable, str(fixture / "scripts/product-validation-check.py"), "local-functional"],
+                cwd=fixture,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stderr + result.stdout
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("target_scope='local-machine-only'", output)
+            self.assertIn("not_release_readiness=True", output)
 
     def test_vs_stage_current_phase_accepts_documented_partial_rows(self) -> None:
         result = subprocess.run(

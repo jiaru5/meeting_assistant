@@ -22,6 +22,7 @@
 ./scripts/db-migration-check.sh
 ./scripts/prod-config-check.sh
 ./scripts/product-validation-check.py current-phase
+./scripts/product-validation-check.py local-functional
 ./scripts/spec-sync-check.sh
 ./scripts/agent-workflow-check.sh
 ./scripts/architecture-check.sh
@@ -58,7 +59,7 @@
 | `dev-down.sh` | 停止本地集成环境，默认不删除数据卷 |
 | `db-migration-check.sh` | 对每个已接入服务验证 migration 可从空库执行 |
 | `prod-config-check.sh` | 检查生产 env 示例、默认 secret、profile 和 dev-only 配置隔离 |
-| `product-validation-check.py` | 按 `current-phase` 或 `release` 检查验证矩阵状态；当前阶段允许有 documented `partial/planned`，release 要求全部 `PV-*` 为 `covered` |
+| `product-validation-check.py` | 按 `current-phase`、`local-functional` 或 `release` 检查验证矩阵状态；当前阶段允许有 documented `partial/planned`，`local-functional` 要求当前 HEAD 有通过的 `local-direct-functional-preflight` report 且保留 `not_release_readiness=true`，release 要求全部 `PV-*` 为 `covered` |
 | `spec-sync-check.sh` | 检查产品表面改动是否同步事实源和验证矩阵 |
 | `agent-workflow-check.sh` | 检查本次 diff 是否同步了必要 spec、测试、验证矩阵和工程规范 |
 | `architecture-check.sh` | 执行每个注册组件的结构和依赖边界测试 |
@@ -147,6 +148,8 @@ local-direct same-chain 使用音频 fixture 时，`local-direct-recording-smoke
 `./platform/e2e/release-local-direct-repeatability-report.sh` 是 VS-MA-23 的 all-target local-direct repeatability 输入生成器。它要求 `MA_RELEASE_LOCAL_DIRECT_TARGET_SMOKE_REPORTS` 指向本轮 rehearsal 收集到的逐目标 `release-local-direct-target-smoke` report，并要求 `MA_RELEASE_LOCAL_DIRECT_EXPECTED_TARGETS` 显式声明完整 target id 列表；缺 expected target、report 未通过、commit 不匹配、重复/额外 target 或任一 expected target 未覆盖时，会写出 `target_scope=incomplete-target-set` 并失败，避免把单机本机功能 smoke 误认为全目标 repeatability、PV covered 或 release readiness。
 
 `./platform/e2e/local-direct-functional-preflight.sh` 是 VS-MA-23 的本机功能 preflight 入口，不属于 release-preflight。它顺序运行 `release-local-direct-target-smoke.sh` 和单台 expected target 的 `release-local-direct-repeatability-report.sh`，再调用 `local_direct_functional_preflight_report.py` 生成 `release_gate=local-direct-functional-preflight`、`target_scope=local-machine-only` report。该入口用于确认当前已授权本机 installed local-direct app 的 recording -> processing -> transcript actions 链路可复跑，并且显式保留 `not_release_readiness=true`；它不打开 System Settings、不修改 TCC、不要求 Developer ID/公证，不把单机功能 evidence 写成 `PV-MA-* covered` 或 `release-preflight` readiness。
+
+`./scripts/product-validation-check.py local-functional` 是本机功能验收视图。它先执行 `current-phase` 的矩阵文档完整性检查，再读取 `MA_LOCAL_DIRECT_FUNCTIONAL_PREFLIGHT_REPORT` 指定的 report，或默认读取最新 `platform/e2e/build/local-direct-functional-preflight/reports/local-direct-functional-preflight-*.json`。该命令要求 report 绑定当前 HEAD、`release_gate=local-direct-functional-preflight`、`target_scope=local-machine-only`、`passed=true`、`not_release_readiness=true`、LaunchServices `open`、同一 installed app identity、recording/processing/actions 三段通过、expected transcript terms 命中以及 copy/export/delete marker 存在。它允许验证矩阵继续保留 documented `partial` PV 行，用于回答“当前本机 installed app 功能是否跑通”；它不能替代 `product-validation-check.py release` 或 `release-preflight.sh`。
 
 `./platform/native-app/scripts/install-local-app.sh` 是 VS-MA-23 的 local-direct app install 入口，默认把本机 Release app 安装到稳定用户路径 `~/Applications/MeetingAssistantNativeLocal.app`。该脚本可用 `--rebuild` 先刷新 `.harness/release-build/.../MeetingAssistantNative.app`，复制前校验 source app 仍为 `CFBundleIdentifier=local.meeting-assistant.native`、`CFBundleName=MeetingAssistantNative`、app executable 和本地 `codesign --verify --deep --strict`；复制后只改安装副本的本机身份，默认写入 `CFBundleIdentifier=local.meeting-assistant.native.localdirect`、`CFBundleName=MeetingAssistantNativeLocal`、`CFBundleDisplayName=Meeting Assistant Native Local`，再执行 `codesign --force --deep --sign -` 和 verify，让 macOS TCC 授权目标区别于 Debug/XCUITest/旧 worktree 的同名 app。已存在安装目标必须是旧 source identity 或新的 local-direct identity 才会替换，避免覆盖无关应用。安装成功后写出 `platform/native-app/build/local-app-install/local-app-install-report.json`，记录 `release_gate=local-direct-app-install`、source app identity、installed app identity、codesign `CDHash`、`local_tcc_identity_strategy`、`opens_system_settings=false`、`modifies_tcc_or_system_settings=false`、`requires_developer_id_or_notarization=false`、`not_release_readiness=true` 和 direct recording diagnostic 复跑命令。该脚本不打开 System Settings、不修改 TCC、不调用 `tccutil`、不要求 Developer ID/公证/Stapler/Sigstore/App Store 分发；它只把本机安装授权对象从发布签名问题里隔离出来。安装后可用 `MA_NATIVE_LOCAL_APP_PATH="$HOME/Applications/MeetingAssistantNativeLocal.app" ./platform/native-app/scripts/run-local-app.sh --no-build` 或 `./platform/native-app/scripts/local-direct-smoke.sh --no-build --app "$HOME/Applications/MeetingAssistantNativeLocal.app"` 针对稳定安装路径复跑。
 
