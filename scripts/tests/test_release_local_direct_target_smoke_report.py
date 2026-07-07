@@ -30,18 +30,28 @@ class ReleaseLocalDirectTargetSmokeReportTests(unittest.TestCase):
         directory: str,
         *,
         passed: bool = True,
+        stage_exit_codes: dict[str, int] | None = None,
+        stage_passed: dict[str, bool] | None = None,
+        stage_reports: dict[str, str] | None = None,
+        blocker_type: str | None = None,
+        blocker_detail: str | None = None,
         launch_modes: list[str] | None = None,
         expected_terms_found: list[str] | None = None,
     ) -> Path:
         report_path = Path(directory) / "local-direct-same-chain-smoke-report.json"
+        stage_exit_codes = stage_exit_codes or {"recording": 0, "processing": 0, "actions": 0}
+        stage_passed = stage_passed or {"recording": True, "processing": True, "actions": True}
         report_path.write_text(
             json.dumps(
                 {
                     "report_schema": 1,
                     "release_gate": "local-direct-same-chain-smoke",
                     "passed": passed,
-                    "stage_exit_codes": {"recording": 0, "processing": 0, "actions": 0},
-                    "stage_passed": {"recording": True, "processing": True, "actions": True},
+                    "blocker_type": blocker_type or "",
+                    "blocker_detail": blocker_detail or "",
+                    "stage_exit_codes": stage_exit_codes,
+                    "stage_passed": stage_passed,
+                    "stage_reports": stage_reports or {},
                     "same_app_identity": True,
                     "requires_clean_app_processes": True,
                     "launch_modes": launch_modes or ["open"],
@@ -140,6 +150,42 @@ class ReleaseLocalDirectTargetSmokeReportTests(unittest.TestCase):
 
             self.assertFalse(report["passed"])
             self.assertTrue(any("LaunchServices open only" in item for item in report["findings"]))
+
+    def test_build_report_propagates_stage_blocker_context(self) -> None:
+        module = load_report_module()
+        with tempfile.TemporaryDirectory() as directory:
+            recording_report = Path(directory) / "recording.json"
+            recording_report.write_text(
+                json.dumps(
+                    {
+                        "passed": False,
+                        "blocker_type": "permission_denied",
+                        "blocker_detail_summary": (
+                            "Screen Recording permission is denied.; authorize exact app "
+                            "/Users/runner/Applications/MeetingAssistantNativeLocal.app "
+                            "(designated_requirement=identifier \"local.meeting-assistant.native.localdirect\" "
+                            "and certificate root = H\"abc\")"
+                        ),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            same_chain_report = self.write_same_chain_report(
+                directory,
+                passed=False,
+                blocker_type="same_chain_stage_failed",
+                blocker_detail="One or more local-direct same-chain stages failed.",
+                stage_exit_codes={"recording": 1, "processing": 1, "actions": 1},
+                stage_passed={"recording": False, "processing": False, "actions": False},
+                stage_reports={"recording": str(recording_report)},
+            )
+
+            report = module.build_report(ROOT, same_chain_report_path=same_chain_report)
+
+            self.assertFalse(report["passed"])
+            self.assertTrue(any("recording blocker: permission_denied" in item for item in report["failure_context"]))
+            self.assertTrue(any("Screen Recording permission is denied" in item for item in report["findings"]))
+            self.assertTrue(any("designated_requirement" in item for item in report["findings"]))
 
     def test_cli_writes_report_and_marker(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

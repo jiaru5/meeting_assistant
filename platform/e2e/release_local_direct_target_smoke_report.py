@@ -76,6 +76,61 @@ def load_json_object(path: Path, label: str, findings: list[str]) -> dict[str, A
     return payload
 
 
+def compact_text(value: object, *, limit: int = 600) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def same_chain_failure_context(report: dict[str, Any]) -> list[str]:
+    context: list[str] = []
+    blocker_type = compact_text(report.get("blocker_type"))
+    blocker_detail = compact_text(report.get("blocker_detail_summary") or report.get("blocker_detail"))
+    if blocker_type or blocker_detail:
+        if blocker_type and blocker_detail:
+            context.append(f"same-chain blocker: {blocker_type}: {blocker_detail}")
+        else:
+            context.append(f"same-chain blocker: {blocker_type or blocker_detail}")
+
+    stage_reports = report.get("stage_reports")
+    if not isinstance(stage_reports, dict):
+        return context
+    stage_passed = report.get("stage_passed")
+    if not isinstance(stage_passed, dict):
+        stage_passed = {}
+    stage_exit_codes = report.get("stage_exit_codes")
+    if not isinstance(stage_exit_codes, dict):
+        stage_exit_codes = {}
+
+    for stage in ("recording", "processing", "actions"):
+        if stage_passed.get(stage) is True and stage_exit_codes.get(stage) == 0:
+            continue
+        path_value = stage_reports.get(stage)
+        if not isinstance(path_value, str) or not path_value:
+            continue
+        stage_report_path = Path(path_value).expanduser()
+        try:
+            stage_report = json.loads(stage_report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(stage_report, dict):
+            continue
+        stage_blocker_type = compact_text(stage_report.get("blocker_type"))
+        stage_blocker_detail = compact_text(
+            stage_report.get("blocker_detail_summary") or stage_report.get("blocker_detail")
+        )
+        permission_details = stage_report.get("permission_failure_details")
+        if not stage_blocker_detail and isinstance(permission_details, list):
+            stage_blocker_detail = compact_text("; ".join(str(item) for item in permission_details if item))
+        if stage_blocker_type or stage_blocker_detail:
+            if stage_blocker_type and stage_blocker_detail:
+                context.append(f"{stage} blocker: {stage_blocker_type}: {stage_blocker_detail}")
+            else:
+                context.append(f"{stage} blocker: {stage_blocker_type or stage_blocker_detail}")
+    return context
+
+
 def validate_same_chain_report(report: dict[str, Any], findings: list[str]) -> dict[str, Any]:
     label = "local-direct same-chain smoke report"
     if report.get("report_schema") != 1:
@@ -169,6 +224,9 @@ def validate_same_chain_report(report: dict[str, Any], findings: list[str]) -> d
     if not isinstance(report.get("delete_event_path"), str) or not report.get("delete_event_path"):
         findings.append(f"{label} must include delete_event_path")
 
+    failure_context = same_chain_failure_context(report) if report.get("passed") is not True else []
+    findings.extend(f"{label} {item}" for item in failure_context)
+
     return {
         "app_identity": app_identity,
         "stage_exit_codes": dict(stage_exit_codes),
@@ -181,6 +239,7 @@ def validate_same_chain_report(report: dict[str, Any], findings: list[str]) -> d
         "export_path": report.get("export_path", ""),
         "delete_event_path": report.get("delete_event_path", ""),
         "expected_terms_found": expected_found,
+        "failure_context": failure_context,
     }
 
 
@@ -248,7 +307,9 @@ def build_report(
             "actions_markers": same_chain_summary.get("actions_markers", []),
             "export_path": same_chain_summary.get("export_path", ""),
             "delete_event_path": same_chain_summary.get("delete_event_path", ""),
+            "failure_context": same_chain_summary.get("failure_context", []),
         },
+        "failure_context": same_chain_summary.get("failure_context", []),
         "passed": passed,
         "not_release_readiness": True,
         "release_blockers": RELEASE_BLOCKERS,

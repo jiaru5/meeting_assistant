@@ -101,6 +101,11 @@ def validate_target_report(
         findings.append(f"{label} must bind subject_commit={expected_commit}")
     if report.get("passed") is not True:
         findings.append(f"{label} must set passed=True")
+        failure_context = report.get("failure_context")
+        if isinstance(failure_context, list):
+            for item in failure_context:
+                if isinstance(item, str) and item:
+                    findings.append(f"{label} blocker: {item}")
     if report.get("not_release_readiness") is not True:
         findings.append(f"{label} must keep not_release_readiness=True")
     for key in ("packages_runtime_or_model", "auto_downloads", "external_network_access"):

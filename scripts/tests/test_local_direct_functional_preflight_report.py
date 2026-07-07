@@ -85,8 +85,12 @@ class LocalDirectFunctionalPreflightReportTests(unittest.TestCase):
         passed: bool = True,
         installed_app: Path | None = None,
         expected_terms_found: list[str] | None = None,
+        failure_context: list[str] | None = None,
     ) -> Path:
         installed_app_path = installed_app or Path(directory) / "MeetingAssistantNativeLocal.app"
+        stage_passed = {"recording": True, "processing": True, "actions": True}
+        if not passed:
+            stage_passed = {"recording": False, "processing": False, "actions": False}
         report_path = Path(directory) / "target.json"
         report_path.write_text(
             json.dumps(
@@ -113,11 +117,13 @@ class LocalDirectFunctionalPreflightReportTests(unittest.TestCase):
                         "same_chain_passed": passed,
                         "same_app_identity": True,
                         "launch_modes": ["open"],
-                        "stage_passed": {"recording": True, "processing": True, "actions": True},
+                        "stage_passed": stage_passed,
                         "expected_terms_found": expected_terms_found
                         or ["HTTP", "LLM", "clean architecture"],
                         "actions_markers": ["Copy complete.", "Export complete.", "Delete complete."],
+                        "failure_context": failure_context or [],
                     },
+                    "failure_context": failure_context or [],
                     "passed": passed,
                     "not_release_readiness": True,
                 }
@@ -284,6 +290,40 @@ class LocalDirectFunctionalPreflightReportTests(unittest.TestCase):
             self.assertTrue(
                 any("installed local-direct app unsigned executable content must match" in item for item in report["findings"])
             )
+
+    def test_build_report_propagates_target_blocker_context(self) -> None:
+        module = load_report_module()
+        with tempfile.TemporaryDirectory() as directory:
+            source_app = self.write_fake_app(directory, "MeetingAssistantNative")
+            installed_app = self.write_fake_app(directory, "MeetingAssistantNativeLocal")
+            release_bundle_report = self.write_release_bundle_report(directory)
+            target_report = self.write_target_report(
+                directory,
+                installed_app=installed_app,
+                passed=False,
+                failure_context=[
+                    (
+                        "recording blocker: permission_denied: Screen Recording permission is denied.; "
+                        "authorize exact app /Users/runner/Applications/MeetingAssistantNativeLocal.app "
+                        "(designated_requirement=identifier \"local.meeting-assistant.native.localdirect\" "
+                        "and certificate root = H\"abc\")"
+                    )
+                ],
+            )
+            repeatability_report = self.write_repeatability_report(directory, target_report)
+
+            report = module.build_report(
+                ROOT,
+                target_smoke_report_path=target_report,
+                repeatability_report_path=repeatability_report,
+                source_app_path=source_app,
+                release_bundle_report_path=release_bundle_report,
+            )
+
+            self.assertFalse(report["passed"])
+            self.assertTrue(any("release local-direct target smoke report blocker" in item for item in report["findings"]))
+            self.assertTrue(any("permission_denied" in item for item in report["findings"]))
+            self.assertTrue(any("designated_requirement" in item for item in report["findings"]))
 
     def test_cli_writes_report_and_marker(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
