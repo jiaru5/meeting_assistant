@@ -107,7 +107,7 @@ docker-build
 release-preflight
 ```
 
-`./scripts/release-preflight.sh` 是 release preflight 的当前标准入口。若接入 GitHub Actions，`.github/workflows/release.yml` 应调用该脚本；只有 project 模式、真实组件、生产工件和发布验证全部就绪后才能变绿。
+`./scripts/release-preflight.sh` 是 release preflight 的当前标准入口。默认 `local-direct` 分发模式面向本机直接安装候选：总门禁会生成 Release bundle、安装稳定 `MeetingAssistantNativeLocal.app` 并运行 local-direct functional preflight；显式 `developer-id` 模式才使用更重的 release-scope native capture / XCUITest 分发证据路径。若接入 GitHub Actions，`.github/workflows/release.yml` 应调用该脚本；只有 project 模式、真实组件、生产工件和对应分发模式的发布验证全部就绪后才能变绿。
 
 ## 仓库保护
 
@@ -182,7 +182,7 @@ release-preflight
 ./scripts/release-preflight.sh
 ```
 
-`release-preflight.sh` 只用于真正的发布候选。它必须 fail-closed：先由 `vs-stage-check.py release` 确认 `VS-MA-14` 到 `VS-MA-22` 均为 `已达退出口径`，再检查发布范围内所有 `PV-*` 均为 `covered`；任何未关闭 VS、任何非 `covered` PV 或阶段收口证据替代发布证据时都不能变绿。
+`release-preflight.sh` 只用于真正的发布候选。它必须 fail-closed：先由 `vs-stage-check.py release` 确认 `VS-MA-14` 到 `VS-MA-22` 均为 `已达退出口径`，再检查发布范围内所有 `PV-*` 均为 `covered`；默认 local-direct 分支还必须证明已安装本机 app 与当前 source Release app 匹配并通过 recording -> processing -> transcript actions functional preflight。任何未关闭 VS、任何非 `covered` PV、installed app/source app 不一致，或阶段收口证据替代发布证据时都不能变绿。
 
 发布前必须确认：
 

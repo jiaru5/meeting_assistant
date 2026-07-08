@@ -949,6 +949,14 @@ class HarnessValidationTests(unittest.TestCase):
         dev_commands = (ROOT / "docs/engineering/02-dev-commands.md").read_text(encoding="utf-8")
         e2e_readme = (ROOT / "platform/e2e/README.md").read_text(encoding="utf-8")
 
+        self.assertIn('MEETING_ASSISTANT_RELEASE_DISTRIBUTION_MODE:-local-direct', release_preflight)
+        self.assertIn("run_local_direct_release_candidate_gates", release_preflight)
+        self.assertIn("./scripts/release-candidate-inputs.py", release_preflight)
+        self.assertIn("./platform/native-app/scripts/install-local-app.sh", release_preflight)
+        self.assertIn("./platform/e2e/local-direct-functional-preflight.sh", release_preflight)
+        self.assertIn("MA_LOCAL_DIRECT_FUNCTIONAL_BUILD_SOURCE=0", release_preflight)
+        self.assertIn("./scripts/product-validation-check.py local-functional", release_preflight)
+        self.assertIn("run_release_scope_native_capture_gates", release_preflight)
         self.assertIn("python3 scripts/vs-stage-check.py release", release_preflight)
         self.assertIn("python3 scripts/product-validation-check.py release", release_preflight)
         self.assertIn("./platform/e2e/release-native-capture-artifact-smoke.sh", release_preflight)
@@ -959,7 +967,7 @@ class HarnessValidationTests(unittest.TestCase):
         )
         self.assertLess(
             release_preflight.index("python3 scripts/product-validation-check.py release"),
-            release_preflight.index("./platform/e2e/release-native-capture-artifact-smoke.sh"),
+            release_preflight.index('if [ "$release_distribution_mode" = "local-direct" ]'),
         )
         self.assertIn("MA_NATIVE_CAPTURE_SMOKE=1", wrapper)
         self.assertIn("MA_NATIVE_CAPTURE_RELEASE_SCOPE=1", wrapper)
@@ -974,20 +982,14 @@ class HarnessValidationTests(unittest.TestCase):
         dev_commands = (ROOT / "docs/engineering/02-dev-commands.md").read_text(encoding="utf-8")
         e2e_readme = (ROOT / "platform/e2e/README.md").read_text(encoding="utf-8")
 
+        self.assertIn("run_local_direct_release_candidate_gates", release_preflight)
+        self.assertIn("run_release_scope_native_capture_gates", release_preflight)
         self.assertIn("./platform/e2e/release-native-capture-artifact-smoke.sh", release_preflight)
         self.assertIn("./platform/e2e/release-real-capture-same-chain-smoke.sh", release_preflight)
         self.assertIn("./platform/e2e/release-native-ui-hardening-smoke.sh", release_preflight)
         self.assertIn("./platform/e2e/release-capture-processing-hardening-smoke.sh", release_preflight)
         self.assertLess(
-            release_preflight.index("./platform/e2e/release-native-capture-artifact-smoke.sh"),
-            release_preflight.index("./platform/e2e/release-real-capture-same-chain-smoke.sh"),
-        )
-        self.assertLess(
-            release_preflight.index("./platform/e2e/release-real-capture-same-chain-smoke.sh"),
-            release_preflight.index("./platform/e2e/release-native-ui-hardening-smoke.sh"),
-        )
-        self.assertLess(
-            release_preflight.index("./platform/e2e/release-native-ui-hardening-smoke.sh"),
+            release_preflight.index('if [ "$release_distribution_mode" = "local-direct" ]'),
             release_preflight.index("./platform/e2e/release-capture-processing-hardening-smoke.sh"),
         )
         self.assertIn("platform/e2e/capture_processing_hardening_report.py", wrapper)
@@ -1004,6 +1006,7 @@ class HarnessValidationTests(unittest.TestCase):
         dev_commands = (ROOT / "docs/engineering/02-dev-commands.md").read_text(encoding="utf-8")
         e2e_readme = (ROOT / "platform/e2e/README.md").read_text(encoding="utf-8")
 
+        self.assertIn("run_release_scope_native_capture_gates", release_preflight)
         self.assertIn("./platform/e2e/release-native-capture-artifact-smoke.sh", release_preflight)
         self.assertIn("./platform/e2e/release-real-capture-same-chain-smoke.sh", release_preflight)
         self.assertIn("./platform/e2e/release-native-ui-hardening-smoke.sh", release_preflight)
