@@ -1897,6 +1897,72 @@ class HarnessValidationTests(unittest.TestCase):
             self.assertIn("./scripts/architecture-check.sh", result.stdout)
             self.assertIn("./scripts/security-check.sh", result.stdout)
 
+    def test_prepare_smoke_image_accepts_no_pull_run_when_inspect_misses_target(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fake_bin = Path(directory) / "bin"
+            fake_bin.mkdir()
+            docker_log = Path(directory) / "docker.log"
+            fake_docker = fake_bin / "docker"
+            fake_docker.write_text(
+                "\n".join(
+                    [
+                        "#!/usr/bin/env bash",
+                        "set -euo pipefail",
+                        "printf '%s\\n' \"$*\" >> \"${FAKE_DOCKER_LOG}\"",
+                        "case \"${1:-}\" in",
+                        "  info)",
+                        "    exit 0",
+                        "    ;;",
+                        "  image)",
+                        "    if [ \"${2:-}\" = inspect ]; then",
+                        "      exit 1",
+                        "    fi",
+                        "    if [ \"${2:-}\" = tag ]; then",
+                        "      exit 0",
+                        "    fi",
+                        "    ;;",
+                        "  run)",
+                        "    if [ \"${2:-}\" = --rm ] && [ \"${3:-}\" = --pull=never ] && [ \"${4:-}\" = --network ] && [ \"${5:-}\" = none ] && [ \"${6:-}\" = fixture-smoke:local ]; then",
+                        "      exit 0",
+                        "    fi",
+                        "    exit 1",
+                        "    ;;",
+                        "esac",
+                        "exit 1",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            fake_docker.chmod(0o755)
+            env = os.environ.copy()
+            env.update(
+                {
+                    "FAKE_DOCKER_LOG": str(docker_log),
+                    "MEETING_ASSISTANT_SMOKE_IMAGE": "fixture-smoke:local",
+                    "MEETING_ASSISTANT_SMOKE_IMAGE_PROBE_ATTEMPTS": "1",
+                    "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
+                }
+            )
+
+            result = subprocess.run(
+                [str(ROOT / "platform/e2e/prepare-smoke-image.sh")],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            combined = result.stderr + result.stdout
+            self.assertIn("target image inspect did not find image; no-pull run probe succeeded: fixture-smoke:local", combined)
+            self.assertIn("local smoke image available and runnable: fixture-smoke:local", combined)
+            docker_calls = docker_log.read_text(encoding="utf-8")
+            self.assertIn("image inspect fixture-smoke:local", docker_calls)
+            self.assertIn("run --rm --pull=never --network none fixture-smoke:local sh -c sleep 0", docker_calls)
+            self.assertNotIn("image tag", docker_calls)
+
     def test_review_report_require_evidence_rejects_stale_fingerprint(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.copy_repo_fixture(directory)

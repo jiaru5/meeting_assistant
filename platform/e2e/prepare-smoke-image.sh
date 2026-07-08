@@ -25,6 +25,26 @@ image_can_run_smoke_shell() {
   docker run --rm --pull=never --network none "$image" sh -c 'sleep 0' >/dev/null 2>&1
 }
 
+cached_image_runnable() {
+  local image="$1"
+  local label="$2"
+
+  if image_exists_once "$image"; then
+    if image_can_run_smoke_shell "$image"; then
+      return 0
+    fi
+    echo "prepare-smoke-image: $label exists but cannot run required sh/sleep probe: $image" >&2
+    return 1
+  fi
+
+  if image_can_run_smoke_shell "$image"; then
+    echo "prepare-smoke-image: $label inspect did not find image; no-pull run probe succeeded: $image" >&2
+    return 0
+  fi
+
+  return 2
+}
+
 if ! command -v docker >/dev/null 2>&1; then
   cat >&2 <<EOF
 prepare-smoke-image failed: docker executable was not found.
@@ -65,31 +85,45 @@ printf 'prepare-smoke-image: pull policy: never; no automatic registry pull will
 
 prepare_from_cached_image() {
   local candidate
+  local candidate_status
+  local target_status
 
-  if image_exists_once "$target_image"; then
-    if image_can_run_smoke_shell "$target_image"; then
-      echo "local smoke image available and runnable: $target_image"
-      return 0
-    fi
-    echo "prepare-smoke-image: target image exists but cannot run required sh/sleep probe: $target_image" >&2
+  if cached_image_runnable "$target_image" "target image"; then
+    echo "local smoke image available and runnable: $target_image"
+    return 0
   fi
 
   for candidate in "${candidates[@]}"; do
-    if ! image_exists_once "$candidate"; then
-      echo "prepare-smoke-image: cached candidate not found: $candidate"
-      continue
+    if cached_image_runnable "$candidate" "cached candidate"; then
+      candidate_status=0
+    else
+      candidate_status="$?"
     fi
-    if ! image_can_run_smoke_shell "$candidate"; then
-      echo "prepare-smoke-image: cached candidate cannot run required sh/sleep probe: $candidate" >&2
-      continue
-    fi
+    case "$candidate_status" in
+      0)
+        ;;
+      1)
+        echo "prepare-smoke-image: cached candidate cannot run required sh/sleep probe: $candidate" >&2
+        continue
+        ;;
+      2)
+        echo "prepare-smoke-image: cached candidate not found: $candidate"
+        continue
+        ;;
+    esac
     if [ "$candidate" != "$target_image" ] && ! docker image tag "$candidate" "$target_image"; then
       echo "prepare-smoke-image: failed to tag cached candidate $candidate as $target_image" >&2
       continue
     fi
-    if image_can_run_smoke_shell "$target_image"; then
+    if cached_image_runnable "$target_image" "target image"; then
+      target_status=0
       echo "local smoke image prepared and runnable: $target_image from cached $candidate"
       return 0
+    else
+      target_status="$?"
+    fi
+    if [ "$target_status" -eq 2 ]; then
+      echo "prepare-smoke-image: cached candidate not found: $candidate"
     fi
     echo "prepare-smoke-image: tagged target cannot run required sh/sleep probe: $target_image from $candidate" >&2
   done
