@@ -115,7 +115,7 @@ public final class ProcessingStateViewModel: ObservableObject {
     private let commandClient: any ProcessingCommandClient
     private var readinessState: PermissionDependencyStatusState
     private var lastRunRequest: ProcessingRunRequest?
-    private let defaultSessionID: String
+    private var defaultSessionID: String
     private let defaultLanguage: String?
     private let defaultRuntime: ProcessingTranscriptRuntime?
 
@@ -137,6 +137,23 @@ public final class ProcessingStateViewModel: ObservableObject {
     public func updateReadiness(_ readinessState: PermissionDependencyStatusState) {
         self.readinessState = readinessState
         guard state.phase == .idle || state.phase == .blocked else {
+            return
+        }
+        state = readinessState.canRunProcessing ? .idle : .blocked
+    }
+
+    public func updateDefaultSessionID(_ sessionID: String) {
+        let nextSessionID = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !nextSessionID.isEmpty else {
+            return
+        }
+        guard defaultSessionID != nextSessionID else {
+            return
+        }
+
+        defaultSessionID = nextSessionID
+        lastRunRequest = nil
+        guard !state.isBusy else {
             return
         }
         state = readinessState.canRunProcessing ? .idle : .blocked

@@ -89,6 +89,7 @@ actions_exit=-1
 set +e
 MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_REPORT_DIR="$recording_report_dir" \
 MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_WORKSPACE="$workspace_dir" \
+MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_SESSION_ID="$session_id" \
 MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_AUDIO="$audio_path" \
 MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_DURATION_SECONDS="$recording_seconds" \
 "$component_dir/scripts/local-direct-recording-smoke.sh" "$@"

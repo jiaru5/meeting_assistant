@@ -2364,6 +2364,7 @@ private final class AppAppleScreenCaptureKitRecordingFixture {
         app.launchEnvironment["MA_NATIVE_CAPTURE_SMOKE_MICROPHONE_AUDIO"] = captureMicrophoneAudio ? "true" : "false"
         app.launchEnvironment["MA_NATIVE_APP_XCTEST"] = "1"
         app.launchEnvironment["MA_NATIVE_RECORDING_WORKSPACE"] = workspaceURL.path
+        app.launchEnvironment["MA_NATIVE_RECORDING_SESSION_ID"] = sessionID
     }
 
     func sessionMetadata() throws -> [String: Any] {

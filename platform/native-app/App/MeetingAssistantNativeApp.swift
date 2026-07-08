@@ -136,7 +136,8 @@ private struct NativeControlPlaneRootView: View {
     @StateObject private var recordingViewModel: RecordingControlViewModel
     @StateObject private var processingViewModel: ProcessingStateViewModel
     @StateObject private var transcriptActionViewModel: TranscriptReviewActionsViewModel
-    private let transcriptViewModel: TranscriptReviewViewModel
+    @State private var transcriptViewModel: TranscriptReviewViewModel
+    @State private var loadedTranscriptSessionID: String?
     private let preflightWorkspaceURL: URL?
     private let autoRefreshPreflightOnAppear: Bool
     private let captureSystemAudio: Bool
@@ -187,7 +188,7 @@ private struct NativeControlPlaneRootView: View {
                 defaultRuntime: configuration.processingDefaultRuntime
             )
         )
-        transcriptViewModel = TranscriptReviewViewModel(input: configuration.transcriptInput)
+        _transcriptViewModel = State(initialValue: TranscriptReviewViewModel(input: configuration.transcriptInput))
         _transcriptActionViewModel = StateObject(
             wrappedValue: TranscriptReviewActionsViewModel(
                 input: configuration.transcriptInput,
@@ -272,6 +273,43 @@ private struct NativeControlPlaneRootView: View {
         }
         .background {
             smokeStateReportView
+        }
+        .onChange(of: recordingViewModel.state) { _, newState in
+            synchronizeProcessingSession(with: newState)
+        }
+        .onChange(of: processingViewModel.state) { _, newState in
+            synchronizeTranscriptReview(with: newState)
+        }
+    }
+
+    @MainActor
+    private func synchronizeProcessingSession(with recordingState: RecordingControlState) {
+        guard let sessionID = recordingState.sessionID else {
+            return
+        }
+        processingViewModel.updateDefaultSessionID(sessionID)
+    }
+
+    @MainActor
+    private func synchronizeTranscriptReview(with processingState: ProcessingState) {
+        guard processingState.phase == .completed || processingState.phase == .degraded,
+              let sessionID = processingState.sessionID,
+              sessionID != loadedTranscriptSessionID,
+              let workspaceURL = preflightWorkspaceURL
+        else {
+            return
+        }
+
+        do {
+            let input = try TranscriptReviewWorkspaceLoader.load(
+                workspaceURL: workspaceURL,
+                sessionID: sessionID
+            )
+            transcriptViewModel = TranscriptReviewViewModel(input: input)
+            transcriptActionViewModel.updateInput(input)
+            loadedTranscriptSessionID = sessionID
+        } catch {
+            return
         }
     }
 
@@ -925,7 +963,7 @@ private struct NativeControlPlaneFixtureConfiguration {
                     )
                 ),
                 captureAdapter: AppleScreenCaptureKitNativeCaptureAdapter(),
-                sessionIDProvider: { sessionID },
+                sessionIDProvider: Self.realCaptureSessionIDProvider(environment: environment),
                 requestIDProvider: { command in "app-apple-screencapturekit-\(command.rawValue)" }
             )
         }
@@ -1399,6 +1437,17 @@ private struct NativeControlPlaneFixtureConfiguration {
             return nil
         }
         return URL(fileURLWithPath: workspacePath, isDirectory: true)
+    }
+
+    private static func realCaptureSessionIDProvider(
+        environment: [String: String]
+    ) -> @Sendable () -> String {
+        let configuredSessionID = environment["MA_NATIVE_RECORDING_SESSION_ID"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let configuredSessionID, !configuredSessionID.isEmpty {
+            return { configuredSessionID }
+        }
+        return { "session-\(UUID().uuidString.lowercased())" }
     }
 
     private static func controlledRecordingArtifacts(

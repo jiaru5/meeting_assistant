@@ -15,6 +15,7 @@ app_state_report_file="$report_dir/local-direct-recording-app-state-report.json"
 runner_log="$report_dir/run-local-app.log"
 audio_path="${MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_AUDIO:-${MEETING_ASSISTANT_WHISPER_SMOKE_AUDIO:-}}"
 workspace_dir="${MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_WORKSPACE:-}"
+session_id="${MA_NATIVE_LOCAL_APP_RECORDING_SMOKE_SESSION_ID:-session-app-ui-blocked}"
 workspace_temp_dir=""
 ax_helper="$report_dir/local-app-ax-helper"
 
@@ -88,6 +89,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 MA_NATIVE_LOCAL_APP_SMOKE_STATE_REPORT="$app_state_report_file" \
+MA_NATIVE_RECORDING_SESSION_ID="$session_id" \
 "$component_dir/scripts/run-local-app.sh" --workspace "$workspace_dir" "$@" >"$runner_log" 2>&1 &
 runner_pid=$!
 

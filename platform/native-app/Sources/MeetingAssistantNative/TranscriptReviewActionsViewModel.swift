@@ -95,12 +95,19 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
         self.destinationSelector = destinationSelector
         self.workspaceDir = workspaceDir
 
+        state = Self.initialState(input: input)
+    }
+
+    public func updateInput(_ input: TranscriptReviewInput) {
+        state = Self.initialState(input: input)
+    }
+
+    private static func initialState(input: TranscriptReviewInput) -> TranscriptReviewActionsState {
         guard let sessionID = input.transcript?.sessionID else {
-            state = .unavailable
-            return
+            return .unavailable
         }
 
-        state = TranscriptReviewActionsState(
+        return TranscriptReviewActionsState(
             phase: .ready,
             sessionID: sessionID,
             sessionTitle: input.sessionTitle,

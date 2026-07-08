@@ -754,6 +754,28 @@ struct TranscriptReviewActionsViewModelTests {
         #expect(deleteRequests.isEmpty)
     }
 
+    @Test
+    func updateInputEnablesActionsAfterProcessingLoadsTranscript() {
+        let viewModel = TranscriptReviewActionsViewModel(
+            input: TranscriptReviewInput(sessionTitle: "Missing", transcript: nil),
+            commandClient: TranscriptActionFakeCommandClient(),
+            clipboard: TranscriptActionMemoryClipboard(),
+            destinationSelector: TranscriptActionStaticDestinationSelector()
+        )
+
+        #expect(viewModel.state.isAvailable == false)
+
+        viewModel.updateInput(actionInput(sessionTitle: "Loaded Transcript"))
+
+        #expect(viewModel.state.isAvailable == true)
+        #expect(viewModel.state.phase == .ready)
+        #expect(viewModel.state.sessionID == "session-actions")
+        #expect(viewModel.state.sessionTitle == "Loaded Transcript")
+        #expect(viewModel.state.canCopy == true)
+        #expect(viewModel.state.canExport == true)
+        #expect(viewModel.state.canRequestDelete == true)
+    }
+
     private func actionInput(sessionTitle: String? = "Action Transcript") -> TranscriptReviewInput {
         TranscriptReviewInput(
             sessionTitle: sessionTitle,

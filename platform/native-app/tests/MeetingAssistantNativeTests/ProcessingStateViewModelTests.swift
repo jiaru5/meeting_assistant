@@ -217,6 +217,38 @@ struct ProcessingStateViewModelTests {
     }
 
     @Test
+    func recordingSessionUpdateChangesDefaultSessionAndClearsOldRetry() async {
+        let client = ProcessingCommandFakeClient(
+            transcriptScript: .failure(
+                code: "processing_failed",
+                message: "Transcript adapter failed."
+            )
+        )
+        let viewModel = ProcessingStateViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState(),
+            defaultSessionID: "session-app-ui-blocked"
+        )
+
+        await viewModel.start()
+        #expect(viewModel.state.phase == .failed)
+        #expect(viewModel.state.sessionID == "session-app-ui-blocked")
+        #expect(viewModel.canRetry)
+
+        viewModel.updateDefaultSessionID("session-current-recording")
+        #expect(viewModel.state.phase == .idle)
+        #expect(!viewModel.canRetry)
+
+        await viewModel.start()
+
+        let transcriptRequests = await client.transcriptRequestSnapshot()
+        #expect(transcriptRequests == [
+            GenerateTranscriptRequest(sessionID: "session-app-ui-blocked"),
+            GenerateTranscriptRequest(sessionID: "session-current-recording"),
+        ])
+    }
+
+    @Test
     func failureDisplayRedactsUnsafeMessageDetailsAndWarningsWithoutChangingCode() async {
         let client = ProcessingCommandFakeClient(
             transcriptScript: .failure(
