@@ -18,6 +18,7 @@ grep -q "VS-MA-17 read-only transcript review boundary" tests/ArchitectureTest.m
 grep -q "read-only workspace transcript loading boundary" tests/ArchitectureTest.md
 grep -q "VS-MA-18/VS-MA-19 deterministic transcript action consumer boundary" tests/ArchitectureTest.md
 grep -q "VS-MA-19A designed native shell boundary" tests/ArchitectureTest.md
+grep -q "VS-MA-26 through VS-MA-30 task-based meeting workflow boundary" tests/ArchitectureTest.md
 grep -q "VS-MA-20 opt-in native app-bundle MVP full-stack smoke boundary" tests/ArchitectureTest.md
 grep -q "MA_NATIVE_TRANSCRIPT_ACTION_CLIENT=process" tests/ArchitectureTest.md
 grep -q "MA_NATIVE_RECORDING_CONTROLLED_MIXED_AUDIO=1" tests/ArchitectureTest.md
@@ -40,6 +41,10 @@ grep -q "ma.processing" tests/ArchitectureTest.md
 grep -q "ma.transcriptAction" tests/ArchitectureTest.md
 grep -q "ma.shell" tests/ArchitectureTest.md
 grep -q "ma.sessionArtifact" tests/ArchitectureTest.md
+grep -q "ma.meetings" tests/ArchitectureTest.md
+grep -q "ma.newRecording" tests/ArchitectureTest.md
+grep -q "ma.meetingDetail" tests/ArchitectureTest.md
+grep -q "ma.diagnostics" tests/ArchitectureTest.md
 test -f MeetingAssistantNative.xcodeproj/project.pbxproj
 test -f MeetingAssistantNative.xcodeproj/xcshareddata/xcschemes/MeetingAssistantNative.xcscheme
 test -x scripts/native-capture-smoke.sh
@@ -80,12 +85,16 @@ test -f Sources/MeetingAssistantNative/ProcessingStateViewModel.swift
 test -f Sources/MeetingAssistantNative/ProcessingStateView.swift
 test -f Sources/MeetingAssistantNative/DesignedNativeShellViewModel.swift
 test -f Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+test -f Sources/MeetingAssistantNative/MeetingSessionWorkspaceRepository.swift
+test -f Sources/MeetingAssistantNative/MeetingWorkspaceCoordinator.swift
 test -x test-fixtures/processing-command-fixture.sh
 test -x test-fixtures/transcript-action-command-fixture.sh
 test -f tests/MeetingAssistantNativeTests/NativeRecordingCommandClientTests.swift
 test -f tests/MeetingAssistantNativeTests/TranscriptReviewActionsViewModelTests.swift
 test -f tests/MeetingAssistantNativeTests/ProcessingStateViewModelTests.swift
 test -f tests/MeetingAssistantNativeTests/DesignedNativeShellViewModelTests.swift
+test -f tests/MeetingAssistantNativeTests/MeetingSessionWorkspaceRepositoryTests.swift
+test -f tests/MeetingAssistantNativeTests/MeetingWorkspaceCoordinatorTests.swift
 test -f UITests/MeetingAssistantNativeUITests/NativeControlPlaneSmokeTests.swift
 test -f UITests/MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests.swift
 test -f UITests/MeetingAssistantNativeAppUITests/DesignedNativeShellAppBundleTests.swift
@@ -143,6 +152,12 @@ grep -R -q "DesignedNativeShellViewModel" Sources tests App UITests
 grep -R -q "DesignedNativeShellView" Sources tests App UITests
 grep -R -q "ma.shell" Sources tests App UITests
 grep -R -q "ma.sessionArtifact" Sources tests App UITests
+grep -R -q "ma.meetings" Sources tests App UITests
+grep -R -q "ma.newRecording" Sources tests App UITests
+grep -R -q "ma.meetingDetail" Sources tests App UITests
+grep -R -q "ma.diagnostics" Sources tests App UITests
+grep -R -q "MeetingSessionWorkspaceRepository" Sources tests App UITests
+grep -R -q "MeetingWorkspaceCoordinator" Sources tests App UITests
 grep -R -q "MA_NATIVE_RECORDING_CLIENT" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "MA_NATIVE_RECORDING_WORKSPACE" App UITests/MeetingAssistantNativeAppUITests
 grep -R -q "isRecordingClientTestHookAllowed" App/MeetingAssistantNativeApp.swift
@@ -236,7 +251,7 @@ if grep -q "NSApplicationDelegateAdaptor\\|MeetingAssistantNativeAppDelegate\\|a
   exit 1
 fi
 grep -R -q "autoRefreshPreflightOnAppear" App/MeetingAssistantNativeApp.swift Sources/MeetingAssistantNative/DesignedNativeShellView.swift
-grep -R -q "preflightWorkspaceURL" App/MeetingAssistantNativeApp.swift Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -R -q "workspaceURL" App/MeetingAssistantNativeApp.swift Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -R -q ".onChange(of: permissionViewModel.state)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -R -q "recordingViewModel.updateReadiness(readiness)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -R -q "processingViewModel.updateReadiness(readiness)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
@@ -246,8 +261,7 @@ grep -R -q '.keyboardShortcut("p", modifiers: \[.command, .option\])' Sources/Me
 grep -R -q '.keyboardShortcut("c", modifiers: \[.command, .option\])' Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -R -q '.keyboardShortcut("e", modifiers: \[.command, .option\])' Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -R -q '.keyboardShortcut("d", modifiers: \[.command, .option\])' Sources/MeetingAssistantNative/DesignedNativeShellView.swift
-grep -R -q ".keyboardShortcut(.defaultAction)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
-grep -R -q "await permissionViewModel.refresh(workspaceURL: preflightWorkspaceURL)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -R -q "await permissionViewModel.refresh(workspaceURL: coordinator.workspaceURL)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -q "release-bundle-create.py" scripts/run-local-app.sh
 grep -q "Contents/MacOS/MeetingAssistantNative" scripts/run-local-app.sh
 grep -q "MA_NATIVE_LOCAL_APP_LAUNCH_MODE" scripts/run-local-app.sh
@@ -360,7 +374,7 @@ grep -q '"opens_system_settings": False' scripts/local-direct-smoke.sh
 grep -q '"starts_recording": False' scripts/local-direct-smoke.sh
 grep -q '"requires_developer_id_or_notarization": False' scripts/local-direct-smoke.sh
 grep -q "Ready to start recording." scripts/local-direct-smoke.sh
-grep -q "Processing is ready to run." scripts/local-direct-smoke.sh
+grep -q "Choose a recorded meeting before generating a transcript." scripts/local-direct-smoke.sh
 if grep -q "CGRequestScreenCaptureAccess\\|AVCaptureDevice\\.requestAccess\\|x-apple.systempreferences\\|tccutil\\|security authorizationdb\\|notarytool\\|stapler\\|cosign" scripts/local-direct-smoke.sh; then
   echo "native-app architecture check failed: local-direct smoke must not request permissions, open System Settings, or require distribution gates." >&2
   exit 1
@@ -370,6 +384,7 @@ grep -q "local-direct-recording-smoke" scripts/local-direct-recording-smoke.sh
 grep -q "AXIdentifier" scripts/local-direct-recording-smoke.sh
 grep -q "AXPress" scripts/local-direct-recording-smoke.sh
 grep -q "ma.recording.startButton" scripts/local-direct-recording-smoke.sh
+grep -q "ma.meetings.newRecordingButton" scripts/local-direct-recording-smoke.sh
 grep -q "ma.recording.stopButton" scripts/local-direct-recording-smoke.sh
 grep -q "Recording in progress." scripts/local-direct-recording-smoke.sh
 grep -q "Recording saved." scripts/local-direct-recording-smoke.sh
@@ -392,6 +407,7 @@ grep -q "System Events" scripts/local-direct-processing-smoke.sh
 grep -q "AXIdentifier" scripts/local-direct-processing-smoke.sh
 grep -q "AXPress" scripts/local-direct-processing-smoke.sh
 grep -q "ma.processing.startButton" scripts/local-direct-processing-smoke.sh
+grep -q "ma.meetings.row" scripts/local-direct-processing-smoke.sh
 grep -q "Processing is ready to run." scripts/local-direct-processing-smoke.sh
 grep -q "Processing complete." scripts/local-direct-processing-smoke.sh
 grep -q "Processing completed with transcript-only speaker labels." scripts/local-direct-processing-smoke.sh
@@ -414,6 +430,7 @@ grep -q "local-direct-actions-smoke" scripts/local-direct-actions-smoke.sh
 grep -q "AXIdentifier" scripts/local-direct-actions-smoke.sh
 grep -q "AXPress" scripts/local-direct-actions-smoke.sh
 grep -q "ma.transcriptAction.copyButton" scripts/local-direct-actions-smoke.sh
+grep -q "ma.meetings.row" scripts/local-direct-actions-smoke.sh
 grep -q "ma.transcriptAction.exportButton" scripts/local-direct-actions-smoke.sh
 grep -q "ma.transcriptAction.deleteButton" scripts/local-direct-actions-smoke.sh
 grep -q "ma.transcriptAction.deleteConfirmButton" scripts/local-direct-actions-smoke.sh
@@ -635,13 +652,13 @@ if grep -R --include '*.swift' -n -E 'generate_transcript|generate_speaker_label
   exit 1
 fi
 
-if grep -R --include 'Processing*.swift' -n -E 'Process\b|ProcessInfo\b|Pipe\b|standardOutput|standardError' Sources/MeetingAssistantNative |
+if grep -R --include 'Processing*.swift' -n -E 'Process\b|ProcessInfo\b|Pipe\b|standardOutput|standardError|posix_spawn|execv|system[[:space:]]*\(|popen[[:space:]]*\(' Sources/MeetingAssistantNative |
   grep -v 'ProcessingCommandProcessRunner.swift'; then
-  echo "native-app architecture check failed: Process usage is only allowed in ProcessingCommandProcessRunner.swift." >&2
+  echo "native-app architecture check failed: process execution primitives are only allowed in ProcessingCommandProcessRunner.swift." >&2
   exit 1
 fi
 
-processing_boundary_forbidden='(^[[:space:]]*import[[:space:]]+(AppKit|ScreenCaptureKit|AVFoundation|CoreAudio|CoreMediaIO|ReplayKit|Network)\b|NSTask\b|posix_spawn|execv|system[[:space:]]*\(|popen[[:space:]]*\(|meeting_assistant_cli|native-helper|processing-cli|helper[[:space:]]+tool|ScreenCaptureKit|AVCapture|CGDisplayStream|SCStream|AVAudioEngine|AVAudioRecorder|NSPasteboard|NSOpenPanel|NSSavePanel|URLSession|URLRequest|URLSessionConfiguration|NWConnection|NWListener|WebSocket|https?://|import_media|export_transcript|delete_session|check_dependencies|normalize_audio|removeItem[[:space:]]*\(|copyItem[[:space:]]*\(|moveItem[[:space:]]*\(|createFile[[:space:]]*\(|createDirectory[[:space:]]*\()'
+processing_boundary_forbidden='(^[[:space:]]*import[[:space:]]+(AppKit|ScreenCaptureKit|AVFoundation|CoreAudio|CoreMediaIO|ReplayKit|Network)\b|NSTask\b|meeting_assistant_cli|native-helper|processing-cli|helper[[:space:]]+tool|ScreenCaptureKit|AVCapture|CGDisplayStream|SCStream|AVAudioEngine|AVAudioRecorder|NSPasteboard|NSOpenPanel|NSSavePanel|URLSession|URLRequest|URLSessionConfiguration|NWConnection|NWListener|WebSocket|https?://|import_media|export_transcript|delete_session|check_dependencies|normalize_audio|removeItem[[:space:]]*\(|copyItem[[:space:]]*\(|moveItem[[:space:]]*\(|createFile[[:space:]]*\(|createDirectory[[:space:]]*\()'
 
 if grep -R --include 'Processing*.swift' -n -E "$processing_boundary_forbidden" Sources/MeetingAssistantNative; then
   echo "native-app architecture check failed: processing consumer must not call provider internals, capture APIs, action surfaces, network APIs, file mutation, or non-VS-MA-16 commands." >&2
@@ -738,7 +755,7 @@ grep -q "TranscriptActionPasteboardClipboard" App/MeetingAssistantNativeApp.swif
 grep -q "TranscriptActionSavePanelDestinationSelector" App/MeetingAssistantNativeApp.swift
 
 action_process_boundary_file='Sources/MeetingAssistantNative/TranscriptActionCommandClient.swift'
-action_os_boundary_forbidden='(^[[:space:]]*import[[:space:]]+(AppKit|ScreenCaptureKit|AVFoundation|CoreAudio|CoreMediaIO|ReplayKit|Network)\b|NSTask\b|posix_spawn|execv|system[[:space:]]*\(|popen[[:space:]]*\(|meeting_assistant_cli|ProcessingCLIDependencyCheckRunner|DependencyCheckProcessRunner|native-helper|processing-cli|helper[[:space:]]+tool|ScreenCaptureKit|AVCapture|CGDisplayStream|SCStream|AVAudioEngine|AVAudioRecorder|NSPasteboard|NSOpenPanel|NSSavePanel|FileManager\b|OutputStream\b|InputStream\b|createFile[[:space:]]*\(|createDirectory[[:space:]]*\(|removeItem[[:space:]]*\(|copyItem[[:space:]]*\(|moveItem[[:space:]]*\(|\.(write|write(to|Bytes))[[:space:]]*\(|URLSession|URLRequest|URLSessionConfiguration|NWConnection|NWListener|WebSocket|https?://)'
+action_os_boundary_forbidden='(^[[:space:]]*import[[:space:]]+(AppKit|ScreenCaptureKit|AVFoundation|CoreAudio|CoreMediaIO|ReplayKit|Network)\b|NSTask\b|meeting_assistant_cli|ProcessingCLIDependencyCheckRunner|DependencyCheckProcessRunner|native-helper|processing-cli|helper[[:space:]]+tool|ScreenCaptureKit|AVCapture|CGDisplayStream|SCStream|AVAudioEngine|AVAudioRecorder|NSPasteboard|NSOpenPanel|NSSavePanel|FileManager\b|OutputStream\b|InputStream\b|createFile[[:space:]]*\(|createDirectory[[:space:]]*\(|removeItem[[:space:]]*\(|copyItem[[:space:]]*\(|moveItem[[:space:]]*\(|\.(write|write(to|Bytes))[[:space:]]*\(|URLSession|URLRequest|URLSessionConfiguration|NWConnection|NWListener|WebSocket|https?://)'
 
 if grep -R --include 'TranscriptAction*.swift' --include 'TranscriptReviewActions*.swift' -n -E "$action_os_boundary_forbidden" Sources |
   grep -v -F "$action_os_boundary_file"; then
@@ -753,9 +770,9 @@ if grep -n -E "$action_os_client_forbidden" "$action_os_boundary_file"; then
   exit 1
 fi
 
-if grep -R --include 'TranscriptAction*.swift' --include 'TranscriptReviewActions*.swift' -n -E 'Process\b|ProcessInfo\b|Pipe\b|standardOutput|standardError|FileHandle\b' Sources |
+if grep -R --include 'TranscriptAction*.swift' --include 'TranscriptReviewActions*.swift' -n -E 'Process\b|ProcessInfo\b|Pipe\b|standardOutput|standardError|FileHandle\b|posix_spawn|execv|system[[:space:]]*\(|popen[[:space:]]*\(' Sources |
   grep -v -F "$action_process_boundary_file"; then
-  echo "native-app architecture check failed: transcript action Process/Pipe usage is allowed only inside TranscriptActionProcessRunner." >&2
+  echo "native-app architecture check failed: transcript action process execution primitives are allowed only inside TranscriptActionProcessRunner." >&2
   exit 1
 fi
 

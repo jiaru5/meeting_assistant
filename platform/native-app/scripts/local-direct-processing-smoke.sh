@@ -352,6 +352,23 @@ def press(identifier: str) -> None:
     pressed_controls.append(identifier)
 
 
+def press_with_retry(identifier: str, timeout: int) -> None:
+    deadline = time.monotonic() + timeout
+    last_error: Optional[SmokeFailure] = None
+    while time.monotonic() < deadline:
+        try:
+            press(identifier)
+            return
+        except SmokeFailure as exc:
+            last_error = exc
+            if exc.kind not in {"accessibility_error", "accessibility_timeout"}:
+                raise
+            time.sleep(0.5)
+    if last_error:
+        raise last_error
+    raise SmokeFailure("ui_marker_timeout", f"timed out pressing {identifier}")
+
+
 def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -624,6 +641,8 @@ def write_report(passed: bool, processing_artifacts: Optional[dict[str, Any]] = 
 
 try:
     validate_recorded_input()
+    press_with_retry(f"ma.meetings.row.{session_id}", min(timeout_seconds, 90))
+    wait_for_marker("ma.meetingDetail.heading", min(timeout_seconds, 90))
     wait_for_marker("Processing is ready to run.", min(timeout_seconds, 90))
     press("ma.processing.startButton")
     try:

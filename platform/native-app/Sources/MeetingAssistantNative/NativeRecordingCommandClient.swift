@@ -10,6 +10,7 @@ public actor NativeRecordingCommandClient: RecordingCommandClient {
     private let recoveryWorkspaceURLProvider: @Sendable () -> URL
     private var activeSessions: [String: RecordingSessionReference] = [:]
     private var pendingStopFinalizations: [String: PendingNativeStopFinalization] = [:]
+    private var inFlightStops: [String: InFlightNativeStop] = [:]
 
     public init(
         permissionChecker: any NativeCapturePermissionChecking = StaticNativeCapturePermissionChecker(),
@@ -137,52 +138,34 @@ public actor NativeRecordingCommandClient: RecordingCommandClient {
                 )
             }
 
-            let endedAt = timestampProvider()
-            let context = NativeCaptureStopContext(
-                sessionID: request.sessionID,
-                workspaceURL: reference.workspaceURL,
-                sessionURL: reference.sessionURL,
-                artifactsURL: reference.artifactsURL,
-                endedAt: endedAt
-            )
-            do {
-                let result = try await captureAdapter.stop(context)
-                let pending = PendingNativeStopFinalization(
-                    adapterArtifacts: result.artifacts,
-                    endedAt: endedAt,
-                    defaultFailureReason: nil
-                )
-                pendingStopFinalizations[request.sessionID] = pending
+            let operation = inFlightStops[request.sessionID]
+                ?? makeInFlightStop(reference: reference)
+            inFlightStops[request.sessionID] = operation
+            let pending = await operation.task.value
+
+            if inFlightStops[request.sessionID]?.id == operation.id {
+                inFlightStops.removeValue(forKey: request.sessionID)
+            }
+            if let finalResponse = try sessionStore.finalResponseIfAvailable(
+                reference: reference,
+                requestID: requestID
+            ) {
+                pendingStopFinalizations.removeValue(forKey: request.sessionID)
+                return finalResponse
+            }
+            if let existingPending = pendingStopFinalizations[request.sessionID] {
                 return try finalizePendingStop(
-                    pending,
-                    reference: reference,
-                    requestID: requestID
-                )
-            } catch NativeCaptureAdapterFailure.stopFailed(let message, let partialArtifacts) {
-                let pending = PendingNativeStopFinalization(
-                    adapterArtifacts: partialArtifacts,
-                    endedAt: endedAt,
-                    defaultFailureReason: message
-                )
-                pendingStopFinalizations[request.sessionID] = pending
-                return try finalizePendingStop(
-                    pending,
-                    reference: reference,
-                    requestID: requestID
-                )
-            } catch let failure as NativeCaptureAdapterFailure {
-                let pending = PendingNativeStopFinalization(
-                    adapterArtifacts: [],
-                    endedAt: endedAt,
-                    defaultFailureReason: failure.localizedDescription
-                )
-                pendingStopFinalizations[request.sessionID] = pending
-                return try finalizePendingStop(
-                    pending,
+                    existingPending,
                     reference: reference,
                     requestID: requestID
                 )
             }
+            pendingStopFinalizations[request.sessionID] = pending
+            return try finalizePendingStop(
+                pending,
+                reference: reference,
+                requestID: requestID
+            )
         } catch let error as RecordingSessionStoreError {
             return storeFailureResponse(
                 error,
@@ -212,6 +195,43 @@ public actor NativeRecordingCommandClient: RecordingCommandClient {
         )
         activeSessions[sessionID] = reference
         return reference
+    }
+
+    private func makeInFlightStop(
+        reference: RecordingSessionReference
+    ) -> InFlightNativeStop {
+        let endedAt = timestampProvider()
+        let context = NativeCaptureStopContext(
+            sessionID: reference.sessionID,
+            workspaceURL: reference.workspaceURL,
+            sessionURL: reference.sessionURL,
+            artifactsURL: reference.artifactsURL,
+            endedAt: endedAt
+        )
+        let adapter = captureAdapter
+        let task = Task<PendingNativeStopFinalization, Never> {
+            do {
+                let result = try await adapter.stop(context)
+                return PendingNativeStopFinalization(
+                    adapterArtifacts: result.artifacts,
+                    endedAt: endedAt,
+                    defaultFailureReason: nil
+                )
+            } catch NativeCaptureAdapterFailure.stopFailed(let message, let partialArtifacts) {
+                return PendingNativeStopFinalization(
+                    adapterArtifacts: partialArtifacts,
+                    endedAt: endedAt,
+                    defaultFailureReason: message
+                )
+            } catch {
+                return PendingNativeStopFinalization(
+                    adapterArtifacts: [],
+                    endedAt: endedAt,
+                    defaultFailureReason: error.localizedDescription
+                )
+            }
+        }
+        return InFlightNativeStop(id: UUID(), task: task)
     }
 
     private func stopCaptureAfterStartFailure(context: NativeCaptureStartContext) async {
@@ -272,4 +292,9 @@ private struct PendingNativeStopFinalization: Sendable {
     let adapterArtifacts: [NativeCaptureArtifactResult]
     let endedAt: String
     let defaultFailureReason: String?
+}
+
+private struct InFlightNativeStop: Sendable {
+    let id: UUID
+    let task: Task<PendingNativeStopFinalization, Never>
 }

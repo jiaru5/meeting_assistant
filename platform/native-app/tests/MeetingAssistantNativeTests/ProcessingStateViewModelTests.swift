@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import Testing
 @testable import MeetingAssistantNative
@@ -98,6 +99,7 @@ struct ProcessingStateViewModelTests {
             readinessState: readyReadinessState(),
             defaultSessionID: "session-processing"
         )
+        bindRecordedSession(viewModel, sessionID: "session-processing")
 
         await viewModel.start()
 
@@ -137,6 +139,7 @@ struct ProcessingStateViewModelTests {
             readinessState: readyReadinessState(),
             defaultSessionID: "session-processing"
         )
+        bindRecordedSession(viewModel, sessionID: "session-processing", audioStatus: .degraded)
 
         await viewModel.start()
 
@@ -162,6 +165,7 @@ struct ProcessingStateViewModelTests {
             readinessState: readyReadinessState(),
             defaultSessionID: "session-processing"
         )
+        bindRecordedSession(viewModel, sessionID: "session-processing")
 
         await viewModel.start()
 
@@ -183,6 +187,7 @@ struct ProcessingStateViewModelTests {
             commandClient: client,
             readinessState: readyReadinessState()
         )
+        bindRecordedSession(viewModel, sessionID: "session-processing")
 
         await viewModel.start(
             sessionID: "session-processing",
@@ -217,7 +222,7 @@ struct ProcessingStateViewModelTests {
     }
 
     @Test
-    func recordingSessionUpdateChangesDefaultSessionAndClearsOldRetry() async {
+    func bindingAnotherRecordedSessionClearsOldRetryAndTargetsTheNewSession() async {
         let client = ProcessingCommandFakeClient(
             transcriptScript: .failure(
                 code: "processing_failed",
@@ -229,13 +234,18 @@ struct ProcessingStateViewModelTests {
             readinessState: readyReadinessState(),
             defaultSessionID: "session-app-ui-blocked"
         )
+        bindRecordedSession(viewModel, sessionID: "session-app-ui-blocked")
 
         await viewModel.start()
         #expect(viewModel.state.phase == .failed)
         #expect(viewModel.state.sessionID == "session-app-ui-blocked")
         #expect(viewModel.canRetry)
 
-        viewModel.updateDefaultSessionID("session-current-recording")
+        bindRecordedSession(
+            viewModel,
+            sessionID: "session-current-recording",
+            audioStatus: .degraded
+        )
         #expect(viewModel.state.phase == .idle)
         #expect(!viewModel.canRetry)
 
@@ -246,6 +256,221 @@ struct ProcessingStateViewModelTests {
             GenerateTranscriptRequest(sessionID: "session-app-ui-blocked"),
             GenerateTranscriptRequest(sessionID: "session-current-recording"),
         ])
+    }
+
+    @Test
+    func defaultSessionIdentifierAloneDoesNotGrantProcessingEligibility() async {
+        let client = ProcessingCommandFakeClient()
+        let viewModel = ProcessingStateViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState(),
+            defaultSessionID: "session-unbound"
+        )
+
+        #expect(viewModel.boundSessionID == nil)
+        #expect(!viewModel.canStart)
+        #expect(viewModel.state.phase == .blocked)
+        #expect(viewModel.state.statusText == "Choose a recorded meeting before generating a transcript.")
+
+        await viewModel.start()
+
+        #expect((await client.transcriptRequestSnapshot()).isEmpty)
+        #expect((await client.speakerLabelsRequestSnapshot()).isEmpty)
+    }
+
+    @Test
+    func emptySessionBindingFailsClosedWithoutSendingCommands() async {
+        let client = ProcessingCommandFakeClient()
+        let viewModel = ProcessingStateViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState()
+        )
+
+        viewModel.bindSession(
+            sessionID: "  \n ",
+            sessionStatus: "recorded",
+            processableAudioStatus: .available
+        )
+        await viewModel.start(sessionID: "  ")
+
+        #expect(viewModel.boundSessionID == nil)
+        #expect(!viewModel.canStart)
+        #expect(viewModel.state.phase == .blocked)
+        #expect((await client.transcriptRequestSnapshot()).isEmpty)
+    }
+
+    @Test
+    func sessionMustBeRecordedBeforeProcessingCanStart() async {
+        let client = ProcessingCommandFakeClient()
+        let viewModel = ProcessingStateViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState()
+        )
+
+        viewModel.bindSession(
+            sessionID: "session-recording",
+            sessionStatus: "recording",
+            processableAudioStatus: .available
+        )
+        await viewModel.start()
+
+        #expect(viewModel.boundSessionID == "session-recording")
+        #expect(!viewModel.canStart)
+        #expect(viewModel.state.phase == .blocked)
+        #expect(viewModel.state.statusText == "Finish and save this recording before generating a transcript.")
+        #expect((await client.transcriptRequestSnapshot()).isEmpty)
+    }
+
+    @Test
+    func recordedSessionRequiresAvailableOrDegradedProcessableAudio() async {
+        let blockedStatuses: [NativeCaptureArtifactStatus?] = [nil, .missing, .failed]
+
+        for status in blockedStatuses {
+            let client = ProcessingCommandFakeClient()
+            let viewModel = ProcessingStateViewModel(
+                commandClient: client,
+                readinessState: readyReadinessState()
+            )
+            viewModel.bindSession(
+                sessionID: "session-no-audio",
+                sessionStatus: "recorded",
+                processableAudioStatus: status
+            )
+
+            await viewModel.start()
+
+            #expect(!viewModel.canStart)
+            #expect(viewModel.state.phase == .blocked)
+            #expect(viewModel.state.statusText == "This meeting does not have processable audio for a transcript.")
+            #expect((await client.transcriptRequestSnapshot()).isEmpty)
+        }
+    }
+
+    @Test
+    func availableAndDegradedProcessableAudioBothPermitRecordedSession() async {
+        for (index, status) in [NativeCaptureArtifactStatus.available, .degraded].enumerated() {
+            let client = ProcessingCommandFakeClient()
+            let sessionID = "session-eligible-\(index)"
+            let viewModel = ProcessingStateViewModel(
+                commandClient: client,
+                readinessState: readyReadinessState()
+            )
+            bindRecordedSession(viewModel, sessionID: sessionID, audioStatus: status)
+
+            #expect(viewModel.canStart)
+            #expect(viewModel.state.phase == .idle)
+
+            await viewModel.start()
+
+            #expect((await client.transcriptRequestSnapshot()) == [
+                GenerateTranscriptRequest(sessionID: sessionID),
+            ])
+            #expect(viewModel.state.phase == .completed)
+        }
+    }
+
+    @Test
+    func transcribedSessionWithSavedAudioCanRegenerateTranscript() async {
+        let client = ProcessingCommandFakeClient()
+        let viewModel = ProcessingStateViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState()
+        )
+        viewModel.bindSession(
+            sessionID: "session-transcribed-recovery",
+            sessionStatus: "transcribed",
+            processableAudioStatus: .available
+        )
+
+        #expect(viewModel.canStart)
+        #expect(viewModel.state.phase == .idle)
+
+        await viewModel.start()
+
+        #expect((await client.transcriptRequestSnapshot()) == [
+            GenerateTranscriptRequest(sessionID: "session-transcribed-recovery"),
+        ])
+        #expect(viewModel.state.phase == .completed)
+    }
+
+    @Test
+    func transcribedSessionWithoutSavedAudioCannotRegenerateTranscript() async {
+        let client = ProcessingCommandFakeClient()
+        let viewModel = ProcessingStateViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState()
+        )
+        viewModel.bindSession(
+            sessionID: "session-transcribed-no-audio",
+            sessionStatus: "transcribed",
+            processableAudioStatus: nil
+        )
+
+        await viewModel.start()
+
+        #expect(!viewModel.canStart)
+        #expect(viewModel.state.phase == .blocked)
+        #expect(viewModel.state.statusText == "This meeting does not have processable audio for a transcript.")
+        #expect((await client.transcriptRequestSnapshot()).isEmpty)
+    }
+
+    @Test
+    func explicitStartCannotTargetASessionOtherThanTheBoundSession() async {
+        let client = ProcessingCommandFakeClient()
+        let viewModel = ProcessingStateViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState()
+        )
+        bindRecordedSession(viewModel, sessionID: "session-current")
+
+        await viewModel.start(sessionID: "session-stale")
+
+        #expect(viewModel.boundSessionID == "session-current")
+        #expect(viewModel.state.phase == .idle)
+        #expect((await client.transcriptRequestSnapshot()).isEmpty)
+        #expect((await client.speakerLabelsRequestSnapshot()).isEmpty)
+    }
+
+    @Test
+    func switchingSessionWhileTranscriptCommandIsRunningIgnoresTheOldResult() async {
+        let client = FirstTranscriptGateProcessingCommandClient()
+        let viewModel = ProcessingStateViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState()
+        )
+        bindRecordedSession(viewModel, sessionID: "session-old")
+
+        let oldRun = Task {
+            await viewModel.start()
+        }
+        while (await client.transcriptRequestSnapshot()).isEmpty {
+            await Task.yield()
+        }
+
+        bindRecordedSession(viewModel, sessionID: "session-new", audioStatus: .degraded)
+        await client.releaseFirstTranscript()
+        await oldRun.value
+
+        #expect(viewModel.boundSessionID == "session-new")
+        #expect(viewModel.state.phase == .idle)
+        #expect(viewModel.state.sessionID == nil)
+        #expect((await client.speakerLabelsRequestSnapshot()).isEmpty)
+
+        await viewModel.start()
+
+        #expect((await client.transcriptRequestSnapshot()) == [
+            GenerateTranscriptRequest(sessionID: "session-old"),
+            GenerateTranscriptRequest(sessionID: "session-new"),
+        ])
+        #expect((await client.speakerLabelsRequestSnapshot()) == [
+            GenerateSpeakerLabelsRequest(
+                sessionID: "session-new",
+                transcriptID: "transcript-fake",
+                allowTranscriptOnlyFallback: true
+            ),
+        ])
+        #expect(viewModel.state.phase == .completed)
+        #expect(viewModel.state.sessionID == "session-new")
     }
 
     @Test
@@ -271,6 +496,7 @@ struct ProcessingStateViewModelTests {
             readinessState: readyReadinessState(),
             defaultSessionID: "session-processing"
         )
+        bindRecordedSession(viewModel, sessionID: "session-processing")
 
         await viewModel.start()
 
@@ -318,6 +544,7 @@ struct ProcessingStateViewModelTests {
             readinessState: readyReadinessState(),
             defaultSessionID: "session-processing"
         )
+        bindRecordedSession(viewModel, sessionID: "session-processing")
 
         await viewModel.start()
 
@@ -364,6 +591,7 @@ struct ProcessingStateViewModelTests {
             readinessState: readyReadinessState(),
             defaultSessionID: "session-processing"
         )
+        bindRecordedSession(viewModel, sessionID: "session-processing", audioStatus: .degraded)
 
         await viewModel.start()
 
@@ -380,6 +608,7 @@ struct ProcessingStateViewModelTests {
             commandClient: client,
             readinessState: blockedProcessingReadinessState()
         )
+        bindRecordedSession(viewModel, sessionID: "session-processing")
 
         await viewModel.start(sessionID: "session-processing")
 
@@ -401,6 +630,7 @@ struct ProcessingStateViewModelTests {
             readinessState: readyReadinessState(),
             defaultSessionID: "session-processing"
         )
+        bindRecordedSession(viewModel, sessionID: "session-processing")
 
         let task = Task {
             await viewModel.start()
@@ -429,6 +659,7 @@ struct ProcessingStateViewModelTests {
             readinessState: readyReadinessState(),
             defaultSessionID: "session-processing"
         )
+        bindRecordedSession(viewModel, sessionID: "session-processing")
 
         await viewModel.start()
         #expect(viewModel.state.phase == .failed)
@@ -462,6 +693,7 @@ struct ProcessingStateViewModelTests {
             readinessState: readyReadinessState(),
             defaultSessionID: "session-processing"
         )
+        bindRecordedSession(viewModel, sessionID: "session-processing")
 
         await viewModel.start()
         #expect(viewModel.state.phase == .failed)
@@ -539,6 +771,64 @@ struct ProcessingStateViewModelTests {
             "--session-id",
             "session-process",
         ])
+    }
+
+    @Test
+    func processRunnerTimesOutTerminatesTheChildAndReturnsOnlySafeBridgeDetails() async throws {
+        let fixture = try ProcessingProcessRunnerFixture(
+            script: .hangingAfterSensitiveOutput,
+            timeoutSeconds: 5
+        )
+
+        do {
+            _ = try await fixture.runner.generateTranscript(
+                GenerateTranscriptRequest(sessionID: "session-process")
+            )
+            #expect(Bool(false), "Expected the hanging processing command to time out.")
+        } catch let error as ProcessingCommandBridgeError {
+            #expect(error == .timedOut(command: .generateTranscript))
+            #expect(error.code == .processingFailed)
+            #expect(error.safeMessage == "Processing command timed out and was stopped.")
+            #expect(error.errorDescription?.contains("/Users/jerry") == false)
+            #expect(error.errorDescription?.contains("sk-processing-timeout-secret") == false)
+        }
+
+        #expect(try fixture.recordedProcessIsRunning() == false)
+    }
+
+    @Test
+    func processRunnerBoundsDrainAndKillsBackgroundDescendantHoldingPipes() async throws {
+        let fixture = try ProcessingProcessRunnerFixture(
+            script: .backgroundDescendantHoldingPipes,
+            timeoutSeconds: 10
+        )
+        let runner = fixture.runner
+        let operation = Task.detached {
+            try await runner.generateTranscript(
+                GenerateTranscriptRequest(sessionID: "session-process")
+            )
+        }
+        #expect(fixture.recordedProcessAppearsWithin(timeoutSeconds: 5))
+        let clock = ContinuousClock()
+        let startedAt = clock.now
+
+        do {
+            _ = try await operation.value
+            #expect(Bool(false), "Expected the direct command's nonzero exit to fail.")
+        } catch let error as ProcessingCommandBridgeError {
+            #expect(
+                error == .processFailed(
+                    command: .generateTranscript,
+                    exitCode: 5,
+                    code: .processingFailed
+                )
+            )
+            #expect(error.errorDescription?.contains("/Users/jerry") == false)
+            #expect(error.errorDescription?.contains("sk-processing-descendant-secret") == false)
+        }
+
+        #expect(startedAt.duration(to: clock.now) < .seconds(3))
+        #expect(try fixture.recordedProcessStopsWithin(timeoutSeconds: 1))
     }
 
     @Test
@@ -666,6 +956,7 @@ struct ProcessingStateViewModelTests {
             readinessState: readyReadinessState(),
             defaultSessionID: "session-process"
         )
+        bindRecordedSession(viewModel, sessionID: "session-process")
 
         await viewModel.start()
 
@@ -685,6 +976,7 @@ struct ProcessingStateViewModelTests {
             readinessState: readyReadinessState(),
             defaultSessionID: "session-process"
         )
+        bindRecordedSession(viewModel, sessionID: "session-process")
 
         await viewModel.start()
 
@@ -710,6 +1002,7 @@ struct ProcessingStateViewModelTests {
             readinessState: readyReadinessState(),
             defaultSessionID: "session-process"
         )
+        bindRecordedSession(viewModel, sessionID: "session-process", audioStatus: .degraded)
 
         await viewModel.start()
 
@@ -730,6 +1023,7 @@ struct ProcessingStateViewModelTests {
             readinessState: readyReadinessState(),
             defaultSessionID: sessionID
         )
+        bindRecordedSession(viewModel, sessionID: sessionID)
 
         await viewModel.start()
 
@@ -780,6 +1074,7 @@ struct ProcessingStateViewModelTests {
             readinessState: readyReadinessState(),
             defaultSessionID: sessionID
         )
+        bindRecordedSession(viewModel, sessionID: sessionID)
 
         await viewModel.start(sessionID: sessionID, language: "zh", runtime: .whisperCpp)
 
@@ -842,6 +1137,7 @@ struct ProcessingStateViewModelTests {
             readinessState: readyReadinessState(),
             defaultSessionID: sessionID
         )
+        bindRecordedSession(viewModel, sessionID: sessionID)
 
         await viewModel.start(sessionID: sessionID)
 
@@ -889,6 +1185,7 @@ struct ProcessingStateViewModelTests {
             readinessState: readyReadinessState(),
             defaultSessionID: "session-process"
         )
+        bindRecordedSession(viewModel, sessionID: "session-process")
 
         await viewModel.start()
 
@@ -907,6 +1204,18 @@ struct ProcessingStateViewModelTests {
             "generate_transcript --session-id session-process",
             "generate_transcript --session-id session-process",
         ])
+    }
+
+    private func bindRecordedSession(
+        _ viewModel: ProcessingStateViewModel,
+        sessionID: String,
+        audioStatus: NativeCaptureArtifactStatus = .available
+    ) {
+        viewModel.bindSession(
+            sessionID: sessionID,
+            sessionStatus: "recorded",
+            processableAudioStatus: audioStatus
+        )
     }
 
     private static func realRuntimeBridgeSmokeEnabled() -> Bool {
@@ -945,6 +1254,75 @@ struct ProcessingStateViewModelTests {
         let compactTranscript = normalizedTranscript.replacingOccurrences(of: " ", with: "")
         let compactTerm = normalizedTerm.replacingOccurrences(of: " ", with: "")
         return normalizedTranscript.contains(normalizedTerm) || compactTranscript.contains(compactTerm)
+    }
+}
+
+private actor FirstTranscriptGateProcessingCommandClient: ProcessingCommandClient {
+    private var transcriptRequests: [GenerateTranscriptRequest] = []
+    private var speakerLabelsRequests: [GenerateSpeakerLabelsRequest] = []
+    private var firstTranscriptContinuation: CheckedContinuation<Void, Never>?
+    private var firstTranscriptWasReleased = false
+
+    func generateTranscript(
+        _ request: GenerateTranscriptRequest
+    ) async throws -> GenerateTranscriptResponse {
+        transcriptRequests.append(request)
+        if transcriptRequests.count == 1 {
+            await waitForFirstTranscriptRelease()
+        }
+
+        return GenerateTranscriptResponse(
+            ok: true,
+            requestID: "local-gated-generate-transcript",
+            sessionID: request.sessionID,
+            transcriptID: "transcript-fake",
+            artifactID: "artifact-transcript-fake",
+            segmentCount: 2,
+            warnings: []
+        )
+    }
+
+    func generateSpeakerLabels(
+        _ request: GenerateSpeakerLabelsRequest
+    ) async throws -> GenerateSpeakerLabelsResponse {
+        speakerLabelsRequests.append(request)
+        return GenerateSpeakerLabelsResponse(
+            ok: true,
+            requestID: "local-gated-generate-speaker-labels",
+            sessionID: request.sessionID,
+            transcriptID: request.transcriptID,
+            labelStatus: "labeled",
+            speakerLabelsArtifactID: "artifact-speaker-labels-fake",
+            warnings: []
+        )
+    }
+
+    func releaseFirstTranscript() {
+        firstTranscriptWasReleased = true
+        firstTranscriptContinuation?.resume()
+        firstTranscriptContinuation = nil
+    }
+
+    func transcriptRequestSnapshot() -> [GenerateTranscriptRequest] {
+        transcriptRequests
+    }
+
+    func speakerLabelsRequestSnapshot() -> [GenerateSpeakerLabelsRequest] {
+        speakerLabelsRequests
+    }
+
+    private func waitForFirstTranscriptRelease() async {
+        guard !firstTranscriptWasReleased else {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            if firstTranscriptWasReleased {
+                continuation.resume()
+            } else {
+                firstTranscriptContinuation = continuation
+            }
+        }
     }
 }
 
@@ -1586,6 +1964,8 @@ private final class ProcessingProcessRunnerFixture {
         case structuredTranscriptFailure
         case nonJSONTranscriptFailure(exitCode: Int32)
         case invalidJSONTranscriptFailure
+        case hangingAfterSensitiveOutput
+        case backgroundDescendantHoldingPipes
     }
 
     let rootURL: URL
@@ -1593,15 +1973,20 @@ private final class ProcessingProcessRunnerFixture {
     let scriptURL: URL
     let argsURL: URL
     let invocationsURL: URL
+    let pidURL: URL
     let runner: ProcessingCommandProcessRunner
 
-    init(script: Script = .success) throws {
+    init(
+        script: Script = .success,
+        timeoutSeconds: TimeInterval = ProcessingCommandProcessRunner.defaultTimeoutSeconds
+    ) throws {
         rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("meeting-assistant-processing-tests-\(UUID().uuidString)", isDirectory: true)
         workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
         scriptURL = rootURL.appendingPathComponent("meeting-assistant-cli")
         argsURL = rootURL.appendingPathComponent("args.txt")
         invocationsURL = rootURL.appendingPathComponent("invocations.txt")
+        pidURL = rootURL.appendingPathComponent("pid.txt")
 
         try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
         try Self.script(script).write(to: scriptURL, atomically: true, encoding: .utf8)
@@ -1612,8 +1997,10 @@ private final class ProcessingProcessRunnerFixture {
             environment: [
                 "MEETING_ASSISTANT_TEST_ARGS_FILE": argsURL.path,
                 "MEETING_ASSISTANT_TEST_INVOCATIONS_FILE": invocationsURL.path,
+                "MEETING_ASSISTANT_TEST_PID_FILE": pidURL.path,
                 "MEETING_ASSISTANT_WORKSPACE": workspaceURL.path,
-            ]
+            ],
+            timeoutSeconds: timeoutSeconds
         )
     }
 
@@ -1631,6 +2018,43 @@ private final class ProcessingProcessRunnerFixture {
         try String(contentsOf: invocationsURL, encoding: .utf8)
             .split(separator: "\n")
             .map(String.init)
+    }
+
+    func recordedProcessIsRunning() throws -> Bool {
+        let rawPID = try String(contentsOf: pidURL, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let pid = Int32(rawPID) else {
+            throw NSError(
+                domain: "ProcessingProcessRunnerFixture",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "The hanging fixture did not record a valid process ID."]
+            )
+        }
+        return Darwin.kill(pid, 0) == 0
+    }
+
+    func recordedProcessStopsWithin(timeoutSeconds: TimeInterval) throws -> Bool {
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while try recordedProcessIsRunning() {
+            guard Date() < deadline else {
+                return false
+            }
+            usleep(10_000)
+        }
+        return true
+    }
+
+    func recordedProcessAppearsWithin(timeoutSeconds: TimeInterval) -> Bool {
+        let deadline = DispatchTime.now() + timeoutSeconds
+        repeat {
+            if let rawPID = try? String(contentsOf: pidURL, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               Int32(rawPID) != nil {
+                return true
+            }
+            usleep(10_000)
+        } while DispatchTime.now() < deadline
+        return false
     }
 
     private static func script(_ script: Script) -> String {
@@ -1700,11 +2124,31 @@ private final class ProcessingProcessRunnerFixture {
                 printf '%s\\n' "not json from /Users/jerry/Movies/MeetingAssistant/session sk-localrawvalue"
                 exit 5
             """
+        case .hangingAfterSensitiveOutput:
+            transcriptCase = """
+                printf '%s\\n' "$$" > "$MEETING_ASSISTANT_TEST_PID_FILE"
+                printf '%s\\n' "processing stalled at /Users/jerry/Movies/MeetingAssistant/session with sk-processing-timeout-secret" >&2
+                trap '' TERM
+                fifo="$MEETING_ASSISTANT_TEST_PID_FILE.fifo"
+                /usr/bin/mkfifo "$fifo"
+                read blocked < "$fifo"
+            """
+        case .backgroundDescendantHoldingPipes:
+            transcriptCase = """
+                (
+                  trap '' TERM
+                  printf '%s\\n' "processing descendant retained /Users/jerry/Movies/MeetingAssistant/session with sk-processing-descendant-secret" >&2
+                  /bin/sleep 10
+                ) &
+                printf '%s\\n' "$!" > "$MEETING_ASSISTANT_TEST_PID_FILE"
+                exit 5
+            """
         }
         let speakerStatus: String
         switch script {
         case .labeledSuccess, .noisyStderrTranscriptSuccess, .structuredTranscriptFailure,
-                .nonJSONTranscriptFailure(_), .invalidJSONTranscriptFailure:
+                .nonJSONTranscriptFailure(_), .invalidJSONTranscriptFailure, .hangingAfterSensitiveOutput,
+                .backgroundDescendantHoldingPipes:
             speakerStatus = """
                 "label_status": "labeled",
                 "speaker_labels_artifact_id": "artifact-speakers-process",

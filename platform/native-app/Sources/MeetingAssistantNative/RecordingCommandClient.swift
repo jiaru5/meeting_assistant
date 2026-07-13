@@ -163,14 +163,16 @@ public struct RecordingCommandResponse: Equatable, Sendable {
                 sessionID: sessionID,
                 artifactType: "screen_video",
                 format: "mov",
-                path: "sessions/\(sessionID)/artifacts/screen_video.mov"
+                path: "sessions/\(sessionID)/artifacts/screen_video.mov",
+                checksum: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
             ),
             RecordingCommandArtifact(
                 id: "artifact-fake-mixed-audio",
                 sessionID: sessionID,
                 artifactType: "mixed_audio",
                 format: "wav",
-                path: "sessions/\(sessionID)/artifacts/mixed_audio.wav"
+                path: "sessions/\(sessionID)/artifacts/mixed_audio.wav",
+                checksum: "sha256:2222222222222222222222222222222222222222222222222222222222222222"
             ),
         ]
 

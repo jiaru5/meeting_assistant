@@ -101,7 +101,7 @@ struct RecordingStateMachineTests {
 
     @Test
     @MainActor
-    func startFailureEntersFailedWithoutRecording() async {
+    func startFailureCanRetryWithoutInventingASession() async {
         let client = SpyRecordingCommandClient(
             startResponses: [
                 .failed(
@@ -109,6 +109,13 @@ struct RecordingStateMachineTests {
                     command: .startNativeRecording,
                     code: "permission_denied",
                     message: "Screen recording permission is denied."
+                ),
+                RecordingCommandResponse(
+                    ok: true,
+                    requestID: "local-start-retry",
+                    command: .startNativeRecording,
+                    sessionID: "session-start-retry",
+                    status: "recording"
                 ),
             ]
         )
@@ -122,12 +129,19 @@ struct RecordingStateMachineTests {
         #expect(viewModel.state.errorCode == .permissionDenied)
         #expect(viewModel.state.errorMessage?.contains("Screen recording permission is denied.") == true)
         #expect(viewModel.state.errorMessage?.contains("System Settings > Privacy & Security") == true)
+        #expect(viewModel.state.canStart == true)
         #expect(viewModel.state.canStop == false)
+
+        await viewModel.start()
+
+        #expect(viewModel.state.phase == .recording)
+        #expect(viewModel.state.sessionID == "session-start-retry")
+        #expect(await client.recordedStartRequests().count == 2)
     }
 
     @Test
     @MainActor
-    func stopFailureDoesNotEnterRecorded() async {
+    func stopFailureKeepsSessionAndAllowsAnotherSaveAttempt() async {
         let client = SpyRecordingCommandClient(
             stopResponses: [
                 .failed(
@@ -135,6 +149,21 @@ struct RecordingStateMachineTests {
                     command: .stopRecording,
                     code: "capture_failed",
                     message: "Recording could not be saved."
+                ),
+                RecordingCommandResponse(
+                    ok: true,
+                    requestID: "local-stop-retry",
+                    command: .stopRecording,
+                    sessionID: "session-recording",
+                    status: "recorded",
+                    artifacts: [
+                        RecordingCommandArtifact(
+                            id: "artifact-screen-video",
+                            sessionID: "session-recording",
+                            artifactType: "screen_video",
+                            captureStatus: "available"
+                        ),
+                    ]
                 ),
             ]
         )
@@ -149,7 +178,13 @@ struct RecordingStateMachineTests {
         #expect(viewModel.state.sessionID == "session-recording")
         #expect(viewModel.state.errorCode == .captureFailed)
         #expect(viewModel.state.errorMessage == "Recording could not be saved.")
-        #expect(viewModel.state.canStop == false)
+        #expect(viewModel.state.canStop == true)
+
+        await viewModel.stop()
+
+        #expect(viewModel.state.phase == .recorded)
+        #expect(viewModel.state.sessionID == "session-recording")
+        #expect(await client.recordedStopRequests().count == 2)
     }
 
     @Test

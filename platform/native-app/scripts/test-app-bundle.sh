@@ -40,6 +40,9 @@ real_capture_real_runtime_same_chain_log="$derived_data_path/real-capture-real-r
 mvp_full_stack_smoke="${MA_NATIVE_APP_MVP_FULL_STACK_SMOKE:-0}"
 mvp_full_stack_test="MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests/testMVPFullStackDesignedShellRecordingProcessingTranscriptActionsWhenExplicitlyEnabled"
 mvp_full_stack_log="$derived_data_path/mvp-full-stack-app-bundle-smoke.log"
+task_xcuitest="${MA_NATIVE_APP_TASK_XCUITEST:-0}"
+task_xcuitest_test="MeetingAssistantNativeAppUITests/DesignedNativeShellAppBundleTests"
+task_xcuitest_log="$derived_data_path/task-workflow-app-bundle-xcuitest.log"
 
 mkdir -p "$derived_data_path"
 
@@ -376,6 +379,8 @@ for line in process_table.splitlines():
         pid = int(pid_text)
     except ValueError:
         continue
+    if pid == os.getpid():
+        continue
     stale_processes.append((pid, executable))
 
 for pid, executable in stale_processes:
@@ -647,6 +652,29 @@ configure_host_ffmpeg_for_app_bundle() {
     set_xctestrun_env "$xctestrun_path" "MEETING_ASSISTANT_FFMPEG_PATH" "$ffmpeg_path"
   fi
 }
+
+if is_truthy "$task_xcuitest"; then
+  prepare_xctestrun "task workflow"
+  reset_xctestrun_smoke_env
+
+  set +e
+  run_app_bundle_test_without_building "task workflow" "$task_xcuitest_log" "$task_xcuitest_test"
+  test_status=$?
+  set -e
+
+  if [[ "$test_status" -ne 0 ]]; then
+    echo "native-app task workflow app-bundle XCUITest failed. Captured xcodebuild log: $task_xcuitest_log" >&2
+    if is_ui_testing_automation_blocked "$task_xcuitest_log"; then
+      print_ui_testing_automation_help "task workflow" "$task_xcuitest_log"
+      print_ui_testing_automation_process_diagnostics
+      print_ui_testing_automation_log_excerpt
+    fi
+    exit "$test_status"
+  fi
+
+  echo "native-app task workflow app-bundle XCUITest passed."
+  exit 0
+fi
 
 if [[ "$real_capture_smoke" == "1" || "$real_capture_smoke" == "true" || "$real_capture_smoke" == "yes" ]]; then
   prepare_xctestrun "real capture"

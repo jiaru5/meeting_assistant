@@ -44,6 +44,7 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         assertPermissionDependencyLocators()
         SwiftUIViewSourceContract.assertPermissionDependencyViewUsesAccessibleStates()
         SwiftUIViewSourceContract.assertAppBundleProductionDefaultsUseCommandClients()
+        SwiftUIViewSourceContract.assertAppFixturesAreDebugXCTestOnlyAndReloadUsesWorkspace()
     }
 
     func testRecordingReadinessBlockedIsHostedAndDoesNotStart() async {
@@ -119,9 +120,16 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         XCTAssertEqual(stopRequests, [StopRecordingRequest(sessionID: "session-ui-smoke")])
     }
 
-    func testDesignedNativeShellIsHostedWithNavigationStatusAndExistingSurfaces() {
+    func testTaskBasedNativeShellIsHostedWithSingleNavigationAndFocusedRoutes() async {
         let transcriptInput = hostedTranscriptInput()
-        let shellViewModel = DesignedNativeShellViewModel()
+        let meeting = hostedMeetingSummary()
+        let coordinator = MeetingWorkspaceCoordinator(
+            workspaceURL: URL(
+                fileURLWithPath: "/tmp/MeetingAssistantNative-Hosted-Shell",
+                isDirectory: true
+            ),
+            initialSessions: [meeting]
+        )
         let permissionViewModel = PermissionDependencyStatusViewModel(
             runner: UnusedDependencyCheckRunner(),
             initialState: readyReadinessState()
@@ -139,34 +147,102 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         let actionViewModel = TranscriptReviewActionsViewModel(input: transcriptInput)
         let host = HostedSwiftUIView(
             DesignedNativeShellView(
-                shellViewModel: shellViewModel,
+                coordinator: coordinator,
                 permissionViewModel: permissionViewModel,
                 recordingViewModel: recordingViewModel,
                 processingViewModel: processingViewModel,
                 transcriptViewModel: transcriptViewModel,
-                transcriptActionViewModel: actionViewModel,
-                captureSystemAudio: true,
-                captureMicrophoneAudio: false
+                transcriptActionViewModel: actionViewModel
             )
         )
 
         host.assertHosted()
-        XCTAssertEqual(
-            DesignedNativeShellViewModel.recordingSetupText(
-                captureSystemAudio: true,
-                captureMicrophoneAudio: false
-            ),
-            "Capture target: screen. System audio capture is requested; microphone capture is not requested for this run."
-        )
-        XCTAssertEqual(shellViewModel.selectedSectionLabel, "Preflight selected.")
-        shellViewModel.select(.actions)
+        XCTAssertEqual(coordinator.route, .meetings)
+        XCTAssertEqual(coordinator.recentSessions, [meeting])
+
+        coordinator.beginNewRecording()
         host.flush()
-        XCTAssertEqual(shellViewModel.selectedSectionLabel, "Export and delete selected.")
-        XCTAssertEqual(
-            DesignedNativeShellViewModel.artifactRows(from: recordingViewModel.state.artifacts).map(\.artifactType),
-            ["screen_video", "system_audio", "microphone_audio", "mixed_audio"]
-        )
+        XCTAssertEqual(coordinator.route, .newRecording)
+
+        await coordinator.open(meeting)
+        host.flush()
+        XCTAssertEqual(coordinator.route, .meetingDetail)
+        XCTAssertEqual(coordinator.currentSession, meeting)
+
+        coordinator.navigate(to: .diagnostics)
+        host.flush()
+        XCTAssertEqual(coordinator.route, .diagnostics)
+
         assertShellLocators()
+        SwiftUIViewSourceContract.assertDesignedNativeShellUsesAccessibleStates()
+        SwiftUIViewSourceContract.assertAppRootUsesDesignedNativeShell()
+    }
+
+    func testUnavailableTranscribedMeetingIsHostedWithRegenerationBinding() async {
+        let meeting = MeetingSessionSummary(
+            id: "session-hosted-transcript-recovery",
+            title: "Transcript recovery",
+            status: "transcribed",
+            startedAt: "2026-07-13T09:00:00Z",
+            endedAt: "2026-07-13T09:30:00Z",
+            updatedAt: "2026-07-13T09:31:00Z",
+            durationLabel: "30:00",
+            artifactCount: 2,
+            hasTranscript: false,
+            hasSpeakerLabels: false,
+            hasProcessableAudio: true
+        )
+        let coordinator = MeetingWorkspaceCoordinator(
+            workspaceURL: URL(
+                fileURLWithPath: "/tmp/MeetingAssistantNative-Hosted-Transcript-Recovery",
+                isDirectory: true
+            ),
+            initialSessions: [meeting]
+        )
+        await coordinator.open(meeting)
+        coordinator.transcriptDidFailToLoad(HostedTranscriptFailure())
+        let permissionViewModel = PermissionDependencyStatusViewModel(
+            runner: UnusedDependencyCheckRunner(),
+            initialState: readyReadinessState()
+        )
+        let recordingViewModel = RecordingControlViewModel(
+            commandClient: FakeRecordingCommandClient(),
+            readinessState: readyReadinessState()
+        )
+        let processingViewModel = ProcessingStateViewModel(
+            commandClient: ProcessingCommandFakeClient(),
+            readinessState: readyReadinessState()
+        )
+        processingViewModel.bindSession(
+            sessionID: meeting.id,
+            sessionStatus: meeting.status,
+            processableAudioStatus: .available
+        )
+        let transcriptInput = TranscriptReviewInput(
+            sessionTitle: meeting.title,
+            transcript: nil
+        )
+        let actionViewModel = TranscriptReviewActionsViewModel(input: transcriptInput)
+        actionViewModel.updateSession(
+            sessionID: meeting.id,
+            sessionTitle: meeting.title,
+            transcript: nil
+        )
+        let host = HostedSwiftUIView(
+            DesignedNativeShellView(
+                coordinator: coordinator,
+                permissionViewModel: permissionViewModel,
+                recordingViewModel: recordingViewModel,
+                processingViewModel: processingViewModel,
+                transcriptViewModel: TranscriptReviewViewModel(input: transcriptInput),
+                transcriptActionViewModel: actionViewModel
+            )
+        )
+
+        host.assertHosted()
+        XCTAssertEqual(coordinator.route, .meetingDetail)
+        XCTAssertTrue(processingViewModel.canStart)
+        XCTAssertTrue(coordinator.transcriptLoadError?.contains("Regenerate the transcript") == true)
         SwiftUIViewSourceContract.assertDesignedNativeShellUsesAccessibleStates()
         SwiftUIViewSourceContract.assertAppRootUsesDesignedNativeShell()
     }
@@ -356,7 +432,7 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         XCTAssertEqual(viewModel.state.statusText, "Copy complete.")
         XCTAssertEqual(
             viewModel.state.successSummary,
-            "Copied plain text transcript for session session-actions."
+            "Transcript copied."
         )
 
         await viewModel.exportTranscript()
@@ -369,7 +445,7 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         XCTAssertEqual(viewModel.state.statusText, "Export complete.")
         XCTAssertEqual(
             viewModel.state.successSummary,
-            "Exported markdown transcript to /tmp/hosted-export.md."
+            "Transcript exported."
         )
 
         viewModel.requestDeleteConfirmation()
@@ -389,16 +465,14 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         XCTAssertEqual(viewModel.state.statusText, "Delete cancelled. No command was sent.")
 
         viewModel.requestDeleteConfirmation()
-        await viewModel.confirmDelete()
+        let deletedSessionID = await viewModel.confirmDelete()
         host.flush()
 
         let deleteRequestsAfterConfirm = await client.deleteRequestSnapshot()
         XCTAssertEqual(deleteRequestsAfterConfirm.count, 1)
-        XCTAssertEqual(viewModel.state.statusText, "Delete complete.")
-        XCTAssertEqual(
-            viewModel.state.successSummary,
-            "Deleted session session-actions. Removed 2 items. Retained 1 external export."
-        )
+        XCTAssertEqual(deletedSessionID, "session-actions")
+        XCTAssertEqual(viewModel.state.phase, .unavailable)
+        XCTAssertNil(viewModel.state.sessionID)
     }
 
     func testTranscriptActionFailuresAreHostedWithPersistentDeleteFailure() async {
@@ -426,7 +500,7 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         XCTAssertEqual(viewModel.state.statusText, "Copy failed.")
         XCTAssertEqual(
             viewModel.state.failureSummary,
-            "Copy failed: Export target already exists. (path_conflict)"
+            "Copy failed: Export target already exists."
         )
 
         viewModel.requestDeleteConfirmation()
@@ -436,7 +510,7 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         XCTAssertEqual(viewModel.state.statusText, "Delete failed.")
         XCTAssertEqual(
             viewModel.state.failureSummary,
-            "Delete failed: Session path escaped the workspace. (path_conflict)"
+            "Delete failed: Session path escaped the workspace."
         )
 
         viewModel.requestDeleteConfirmation()
@@ -445,7 +519,7 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
 
         XCTAssertEqual(
             viewModel.state.failureSummary,
-            "Delete failed: Session path escaped the workspace. (path_conflict)"
+            "Delete failed: Session path escaped the workspace."
         )
         assertTranscriptActionLocators()
         SwiftUIViewSourceContract.assertTranscriptActionViewUsesAccessibleStates()
@@ -490,6 +564,11 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
             defaultSessionID: "session-hosted-processing"
         )
         let successHost = HostedSwiftUIView(ProcessingStateView(viewModel: successViewModel))
+        successViewModel.bindSession(
+            sessionID: "session-hosted-processing",
+            sessionStatus: "recorded",
+            processableAudioStatus: .available
+        )
 
         await successViewModel.start()
         successHost.flush()
@@ -515,6 +594,11 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
             defaultSessionID: "session-hosted-processing"
         )
         let degradedHost = HostedSwiftUIView(ProcessingStateView(viewModel: degradedViewModel))
+        degradedViewModel.bindSession(
+            sessionID: "session-hosted-processing",
+            sessionStatus: "recorded",
+            processableAudioStatus: .available
+        )
 
         await degradedViewModel.start()
         degradedHost.flush()
@@ -535,6 +619,11 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
             defaultSessionID: "session-hosted-processing"
         )
         let failureHost = HostedSwiftUIView(ProcessingStateView(viewModel: failureViewModel))
+        failureViewModel.bindSession(
+            sessionID: "session-hosted-processing",
+            sessionStatus: "recorded",
+            processableAudioStatus: .available
+        )
 
         await failureViewModel.start()
         failureHost.flush()
@@ -899,44 +988,80 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
             line: line
         )
         XCTAssertEqual(
-            DesignedNativeShellAccessibilityID.heading,
-            "ma.shell.heading",
-            file: file,
-            line: line
-        )
-        XCTAssertEqual(
-            DesignedNativeShellAccessibilityID.navigation,
+            MeetingTaskAccessibilityID.navigation,
             "ma.shell.navigation",
             file: file,
             line: line
         )
         XCTAssertEqual(
-            DesignedNativeShellAccessibilityID.selectedSection,
+            MeetingTaskAccessibilityID.routeStatus,
             "ma.shell.selectedSection",
             file: file,
             line: line
         )
         XCTAssertEqual(
-            DesignedNativeShellAccessibilityID.navButton(.processing),
-            "ma.shell.nav.processing",
+            MeetingTaskAccessibilityID.meetingsNavigation,
+            "ma.navigation.meetings",
             file: file,
             line: line
         )
         XCTAssertEqual(
-            DesignedNativeShellAccessibilityID.section(.actions),
-            "ma.shell.section.actions",
+            MeetingTaskAccessibilityID.newRecordingNavigation,
+            "ma.navigation.newRecording",
             file: file,
             line: line
         )
         XCTAssertEqual(
-            DesignedNativeShellAccessibilityID.status("recording"),
-            "ma.shell.status.recording",
+            MeetingTaskAccessibilityID.currentMeetingNavigation,
+            "ma.navigation.currentMeeting",
             file: file,
             line: line
         )
         XCTAssertEqual(
-            DesignedNativeShellAccessibilityID.artifactStatus("system_audio"),
-            "ma.sessionArtifact.system_audio.status",
+            MeetingTaskAccessibilityID.diagnosticsNavigation,
+            "ma.navigation.diagnostics",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            MeetingTaskAccessibilityID.meetingsHeading,
+            "ma.meetings.heading",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            MeetingTaskAccessibilityID.newRecordingHeading,
+            "ma.newRecording.heading",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            MeetingTaskAccessibilityID.detailHeading,
+            "ma.meetingDetail.heading",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            MeetingTaskAccessibilityID.recoveryStatus,
+            "ma.meetingDetail.recoveryStatus",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            MeetingTaskAccessibilityID.startNewRecording,
+            "ma.meetingDetail.startNewRecording",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            MeetingTaskAccessibilityID.diagnosticsHeading,
+            "ma.diagnostics.heading",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            MeetingTaskAccessibilityID.meetingRow("session-hosted-shell"),
+            "ma.meetings.row.session-hosted-shell",
             file: file,
             line: line
         )
@@ -948,6 +1073,8 @@ private struct UnusedDependencyCheckRunner: DependencyCheckRunning {
         throw XCTSkip("The hosted UI smoke uses an injected initial state.")
     }
 }
+
+private struct HostedTranscriptFailure: Error {}
 
 @MainActor
 private final class HostedSwiftUIView<Content: View> {
@@ -1137,27 +1264,53 @@ private enum SwiftUIViewSourceContract {
             source,
             contains: [
                 "Text(\"Meeting Assistant\")",
-                "Designed native app shell",
                 ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.root)",
-                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.heading)",
-                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.navigation)",
-                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.selectedSection)",
-                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.statusBoard)",
-                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.commandRail)",
-                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.workspaceBoundary)",
-                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.recordingSetup)",
-                "DesignedNativeShellViewModel.recordingSetupText(",
-                "captureSystemAudio: captureSystemAudio",
-                "captureMicrophoneAudio: captureMicrophoneAudio",
-                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.navButton(section))",
-                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.section(section))",
-                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.artifactStatus(row.artifactType))",
-                ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.processingStep(step.id))",
+                ".accessibilityIdentifier(MeetingTaskAccessibilityID.navigation)",
+                ".accessibilityIdentifier(MeetingTaskAccessibilityID.routeStatus)",
+                "identifier: MeetingTaskAccessibilityID.meetingsNavigation",
+                "identifier: MeetingTaskAccessibilityID.newRecordingNavigation",
+                "identifier: MeetingTaskAccessibilityID.currentMeetingNavigation",
+                "identifier: MeetingTaskAccessibilityID.diagnosticsNavigation",
+                "identifier: MeetingTaskAccessibilityID.meetingsHeading",
+                "identifier: MeetingTaskAccessibilityID.newRecordingHeading",
+                "identifier: MeetingTaskAccessibilityID.detailHeading",
+                "identifier: MeetingTaskAccessibilityID.diagnosticsHeading",
+                ".accessibilityIdentifier(MeetingTaskAccessibilityID.newRecordingButton)",
+                ".accessibilityIdentifier(MeetingTaskAccessibilityID.meetingRow(meeting.id))",
+                ".accessibilityIdentifier(MeetingTaskAccessibilityID.titleField)",
+                ".accessibilityIdentifier(MeetingTaskAccessibilityID.target)",
+                ".accessibilityIdentifier(MeetingTaskAccessibilityID.systemAudioToggle)",
+                ".accessibilityIdentifier(MeetingTaskAccessibilityID.microphoneToggle)",
+                "switch coordinator.route",
+                "case .meetings:",
+                "case .newRecording:",
+                "case .meetingDetail:",
+                "case .diagnostics:",
+                "title: \"Meetings\"",
+                "title: \"New recording\"",
+                "title: \"Set up your recording\"",
+                "title: \"Settings & diagnostics\"",
                 "PermissionDependencyStatusView(viewModel: permissionViewModel)",
-                "RecordingControlView(viewModel: recordingViewModel)",
-                "ProcessingStateView(viewModel: processingViewModel)",
-                "TranscriptReviewView(viewModel: transcriptViewModel)",
-                "TranscriptReviewActionsView(viewModel: transcriptActionViewModel)",
+                ".accessibilityIdentifier(TranscriptReviewAccessibilityID.segmentRow(segment.id))",
+                ".accessibilityIdentifier(TranscriptActionAccessibilityID.copyButton)",
+                ".accessibilityIdentifier(TranscriptActionAccessibilityID.exportButton)",
+                ".accessibilityIdentifier(TranscriptActionAccessibilityID.deleteButton)",
+                "Button(\"Regenerate transcript\", action: startProcessing)",
+                "Button(\"Reload transcript\", action: reloadTranscript)",
+                "return \"Transcript unavailable\"",
+                "historicalMeetingRecoveryStatus(sessionStatus) != nil",
+                "historicalMeetingRecoveryView(status: sessionStatus)",
+                "return \"Recording not started\"",
+                "return \"Recording interrupted\"",
+                "return \"Transcript interrupted\"",
+                "return \"Meeting date unavailable\"",
+                "Label(\"Meeting needs attention\", systemImage: \"exclamationmark.triangle.fill\")",
+                "subtitle: \"Existing meeting files were not changed.\"",
+                "Button(\"Start a new recording\")",
+                ".accessibilityIdentifier(MeetingTaskAccessibilityID.startNewRecording)",
+                ".accessibilityIdentifier(MeetingTaskAccessibilityID.recoveryStatus)",
+                "secondaryMeetingActions",
+                "technicalDetailsDisclosure",
                 ".onChange(of: permissionViewModel.state)",
                 "recordingViewModel.updateReadiness(readiness)",
                 "processingViewModel.updateReadiness(readiness)",
@@ -1166,14 +1319,35 @@ private enum SwiftUIViewSourceContract {
                 ".keyboardShortcut(\"p\", modifiers: [.command, .option])",
                 ".keyboardShortcut(\"c\", modifiers: [.command, .option])",
                 ".keyboardShortcut(\"e\", modifiers: [.command, .option])",
-                ".keyboardShortcut(\"d\", modifiers: [.command, .option])",
-                ".keyboardShortcut(.defaultAction)",
                 ".task {",
+                "coordinator.refreshSessions()",
                 "await autoRefreshPreflightIfNeeded()",
                 "autoRefreshPreflightOnAppear",
-                "preflightWorkspaceURL",
-                "await permissionViewModel.refresh(workspaceURL: preflightWorkspaceURL)",
+                "await permissionViewModel.refresh(workspaceURL: coordinator.workspaceURL)",
             ],
+            file: file,
+            line: line
+        )
+        assertSource(
+            source,
+            excludes: [
+                "commandRail",
+                "statusBoard",
+                "DesignedNativeShellSection.allCases",
+                "ForEach(shellViewModel.sections)",
+                "DesignedNativeShellAccessibilityID.section(",
+                "DesignedNativeShellAccessibilityID.navButton(",
+                "if hasTranscript || status == \"transcribed\"",
+                "return \"Saved meeting\"",
+                "return \"Saved\"",
+            ],
+            file: file,
+            line: line
+        )
+        assertOccurrenceCount(
+            source,
+            snippet: ".accessibilityIdentifier(MeetingTaskAccessibilityID.navigation)",
+            expected: 1,
             file: file,
             line: line
         )
@@ -1187,8 +1361,12 @@ private enum SwiftUIViewSourceContract {
         assertSource(
             source,
             contains: [
-                "@StateObject private var shellViewModel: DesignedNativeShellViewModel",
-                "_shellViewModel = StateObject(wrappedValue: DesignedNativeShellViewModel())",
+                "@StateObject private var workspaceCoordinator: MeetingWorkspaceCoordinator",
+                "_workspaceCoordinator = StateObject(",
+                "wrappedValue: MeetingWorkspaceCoordinator(",
+                "workspaceURL: recordingWorkspaceURL",
+                "initialSessions: initialSessions",
+                "recordingDraft: MeetingRecordingDraft(",
                 "let readinessState = configuration.initialReadinessState()",
                 "let autoRefreshPreflightOnAppear = configuration.autoRefreshPreflightOnAppear()",
                 "self.captureSystemAudio = configuration.captureSystemAudio",
@@ -1226,16 +1404,24 @@ private enum SwiftUIViewSourceContract {
                 "window.makeKeyAndOrderFront(nil)",
                 "MA_NATIVE_LOCAL_APP_SMOKE_STATE_REPORT",
                 "DesignedNativeShellView(",
-                "shellViewModel: shellViewModel",
+                "coordinator: workspaceCoordinator",
                 "permissionViewModel: permissionViewModel",
                 "recordingViewModel: recordingViewModel",
                 "processingViewModel: processingViewModel",
                 "transcriptViewModel: transcriptViewModel",
                 "transcriptActionViewModel: transcriptActionViewModel",
-                "preflightWorkspaceURL: preflightWorkspaceURL",
                 "autoRefreshPreflightOnAppear: autoRefreshPreflightOnAppear",
-                "captureSystemAudio: captureSystemAudio",
-                "captureMicrophoneAudio: captureMicrophoneAudio",
+                "startRecording: beginRecording",
+                "openMeeting: openMeeting",
+                "reloadTranscript: reloadCurrentTranscript",
+                "confirmDelete: confirmCurrentMeetingDeletion",
+                "processingViewModel.bindSession(",
+                "sessionStatus: \"recorded\"",
+                "sessionStatus: session.status",
+                "let reconciliation = await workspaceCoordinator.reconcileDeletionAttempt(",
+                "switch reconciliation",
+                "case .sessionPresent(let session):",
+                "case .sessionMissing, .workspaceUnreadable:",
                 "contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760)",
             ],
             file: file,
@@ -1308,6 +1494,37 @@ private enum SwiftUIViewSourceContract {
         )
     }
 
+    static func assertAppFixturesAreDebugXCTestOnlyAndReloadUsesWorkspace(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let source = readAppSource("MeetingAssistantNativeApp.swift", file: file, line: line)
+        assertSource(
+            source,
+            contains: [
+                "let fixture = smokeFixtureName(environment: environment, arguments: arguments)",
+                "private static func smokeFixtureName(",
+                "guard isNativeAppXCTestEnvironment(environment) else {",
+                "private func isNativeAppXCTestEnvironment(_ environment: [String: String]) -> Bool {\n    #if DEBUG\n    return environment[\"MA_NATIVE_APP_XCTEST\"] == \"1\"",
+                "#else\n        return \"blocked\"\n        #endif",
+                "#else\n    return false\n    #endif",
+                "let input = try transcriptInput(for: sessionID, allowGeneratedTestFixture: false)",
+                "return try TranscriptReviewWorkspaceLoader.load(",
+            ],
+            file: file,
+            line: line
+        )
+        assertSource(
+            source,
+            excludes: [
+                "let fixture = environment[\"MA_NATIVE_APP_SMOKE_FIXTURE\"]",
+                "let input = try transcriptInput(for: sessionID, allowGeneratedTestFixture: usesTestFixture)",
+            ],
+            file: file,
+            line: line
+        )
+    }
+
     private static func readSource(
         _ filename: String,
         file: StaticString,
@@ -1351,6 +1568,39 @@ private enum SwiftUIViewSourceContract {
             )
         }
     }
+
+    private static func assertSource(
+        _ source: String,
+        excludes snippets: [String],
+        file: StaticString,
+        line: UInt
+    ) {
+        for snippet in snippets {
+            XCTAssertFalse(
+                source.contains(snippet),
+                "Obsolete SwiftUI source snippet is still present: \(snippet)",
+                file: file,
+                line: line
+            )
+        }
+    }
+
+    private static func assertOccurrenceCount(
+        _ source: String,
+        snippet: String,
+        expected: Int,
+        file: StaticString,
+        line: UInt
+    ) {
+        let count = source.components(separatedBy: snippet).count - 1
+        XCTAssertEqual(
+            count,
+            expected,
+            "Expected \(expected) occurrence(s) of SwiftUI source snippet: \(snippet)",
+            file: file,
+            line: line
+        )
+    }
 }
 
 private func hostedTranscriptInput() -> TranscriptReviewInput {
@@ -1384,6 +1634,22 @@ private func hostedTranscriptInput() -> TranscriptReviewInput {
                 SpeakerLabelSegmentMapping(segmentID: "seg-hosted-shell", label: "SPEAKER_01"),
             ]
         )
+    )
+}
+
+private func hostedMeetingSummary() -> MeetingSessionSummary {
+    MeetingSessionSummary(
+        id: "session-hosted-shell",
+        title: "Hosted Shell Transcript",
+        status: "transcribed",
+        startedAt: "2026-07-13T09:00:00Z",
+        endedAt: "2026-07-13T09:30:00Z",
+        updatedAt: "2026-07-13T09:31:00Z",
+        durationLabel: "30:00",
+        artifactCount: 4,
+        hasTranscript: true,
+        hasSpeakerLabels: true,
+        hasProcessableAudio: true
     )
 }
 

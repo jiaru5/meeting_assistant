@@ -17,8 +17,34 @@ public struct TranscriptReviewActionsState: Equatable, Sendable {
     public let statusText: String
     public let successSummary: String?
     public let failureSummary: String?
+    public let technicalDetails: [String]
     public let warnings: [String]
     public let isDeletePromptVisible: Bool
+    public let hasTranscript: Bool
+
+    public init(
+        phase: TranscriptReviewActionPhase,
+        sessionID: String?,
+        sessionTitle: String?,
+        statusText: String,
+        successSummary: String?,
+        failureSummary: String?,
+        technicalDetails: [String] = [],
+        warnings: [String],
+        isDeletePromptVisible: Bool,
+        hasTranscript: Bool = true
+    ) {
+        self.phase = phase
+        self.sessionID = sessionID
+        self.sessionTitle = sessionTitle
+        self.statusText = statusText
+        self.successSummary = successSummary
+        self.failureSummary = failureSummary
+        self.technicalDetails = technicalDetails
+        self.warnings = warnings
+        self.isDeletePromptVisible = isDeletePromptVisible
+        self.hasTranscript = hasTranscript
+    }
 
     public var isAvailable: Bool {
         sessionID != nil && phase != .unavailable
@@ -29,11 +55,11 @@ public struct TranscriptReviewActionsState: Equatable, Sendable {
     }
 
     public var canCopy: Bool {
-        isAvailable && !isBusy && !isDeletePromptVisible
+        isAvailable && hasTranscript && !isBusy && !isDeletePromptVisible
     }
 
     public var canExport: Bool {
-        isAvailable && !isBusy && !isDeletePromptVisible
+        isAvailable && hasTranscript && !isBusy && !isDeletePromptVisible
     }
 
     public var canRequestDelete: Bool {
@@ -65,7 +91,8 @@ public struct TranscriptReviewActionsState: Equatable, Sendable {
         successSummary: nil,
         failureSummary: nil,
         warnings: [],
-        isDeletePromptVisible: false
+        isDeletePromptVisible: false,
+        hasTranscript: false
     )
 }
 
@@ -82,6 +109,7 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
     private let clipboard: any TranscriptClipboardWriting
     private let destinationSelector: any TranscriptExportDestinationSelecting
     private let workspaceDir: String?
+    private var sessionRevision: UInt = 0
 
     public init(
         input: TranscriptReviewInput,
@@ -99,7 +127,73 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
     }
 
     public func updateInput(_ input: TranscriptReviewInput) {
-        state = Self.initialState(input: input)
+        guard let transcript = input.transcript else {
+            clearSession()
+            return
+        }
+
+        updateSession(
+            sessionID: transcript.sessionID,
+            sessionTitle: input.sessionTitle,
+            transcript: transcript
+        )
+    }
+
+    public func updateSession(
+        sessionID: String?,
+        sessionTitle: String?,
+        transcript: TranscriptReviewTranscript?,
+        preservingFailureFeedback: Bool = false
+    ) {
+        let previousState = state
+        sessionRevision &+= 1
+
+        guard let sessionID = sessionID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !sessionID.isEmpty
+        else {
+            state = .unavailable
+            return
+        }
+
+        let hasMatchingTranscript = transcript?.sessionID == sessionID
+        let preservesFailure = preservingFailureFeedback
+            && previousState.sessionID == sessionID
+            && previousState.failureSummary != nil
+        state = TranscriptReviewActionsState(
+            phase: .ready,
+            sessionID: sessionID,
+            sessionTitle: sessionTitle,
+            statusText: preservesFailure
+                ? previousState.statusText
+                : (hasMatchingTranscript
+                    ? "Transcript actions are ready."
+                    : "Session actions are ready. Load a transcript to copy or export it."),
+            successSummary: nil,
+            failureSummary: preservesFailure ? previousState.failureSummary : nil,
+            technicalDetails: preservesFailure ? previousState.technicalDetails : [],
+            warnings: [],
+            isDeletePromptVisible: false,
+            hasTranscript: hasMatchingTranscript
+        )
+    }
+
+    public func reportDeleteReconciliationFailure() {
+        guard state.sessionID != nil else {
+            return
+        }
+        setState(
+            phase: .ready,
+            statusText: "Delete failed.",
+            successSummary: nil,
+            failureSummary: "Delete failed: The meeting is still present in the refreshed workspace.",
+            warnings: [],
+            isDeletePromptVisible: false
+        )
+    }
+
+    public func clearSession() {
+        sessionRevision &+= 1
+        state = .unavailable
     }
 
     private static func initialState(input: TranscriptReviewInput) -> TranscriptReviewActionsState {
@@ -115,7 +209,8 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
             successSummary: nil,
             failureSummary: nil,
             warnings: [],
-            isDeletePromptVisible: false
+            isDeletePromptVisible: false,
+            hasTranscript: true
         )
     }
 
@@ -123,6 +218,7 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
         guard let sessionID = state.sessionID, state.canCopy else {
             return
         }
+        let revision = sessionRevision
 
         setState(
             phase: .copying,
@@ -147,6 +243,9 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
                 expectedExportType: .plainText,
                 expectation: .copyContent
             )
+            guard isCurrentSession(sessionID, revision: revision) else {
+                return
+            }
             guard let content = response.content, !content.isEmpty else {
                 throw TranscriptActionCommandFailure(
                     command: .exportTranscript,
@@ -156,16 +255,25 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
             }
 
             await clipboard.writeTranscript(content)
+            guard isCurrentSession(sessionID, revision: revision) else {
+                return
+            }
             setState(
                 phase: .ready,
                 statusText: "Copy complete.",
-                successSummary: "Copied plain text transcript for session \(sessionID).",
+                successSummary: "Transcript copied.",
                 failureSummary: nil,
                 warnings: response.warnings,
+                technicalDetails: ["Session ID: \(sessionID)"],
                 isDeletePromptVisible: false
             )
         } catch {
-            fail(operation: "Copy", error: error)
+            fail(
+                operation: "Copy",
+                error: error,
+                expectedSessionID: sessionID,
+                expectedRevision: revision
+            )
         }
     }
 
@@ -173,6 +281,7 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
         guard let sessionID = state.sessionID, state.canExport else {
             return
         }
+        let revision = sessionRevision
 
         let exportType = TranscriptExportType.markdown
         let destination = await destinationSelector.destination(
@@ -182,6 +291,10 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
             )
         )
 
+        guard isCurrentSession(sessionID, revision: revision) else {
+            return
+        }
+
         guard let targetPath = destination, !targetPath.isEmpty else {
             setState(
                 phase: .ready,
@@ -189,6 +302,7 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
                 successSummary: nil,
                 failureSummary: state.failureSummary,
                 warnings: [],
+                technicalDetails: state.technicalDetails,
                 isDeletePromptVisible: false
             )
             return
@@ -217,18 +331,30 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
                 expectedExportType: exportType,
                 expectation: .fileExport(targetPath: targetPath)
             )
+            guard isCurrentSession(sessionID, revision: revision) else {
+                return
+            }
 
             let resolvedTargetPath = response.targetPath ?? targetPath
             setState(
                 phase: .ready,
                 statusText: "Export complete.",
-                successSummary: "Exported markdown transcript to \(resolvedTargetPath).",
+                successSummary: "Transcript exported.",
                 failureSummary: nil,
                 warnings: response.warnings,
+                technicalDetails: [
+                    "Session ID: \(sessionID)",
+                    "Export path: \(resolvedTargetPath)",
+                ],
                 isDeletePromptVisible: false
             )
         } catch {
-            fail(operation: "Export", error: error)
+            fail(
+                operation: "Export",
+                error: error,
+                expectedSessionID: sessionID,
+                expectedRevision: revision
+            )
         }
     }
 
@@ -243,6 +369,7 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
             successSummary: nil,
             failureSummary: state.failureSummary,
             warnings: [],
+            technicalDetails: state.technicalDetails,
             isDeletePromptVisible: true
         )
     }
@@ -258,14 +385,33 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
             successSummary: nil,
             failureSummary: state.failureSummary,
             warnings: [],
+            technicalDetails: state.technicalDetails,
             isDeletePromptVisible: false
         )
     }
 
-    public func confirmDelete() async {
-        guard let sessionID = state.sessionID, state.canConfirmDelete else {
+    public func dismissFeedback() {
+        guard state.isAvailable, !state.isBusy, !state.isDeletePromptVisible else {
             return
         }
+        setState(
+            phase: .ready,
+            statusText: state.hasTranscript
+                ? "Transcript actions are ready."
+                : "Session actions are ready. Load a transcript to copy or export it.",
+            successSummary: nil,
+            failureSummary: nil,
+            warnings: [],
+            isDeletePromptVisible: false
+        )
+    }
+
+    @discardableResult
+    public func confirmDelete() async -> String? {
+        guard let sessionID = state.sessionID, state.canConfirmDelete else {
+            return nil
+        }
+        let revision = sessionRevision
 
         setState(
             phase: .deleting,
@@ -286,20 +432,20 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
             )
             try validateDeleteResponse(response, expectedSessionID: sessionID)
 
-            let deletedCount = response.deletedItems.count
-            let retainedCount = response.retainedExternalExports.count
-            let itemLabel = deletedCount == 1 ? "item" : "items"
-            let exportLabel = retainedCount == 1 ? "external export" : "external exports"
-            setState(
-                phase: .ready,
-                statusText: "Delete complete.",
-                successSummary: "Deleted session \(sessionID). Removed \(deletedCount) \(itemLabel). Retained \(retainedCount) \(exportLabel).",
-                failureSummary: nil,
-                warnings: response.warnings,
-                isDeletePromptVisible: false
-            )
+            guard isCurrentSession(sessionID, revision: revision) else {
+                return nil
+            }
+            clearSession()
+            return sessionID
         } catch {
-            fail(operation: "Delete", error: error, keepPromptVisible: false)
+            fail(
+                operation: "Delete",
+                error: error,
+                keepPromptVisible: false,
+                expectedSessionID: sessionID,
+                expectedRevision: revision
+            )
+            return nil
         }
     }
 
@@ -385,17 +531,22 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
     private func fail(
         operation: String,
         error: Error,
-        keepPromptVisible: Bool = false
+        keepPromptVisible: Bool = false,
+        expectedSessionID: String,
+        expectedRevision: UInt
     ) {
+        guard isCurrentSession(expectedSessionID, revision: expectedRevision) else {
+            return
+        }
+
         let summary: String
+        let technicalDetails: [String]
         if let failure = error as? TranscriptActionCommandFailure {
-            if let code = failure.code {
-                summary = "\(operation) failed: \(failure.message) (\(code.rawValue))"
-            } else {
-                summary = "\(operation) failed: \(failure.message)"
-            }
+            summary = "\(operation) failed: \(failure.message.processingSafeDisplayText(fallback: "The requested action could not be completed."))"
+            technicalDetails = failure.code.map { ["Error code: \($0.rawValue)"] } ?? []
         } else {
-            summary = "\(operation) failed: \(error.localizedDescription)"
+            summary = "\(operation) failed: \(error.localizedDescription.processingSafeDisplayText(fallback: "The requested action could not be completed."))"
+            technicalDetails = []
         }
 
         setState(
@@ -404,6 +555,7 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
             successSummary: nil,
             failureSummary: summary,
             warnings: [],
+            technicalDetails: technicalDetails,
             isDeletePromptVisible: keepPromptVisible
         )
     }
@@ -414,6 +566,7 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
         successSummary: String?,
         failureSummary: String?,
         warnings: [String],
+        technicalDetails: [String] = [],
         isDeletePromptVisible: Bool
     ) {
         state = TranscriptReviewActionsState(
@@ -423,8 +576,14 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
             statusText: statusText,
             successSummary: successSummary,
             failureSummary: failureSummary,
+            technicalDetails: technicalDetails,
             warnings: warnings,
-            isDeletePromptVisible: isDeletePromptVisible
+            isDeletePromptVisible: isDeletePromptVisible,
+            hasTranscript: state.hasTranscript
         )
+    }
+
+    private func isCurrentSession(_ sessionID: String, revision: UInt) -> Bool {
+        sessionRevision == revision && state.sessionID == sessionID
     }
 }

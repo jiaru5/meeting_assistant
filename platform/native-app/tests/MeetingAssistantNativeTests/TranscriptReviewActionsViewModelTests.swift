@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 @testable import MeetingAssistantNative
@@ -125,7 +126,7 @@ struct TranscriptReviewActionsViewModelTests {
         ])
         #expect(latestContent == "Copyable transcript text.")
         #expect(viewModel.state.statusText == "Copy complete.")
-        #expect(viewModel.state.successSummary == "Copied plain text transcript for session session-actions.")
+        #expect(viewModel.state.successSummary == "Transcript copied.")
         #expect(viewModel.state.failureSummary == nil)
     }
 
@@ -153,7 +154,8 @@ struct TranscriptReviewActionsViewModelTests {
         #expect(exportRequests.count == 1)
         #expect(latestContent == nil)
         #expect(viewModel.state.statusText == "Copy failed.")
-        #expect(viewModel.state.failureSummary == "Copy failed: Transcript artifact is missing. (artifact_missing)")
+        #expect(viewModel.state.failureSummary == "Copy failed: Transcript artifact is missing.")
+        #expect(viewModel.state.technicalDetails == ["Error code: artifact_missing"])
     }
 
     @Test
@@ -236,7 +238,7 @@ struct TranscriptReviewActionsViewModelTests {
             ),
         ])
         #expect(viewModel.state.statusText == "Export complete.")
-        #expect(viewModel.state.successSummary == "Exported markdown transcript to /tmp/actions.md.")
+        #expect(viewModel.state.successSummary == "Transcript exported.")
     }
 
     @Test
@@ -339,7 +341,8 @@ struct TranscriptReviewActionsViewModelTests {
 
         #expect(exportRequests.count == 1)
         #expect(viewModel.state.statusText == "Export failed.")
-        #expect(viewModel.state.failureSummary == "Export failed: Export target already exists. (path_conflict)")
+        #expect(viewModel.state.failureSummary == "Export failed: Export target already exists.")
+        #expect(viewModel.state.technicalDetails == ["Error code: path_conflict"])
     }
 
     @Test
@@ -410,6 +413,85 @@ struct TranscriptReviewActionsViewModelTests {
             "export_transcript --session-id session-actions --export-type markdown --target-path /tmp/actions.md",
             "delete_session --session-id session-actions --workspace-dir /tmp/workspace --confirm true",
         ])
+    }
+
+    @Test
+    func processRunnerDrainsLargeStdoutAndStderrWithoutDeadlock() async throws {
+        let fixture = try TranscriptActionProcessRunnerFixture(script: .largeOutput)
+
+        let response = try await fixture.runner.exportTranscript(
+            ExportTranscriptRequest(
+                sessionID: "session-actions",
+                exportType: .plainText
+            )
+        )
+
+        #expect(response.ok)
+        #expect(response.content?.count == 1_048_576)
+    }
+
+    @Test
+    func processRunnerTimesOutTerminatesTheChildAndReturnsOnlySafeBridgeDetails() async throws {
+        let fixture = try TranscriptActionProcessRunnerFixture(
+            script: .hangingAfterSensitiveOutput,
+            timeoutSeconds: 5
+        )
+
+        do {
+            _ = try await fixture.runner.exportTranscript(
+                ExportTranscriptRequest(
+                    sessionID: "session-actions",
+                    exportType: .plainText
+                )
+            )
+            #expect(Bool(false), "Expected the hanging transcript action command to time out.")
+        } catch let error as TranscriptActionBridgeError {
+            #expect(error == .timedOut(command: .exportTranscript))
+            #expect(error.code.rawValue == "internal_error")
+            #expect(error.safeMessage == "Transcript action command timed out and was stopped.")
+            #expect(error.errorDescription?.contains("/Users/jerry") == false)
+            #expect(error.errorDescription?.contains("sk-action-timeout-secret") == false)
+        }
+
+        #expect(try fixture.recordedProcessIsRunning() == false)
+    }
+
+    @Test
+    func processRunnerBoundsDrainAndKillsBackgroundDescendantHoldingPipes() async throws {
+        let fixture = try TranscriptActionProcessRunnerFixture(
+            script: .backgroundDescendantHoldingPipes,
+            timeoutSeconds: 10
+        )
+        let runner = fixture.runner
+        let operation = Task.detached {
+            try await runner.exportTranscript(
+                ExportTranscriptRequest(
+                    sessionID: "session-actions",
+                    exportType: .plainText
+                )
+            )
+        }
+        #expect(fixture.recordedProcessAppearsWithin(timeoutSeconds: 5))
+        let clock = ContinuousClock()
+        let startedAt = clock.now
+
+        do {
+            _ = try await operation.value
+            #expect(Bool(false), "Expected the direct command's nonzero exit to fail.")
+        } catch let error as TranscriptActionBridgeError {
+            #expect(
+                error == .processFailed(
+                    command: .exportTranscript,
+                    exitCode: 3,
+                    code: "path_conflict"
+                )
+            )
+            #expect(error.errorDescription?.contains("/Users/jerry") == false)
+            #expect(error.errorDescription?.contains("sk-action-descendant-secret") == false)
+        }
+
+        #expect(startedAt.duration(to: clock.now) < .seconds(3))
+        #expect(try fixture.recordedProcessStopsWithin(timeoutSeconds: 1))
     }
 
     @Test
@@ -517,13 +599,13 @@ struct TranscriptReviewActionsViewModelTests {
         await viewModel.exportTranscript()
 
         #expect(viewModel.state.statusText == "Export complete.")
-        #expect(viewModel.state.successSummary == "Exported markdown transcript to /tmp/actions.md.")
+        #expect(viewModel.state.successSummary == "Transcript exported.")
 
         viewModel.requestDeleteConfirmation()
-        await viewModel.confirmDelete()
+        let deletedSessionID = await viewModel.confirmDelete()
 
-        #expect(viewModel.state.statusText == "Delete complete.")
-        #expect(viewModel.state.successSummary == "Deleted session session-actions. Removed 2 items. Retained 1 external export.")
+        #expect(deletedSessionID == "session-actions")
+        #expect(viewModel.state == .unavailable)
         #expect(try fixture.recordedInvocationLines() == [
             "export_transcript --session-id session-actions --export-type plain_text",
             "export_transcript --session-id session-actions --export-type markdown --target-path /tmp/actions.md",
@@ -555,7 +637,7 @@ struct TranscriptReviewActionsViewModelTests {
     }
 
     @Test
-    func deleteConfirmSendsConfirmTrueAndShowsSuccessSummary() async {
+    func deleteConfirmSendsConfirmTrueReturnsSessionIDAndClearsState() async {
         let client = TranscriptActionFakeCommandClient(
             deleteScript: .success(
                 deletedItems: [
@@ -574,7 +656,7 @@ struct TranscriptReviewActionsViewModelTests {
         )
 
         viewModel.requestDeleteConfirmation()
-        await viewModel.confirmDelete()
+        let deletedSessionID = await viewModel.confirmDelete()
 
         let deleteRequests = await client.deleteRequestSnapshot()
 
@@ -585,8 +667,8 @@ struct TranscriptReviewActionsViewModelTests {
                 confirm: true
             ),
         ])
-        #expect(viewModel.state.statusText == "Delete complete.")
-        #expect(viewModel.state.successSummary == "Deleted session session-actions. Removed 2 items. Retained 1 external export.")
+        #expect(deletedSessionID == "session-actions")
+        #expect(viewModel.state == .unavailable)
     }
 
     @Test
@@ -681,12 +763,126 @@ struct TranscriptReviewActionsViewModelTests {
             ),
         ])
         #expect(viewModel.state.statusText == "Delete failed.")
-        #expect(viewModel.state.failureSummary == "Delete failed: Session path escaped the workspace. (path_conflict)")
+        #expect(viewModel.state.failureSummary == "Delete failed: Session path escaped the workspace.")
+        #expect(viewModel.state.technicalDetails == ["Error code: path_conflict"])
 
         viewModel.requestDeleteConfirmation()
         viewModel.cancelDelete()
 
-        #expect(viewModel.state.failureSummary == "Delete failed: Session path escaped the workspace. (path_conflict)")
+        #expect(viewModel.state.failureSummary == "Delete failed: Session path escaped the workspace.")
+    }
+
+    @Test
+    func deleteFailureSurvivesFreshSessionRebindWhileStaleTranscriptCapabilityIsCleared() async {
+        let client = TranscriptActionFakeCommandClient(
+            deleteScript: .failure(
+                code: "partial_delete",
+                message: "Some managed files could not be deleted."
+            )
+        )
+        let viewModel = TranscriptReviewActionsViewModel(
+            input: actionInput(),
+            commandClient: client,
+            clipboard: TranscriptActionMemoryClipboard(),
+            destinationSelector: TranscriptActionStaticDestinationSelector()
+        )
+
+        viewModel.requestDeleteConfirmation()
+        await viewModel.confirmDelete()
+        viewModel.updateSession(
+            sessionID: "session-actions",
+            sessionTitle: "Action Transcript",
+            transcript: nil,
+            preservingFailureFeedback: true
+        )
+
+        #expect(viewModel.state.sessionID == "session-actions")
+        #expect(viewModel.state.hasTranscript == false)
+        #expect(viewModel.state.canCopy == false)
+        #expect(viewModel.state.canExport == false)
+        #expect(viewModel.state.canRequestDelete)
+        #expect(viewModel.state.statusText == "Delete failed.")
+        #expect(viewModel.state.failureSummary == "Delete failed: Some managed files could not be deleted.")
+        #expect(viewModel.state.technicalDetails == ["Error code: partial_delete"])
+    }
+
+    @Test
+    func refreshedMeetingCanReportThatACommandSuccessWasNotVerified() async {
+        let viewModel = TranscriptReviewActionsViewModel(
+            input: TranscriptReviewInput(sessionTitle: nil, transcript: nil),
+            commandClient: TranscriptActionFakeCommandClient(),
+            clipboard: TranscriptActionMemoryClipboard(),
+            destinationSelector: TranscriptActionStaticDestinationSelector()
+        )
+        viewModel.updateSession(
+            sessionID: "session-still-present",
+            sessionTitle: "Still present",
+            transcript: nil
+        )
+
+        viewModel.reportDeleteReconciliationFailure()
+
+        #expect(viewModel.state.sessionID == "session-still-present")
+        #expect(viewModel.state.hasTranscript == false)
+        #expect(viewModel.state.failureSummary == "Delete failed: The meeting is still present in the refreshed workspace.")
+        #expect(viewModel.state.successSummary == nil)
+        #expect(viewModel.state.canRequestDelete)
+    }
+
+    @Test
+    func dismissFeedbackClearsPersistentFailureWithoutChangingSession() async {
+        let client = TranscriptActionFakeCommandClient(
+            exportScript: .failure(
+                code: "path_conflict",
+                message: "Export target already exists."
+            )
+        )
+        let viewModel = TranscriptReviewActionsViewModel(
+            input: actionInput(),
+            commandClient: client,
+            clipboard: TranscriptActionMemoryClipboard(),
+            destinationSelector: TranscriptActionStaticDestinationSelector(targetPath: "/tmp/actions.md")
+        )
+
+        await viewModel.exportTranscript()
+        #expect(viewModel.state.failureSummary != nil)
+
+        viewModel.dismissFeedback()
+
+        #expect(viewModel.state.sessionID == "session-actions")
+        #expect(viewModel.state.phase == .ready)
+        #expect(viewModel.state.failureSummary == nil)
+        #expect(viewModel.state.canExport)
+    }
+
+    @Test
+    func switchingSessionDuringDeleteIgnoresOldSuccessAndDoesNotClearNewSession() async {
+        let client = TranscriptActionFakeCommandClient(
+            deleteScript: .success(deletedItems: ["session.json"]),
+            responseDelayNanoseconds: 150_000_000
+        )
+        let viewModel = TranscriptReviewActionsViewModel(
+            input: actionInput(sessionTitle: "Old meeting"),
+            commandClient: client,
+            clipboard: TranscriptActionMemoryClipboard(),
+            destinationSelector: TranscriptActionStaticDestinationSelector()
+        )
+        viewModel.requestDeleteConfirmation()
+
+        let deleteTask = Task { await viewModel.confirmDelete() }
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        viewModel.updateSession(
+            sessionID: "session-new",
+            sessionTitle: "New meeting",
+            transcript: nil
+        )
+
+        let deletedSessionID = await deleteTask.value
+
+        #expect(deletedSessionID == nil)
+        #expect(viewModel.state.sessionID == "session-new")
+        #expect(viewModel.state.hasTranscript == false)
+        #expect(viewModel.state.canRequestDelete)
     }
 
     @Test
@@ -755,6 +951,110 @@ struct TranscriptReviewActionsViewModelTests {
     }
 
     @Test
+    func selectedSessionWithoutTranscriptCanDeleteButCannotCopyOrExport() async {
+        let client = TranscriptActionFakeCommandClient(
+            deleteScript: .success(deletedItems: ["session.json"])
+        )
+        let viewModel = TranscriptReviewActionsViewModel(
+            input: TranscriptReviewInput(sessionTitle: nil, transcript: nil),
+            commandClient: client,
+            clipboard: TranscriptActionMemoryClipboard(),
+            destinationSelector: TranscriptActionStaticDestinationSelector(targetPath: "/tmp/should-not-export.md"),
+            workspaceDir: "/tmp/workspace"
+        )
+
+        viewModel.updateSession(
+            sessionID: "session-without-transcript",
+            sessionTitle: "Recorded meeting",
+            transcript: nil
+        )
+
+        #expect(viewModel.state.isAvailable)
+        #expect(viewModel.state.hasTranscript == false)
+        #expect(viewModel.state.canCopy == false)
+        #expect(viewModel.state.canExport == false)
+        #expect(viewModel.state.canRequestDelete)
+
+        await viewModel.copyTranscript()
+        await viewModel.exportTranscript()
+        viewModel.requestDeleteConfirmation()
+        let deletedSessionID = await viewModel.confirmDelete()
+
+        #expect(await client.exportRequestSnapshot().isEmpty)
+        #expect(await client.deleteRequestSnapshot() == [
+            DeleteSessionRequest(
+                sessionID: "session-without-transcript",
+                workspaceDir: "/tmp/workspace",
+                confirm: true
+            ),
+        ])
+        #expect(deletedSessionID == "session-without-transcript")
+        #expect(viewModel.state == .unavailable)
+    }
+
+    @Test
+    func switchingSessionClearsOldTranscriptAndIgnoresOldOperationCompletion() async {
+        let client = TranscriptActionFakeCommandClient(
+            exportScript: .success(content: "Old transcript content."),
+            responseDelayNanoseconds: 150_000_000
+        )
+        let viewModel = TranscriptReviewActionsViewModel(
+            input: actionInput(sessionTitle: "Old meeting"),
+            commandClient: client,
+            clipboard: TranscriptActionMemoryClipboard(),
+            destinationSelector: TranscriptActionStaticDestinationSelector()
+        )
+
+        let copyTask = Task {
+            await viewModel.copyTranscript()
+        }
+        await Task.yield()
+        #expect(viewModel.state.phase == .copying)
+
+        viewModel.updateSession(
+            sessionID: "session-new",
+            sessionTitle: "New meeting",
+            transcript: nil
+        )
+        await copyTask.value
+
+        #expect(viewModel.state.sessionID == "session-new")
+        #expect(viewModel.state.sessionTitle == "New meeting")
+        #expect(viewModel.state.hasTranscript == false)
+        #expect(viewModel.state.canCopy == false)
+        #expect(viewModel.state.canExport == false)
+        #expect(viewModel.state.canRequestDelete)
+        #expect(viewModel.state.successSummary == nil)
+        #expect(viewModel.state.failureSummary == nil)
+
+        viewModel.clearSession()
+
+        #expect(viewModel.state == .unavailable)
+    }
+
+    @Test
+    func mismatchedTranscriptCannotEnableCopyOrExportForSelectedSession() {
+        let viewModel = TranscriptReviewActionsViewModel(
+            input: actionInput(),
+            commandClient: TranscriptActionFakeCommandClient(),
+            clipboard: TranscriptActionMemoryClipboard(),
+            destinationSelector: TranscriptActionStaticDestinationSelector()
+        )
+
+        viewModel.updateSession(
+            sessionID: "session-new",
+            sessionTitle: "New meeting",
+            transcript: actionInput().transcript
+        )
+
+        #expect(viewModel.state.sessionID == "session-new")
+        #expect(viewModel.state.hasTranscript == false)
+        #expect(viewModel.state.canCopy == false)
+        #expect(viewModel.state.canExport == false)
+        #expect(viewModel.state.canRequestDelete)
+    }
+
+    @Test
     func updateInputEnablesActionsAfterProcessingLoadsTranscript() {
         let viewModel = TranscriptReviewActionsViewModel(
             input: TranscriptReviewInput(sessionTitle: "Missing", transcript: nil),
@@ -803,6 +1103,9 @@ private final class TranscriptActionProcessRunnerFixture {
         case structuredExportFailure
         case nonJSONExportFailure(exitCode: Int32)
         case invalidJSONExportFailure
+        case largeOutput
+        case hangingAfterSensitiveOutput
+        case backgroundDescendantHoldingPipes
     }
 
     let rootURL: URL
@@ -810,15 +1113,20 @@ private final class TranscriptActionProcessRunnerFixture {
     let scriptURL: URL
     let argsURL: URL
     let invocationsURL: URL
+    let pidURL: URL
     let runner: TranscriptActionProcessRunner
 
-    init(script: Script = .success) throws {
+    init(
+        script: Script = .success,
+        timeoutSeconds: TimeInterval = TranscriptActionProcessRunner.defaultTimeoutSeconds
+    ) throws {
         rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("meeting-assistant-transcript-action-tests-\(UUID().uuidString)", isDirectory: true)
         workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
         scriptURL = rootURL.appendingPathComponent("meeting-assistant-cli")
         argsURL = rootURL.appendingPathComponent("args.txt")
         invocationsURL = rootURL.appendingPathComponent("invocations.txt")
+        pidURL = rootURL.appendingPathComponent("pid.txt")
 
         try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
         try Self.script(script).write(to: scriptURL, atomically: true, encoding: .utf8)
@@ -829,8 +1137,10 @@ private final class TranscriptActionProcessRunnerFixture {
             environment: [
                 "MEETING_ASSISTANT_TEST_ARGS_FILE": argsURL.path,
                 "MEETING_ASSISTANT_TEST_INVOCATIONS_FILE": invocationsURL.path,
+                "MEETING_ASSISTANT_TEST_PID_FILE": pidURL.path,
                 "MEETING_ASSISTANT_WORKSPACE": workspaceURL.path,
-            ]
+            ],
+            timeoutSeconds: timeoutSeconds
         )
     }
 
@@ -848,6 +1158,43 @@ private final class TranscriptActionProcessRunnerFixture {
         try String(contentsOf: invocationsURL, encoding: .utf8)
             .split(separator: "\n")
             .map(String.init)
+    }
+
+    func recordedProcessIsRunning() throws -> Bool {
+        let rawPID = try String(contentsOf: pidURL, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let pid = Int32(rawPID) else {
+            throw NSError(
+                domain: "TranscriptActionProcessRunnerFixture",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "The hanging fixture did not record a valid process ID."]
+            )
+        }
+        return Darwin.kill(pid, 0) == 0
+    }
+
+    func recordedProcessStopsWithin(timeoutSeconds: TimeInterval) throws -> Bool {
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while try recordedProcessIsRunning() {
+            guard Date() < deadline else {
+                return false
+            }
+            usleep(10_000)
+        }
+        return true
+    }
+
+    func recordedProcessAppearsWithin(timeoutSeconds: TimeInterval) -> Bool {
+        let deadline = DispatchTime.now() + timeoutSeconds
+        repeat {
+            if let rawPID = try? String(contentsOf: pidURL, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               Int32(rawPID) != nil {
+                return true
+            }
+            usleep(10_000)
+        } while DispatchTime.now() < deadline
+        return false
     }
 
     private static func script(_ script: Script) -> String {
@@ -911,6 +1258,32 @@ private final class TranscriptActionProcessRunnerFixture {
         case .invalidJSONExportFailure:
             exportCase = """
                 printf '%s\\n' "not json from /Users/jerry/Movies/MeetingAssistant/session sk-actionrawvalue"
+                exit 3
+            """
+        case .largeOutput:
+            exportCase = """
+                /bin/dd if=/dev/zero bs=1048576 count=1 2>/dev/null | /usr/bin/tr '\\000' 'e' >&2
+                printf '{"ok":true,"request_id":"local-action-large","command":"export_transcript","session_id":"%s","export_type":"%s","export_package_id":"export-package-large","content":"' "$3" "$5"
+                /bin/dd if=/dev/zero bs=1048576 count=1 2>/dev/null | /usr/bin/tr '\\000' 'x'
+                printf '","warnings":[]}\\n'
+            """
+        case .hangingAfterSensitiveOutput:
+            exportCase = """
+                printf '%s\\n' "$$" > "$MEETING_ASSISTANT_TEST_PID_FILE"
+                printf '%s\\n' "export stalled at /Users/jerry/Movies/MeetingAssistant/session with sk-action-timeout-secret" >&2
+                trap '' TERM
+                fifo="$MEETING_ASSISTANT_TEST_PID_FILE.fifo"
+                /usr/bin/mkfifo "$fifo"
+                read blocked < "$fifo"
+            """
+        case .backgroundDescendantHoldingPipes:
+            exportCase = """
+                (
+                  trap '' TERM
+                  printf '%s\\n' "action descendant retained /Users/jerry/Movies/MeetingAssistant/session with sk-action-descendant-secret" >&2
+                  /bin/sleep 10
+                ) &
+                printf '%s\\n' "$!" > "$MEETING_ASSISTANT_TEST_PID_FILE"
                 exit 3
             """
         }

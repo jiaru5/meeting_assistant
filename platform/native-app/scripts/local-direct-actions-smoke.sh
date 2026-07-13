@@ -639,6 +639,7 @@ def write_report(passed: bool, transcript_excerpt: str = "") -> None:
 try:
     transcript = validate_processed_input()
 
+    press_with_retry(f"ma.meetings.row.{session_id}", timeout_seconds)
     wait_for_actions_ready(timeout_seconds)
     subprocess.run(["/usr/bin/pbcopy"], input="", text=True, check=False)
     press_with_retry("ma.transcriptAction.copyButton", timeout_seconds)

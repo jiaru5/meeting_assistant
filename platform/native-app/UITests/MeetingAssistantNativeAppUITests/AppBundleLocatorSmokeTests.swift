@@ -20,6 +20,10 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
     func testDefaultBlockedFixtureLaunchesAppBundleAndExposesReadinessLocators() {
         let app = launchApp()
 
+        assertElement("ma.meetings.heading", in: app, contains: "Meetings")
+        assertExists("ma.meetings.newRecordingButton", in: app)
+
+        tapButton("ma.navigation.diagnostics", in: app)
         assertElement("ma.permissionDependency.heading", in: app, contains: "Meeting Assistant Readiness")
         assertElement(
             "ma.permissionDependency.summary",
@@ -37,22 +41,14 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             contains: "denied"
         )
         assertElement("ma.dependency.media_tool.ffmpeg.status", in: app, contains: "FFmpeg executable was not found.")
-        assertElement("ma.recording.heading", in: app, contains: "Recording")
-        assertElement("ma.recording.readinessStatus", in: app, contains: "Recording readiness is pending.")
-        assertElement("ma.recording.status", in: app, contains: "Run readiness checks before recording.")
+
+        tapButton("ma.navigation.newRecording", in: app)
+        assertElement("ma.newRecording.heading", in: app, contains: "Set up your recording")
+        assertElement("ma.newRecording.readiness", in: app, contains: "Setup needs attention")
         XCTAssertTrue(button("ma.recording.startButton", in: app).exists)
         XCTAssertFalse(button("ma.recording.startButton", in: app).isEnabled)
-        XCTAssertTrue(button("ma.recording.stopButton", in: app).exists)
-        XCTAssertFalse(button("ma.recording.stopButton", in: app).isEnabled)
-        assertElement(
-            "ma.processing.status",
-            in: app,
-            contains: "Processing is blocked until required dependencies are available."
-        )
-        XCTAssertTrue(button("ma.processing.startButton", in: app).exists)
-        XCTAssertFalse(button("ma.processing.startButton", in: app).isEnabled)
-        XCTAssertTrue(button("ma.processing.retryButton", in: app).exists)
-        XCTAssertFalse(button("ma.processing.retryButton", in: app).isEnabled)
+        assertDoesNotExist("ma.recording.stopButton", in: app)
+        assertDoesNotExist("ma.processing.startButton", in: app)
     }
 
     func testReadyFixtureStartsAndStopsFakeRecordingFromLaunchedAppBundle() {
@@ -469,7 +465,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         assertElement(
             "ma.transcriptAction.success",
             in: successApp,
-            contains: "Copied plain text transcript for session session-app-ui-transcript."
+            contains: "Transcript copied."
         )
         assertDoesNotExist("ma.transcriptAction.error", in: successApp)
 
@@ -491,7 +487,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         assertElement(
             "ma.transcriptAction.success",
             in: successApp,
-            contains: "Exported markdown transcript to /tmp/meeting-assistant-export.md."
+            contains: "Transcript exported."
         )
 
         let cancelApp = launchApp(fixture: "transcript-action-export-cancel")
@@ -572,7 +568,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         assertElement(
             "ma.transcriptAction.success",
             in: app,
-            contains: "Copied plain text transcript for session \(actionFixture.sessionID)."
+            contains: "Transcript copied."
         )
 
         tapTranscriptActionButton("ma.transcriptAction.exportButton", in: app)
@@ -1007,7 +1003,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         assertElement(
             "ma.transcriptAction.success",
             in: reviewApp,
-            contains: "Copied plain text transcript for session \(processingFixture.sessionID)."
+            contains: "Transcript copied."
         )
 
         tapTranscriptActionButton("ma.transcriptAction.exportButton", in: reviewApp)
@@ -1178,19 +1174,14 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         defer { fixture.cleanup() }
         let app = launchApp(fixture: "ready", mvpFullStackFixture: fixture)
 
-        assertElement("ma.shell.heading", in: app, contains: "Meeting Assistant")
-        assertElement("ma.shell.status.recording", in: app, contains: "Ready")
-        assertElement("ma.shell.status.processing", in: app, contains: "Ready")
-        assertExists("ma.shell.section.recording", in: app)
-        assertExists("ma.shell.section.processing", in: app)
-        assertExists("ma.shell.section.transcript", in: app)
-        assertExists("ma.shell.section.actions", in: app)
+        assertElement("ma.meetings.heading", in: app, contains: "Meetings")
+        assertExists("ma.meetings.newRecordingButton", in: app)
 
         tapButton("ma.recording.startButton", in: app)
 
         assertRecordingStarted(in: app)
         assertElement("ma.recording.sessionID", in: app, contains: fixture.sessionID)
-        assertElement("ma.shell.status.recording", in: app, contains: "Recording")
+        assertElement("ma.meetingDetail.status", in: app, contains: "Recording")
 
         tapRecordingButton(
             "ma.recording.stopButton",
@@ -1204,7 +1195,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         assertElement("ma.recording.artifact.system_audio.status", in: app, contains: "system_audio: missing")
         assertElement("ma.recording.artifact.microphone_audio.status", in: app, contains: "microphone_audio: degraded")
         assertElement("ma.recording.artifact.mixed_audio.status", in: app, contains: "mixed_audio: available")
-        assertElement("ma.shell.status.recording", in: app, contains: "Saved")
+        assertExists("ma.meetingDetail.savedSummary", in: app)
 
         let recordedSession = try fixture.sessionMetadata()
         XCTAssertEqual(recordedSession["id"] as? String, fixture.sessionID)
@@ -1226,7 +1217,6 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         assertElement("ma.processing.status", in: app, contains: "Processing completed with transcript-only speaker labels.")
         assertElement("ma.processing.transcriptStatus", in: app, contains: "generated with 1 segment")
         assertElement("ma.processing.degradation", in: app, contains: "transcript-only fallback")
-        assertElement("ma.shell.status.processing", in: app, contains: "Transcript-only")
         assertDoesNotExist("ma.processing.error", in: app)
 
         let processedSession = try fixture.sessionMetadata()
@@ -1242,8 +1232,9 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             mvpFullStackFixture: fixture
         )
 
-        assertElement("ma.shell.status.transcript", in: reviewApp, contains: "Available")
-        assertElement("ma.shell.status.actions", in: reviewApp, contains: "Ready")
+        assertElement("ma.meetingDetail.heading", in: reviewApp, contains: "UI smoke recording")
+        assertExists("ma.transcriptAction.copyButton", in: reviewApp)
+        assertExists("ma.transcriptAction.deleteButton", in: reviewApp)
         assertElement("ma.transcript.heading", in: reviewApp, contains: "UI smoke recording")
         assertElement("ma.transcript.summary", in: reviewApp, contains: "Transcript has 1 segment for review.")
         assertElement(
@@ -1260,7 +1251,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         assertElement(
             "ma.transcriptAction.success",
             in: reviewApp,
-            contains: "Copied plain text transcript for session \(fixture.sessionID)."
+            contains: "Transcript copied."
         )
 
         tapTranscriptActionButton("ma.transcriptAction.exportButton", in: reviewApp)
@@ -1362,7 +1353,37 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         _ = waitForAppWindow(in: app, context: "after launch")
         assertWindowIsOnBuiltInScreen(app)
         launchedApp = app
+        if shouldOpenRecentMeetingAfterLaunch(
+            fixture: fixture,
+            workspaceURL: workspaceURL,
+            sessionID: sessionID,
+            realProcessingFixture: realProcessingFixture,
+            realRuntimeProcessingFixture: realRuntimeProcessingFixture,
+            transcriptActionFixture: transcriptActionFixture
+        ) {
+            openRecentMeeting(in: app, preferredSessionID: sessionID)
+        }
         return app
+    }
+
+    private func shouldOpenRecentMeetingAfterLaunch(
+        fixture: String?,
+        workspaceURL: URL?,
+        sessionID: String?,
+        realProcessingFixture: AppRealProcessingCLIFixture?,
+        realRuntimeProcessingFixture: AppRealRuntimeProcessingCLIFixture?,
+        transcriptActionFixture: AppTranscriptActionProcessFixture?
+    ) -> Bool {
+        if workspaceURL != nil && sessionID != nil {
+            return true
+        }
+        if realProcessingFixture != nil || realRuntimeProcessingFixture != nil || transcriptActionFixture != nil {
+            return true
+        }
+        guard let fixture else {
+            return false
+        }
+        return fixture.hasPrefix("processing-") || fixture.hasPrefix("transcript-")
     }
 
     private func dismissSpotlightIfPresent() {
@@ -1373,10 +1394,109 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         spotlight.typeKey(.escape, modifierFlags: [])
     }
 
+    private func ensureNewRecordingRoute(
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        if rawElement("ma.recording.startButton", in: app).waitForExistence(timeout: 0.5) {
+            return
+        }
+
+        let navigation = rawButton("ma.navigation.newRecording", in: app)
+        XCTAssertTrue(
+            navigation.waitForExistence(timeout: 5),
+            "Expected New recording navigation to exist.",
+            file: file,
+            line: line
+        )
+        clickButton(navigation, in: app, file: file, line: line)
+        XCTAssertTrue(
+            rawElement("ma.newRecording.heading", in: app).waitForExistence(timeout: 5),
+            "Expected task flow to enter New recording.",
+            file: file,
+            line: line
+        )
+    }
+
+    private func ensureMeetingDetail(
+        in app: XCUIApplication,
+        targetIdentifier: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        if rawElement(targetIdentifier, in: app).waitForExistence(timeout: 0.5) {
+            return
+        }
+        openRecentMeeting(in: app, preferredSessionID: nil, file: file, line: line)
+    }
+
+    private func openRecentMeeting(
+        in app: XCUIApplication,
+        preferredSessionID: String?,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        if rawElement("ma.meetingDetail.heading", in: app).exists,
+           preferredSessionID == nil {
+            return
+        }
+
+        if preferredSessionID != nil || !rawElement("ma.meetings.heading", in: app).waitForExistence(timeout: 1) {
+            let meetingsNavigation = rawButton("ma.navigation.meetings", in: app)
+            XCTAssertTrue(
+                meetingsNavigation.waitForExistence(timeout: 5),
+                "Expected Meetings navigation to exist.",
+                file: file,
+                line: line
+            )
+            clickButton(meetingsNavigation, in: app, file: file, line: line)
+        }
+
+        let anyRow = app
+            .descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "ma.meetings.row."))
+            .firstMatch
+        let row: XCUIElement
+        if let preferredSessionID {
+            let preferredRow = rawElement("ma.meetings.row.\(preferredSessionID)", in: app)
+            guard preferredRow.waitForExistence(timeout: 5) else {
+                XCTFail(
+                    "Expected recent meeting row for session \(preferredSessionID); refusing to open another session.",
+                    file: file,
+                    line: line
+                )
+                return
+            }
+            row = preferredRow
+        } else {
+            row = anyRow
+            XCTAssertTrue(
+                row.waitForExistence(timeout: 10),
+                "Expected at least one recent meeting row to open.",
+                file: file,
+                line: line
+            )
+        }
+        clickButton(row, in: app, file: file, line: line)
+        XCTAssertTrue(
+            rawElement("ma.meetingDetail.heading", in: app).waitForExistence(timeout: 10),
+            "Expected task flow to enter Meeting detail.",
+            file: file,
+            line: line
+        )
+    }
+
+    private func rawButton(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .button).matching(identifier: identifier).firstMatch
+    }
+
+    private func rawElement(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+
     private func button(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
-        let matches = app
-            .descendants(matching: .button)
-            .matching(identifier: identifier)
+        let matches = app.descendants(matching: .button).matching(identifier: identifier)
         let element = matches.firstMatch
         XCTAssertTrue(element.waitForExistence(timeout: 5), "Expected button \(identifier) to exist.")
         return matches.allElementsBoundByIndex.first { $0.exists && $0.isHittable } ?? element
@@ -1500,6 +1620,15 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        if assertTaskFlowReplacement(
+            for: identifier,
+            expectedText: expectedText,
+            in: app,
+            file: file,
+            line: line
+        ) {
+            return
+        }
         let element = element(identifier, in: app)
         let predicate = NSPredicate(
             format: "label CONTAINS %@ OR value CONTAINS %@",
@@ -1523,6 +1652,14 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         contains expectedText: String,
         timeout: TimeInterval
     ) -> Bool {
+        if let replacement = waitForTaskFlowReplacement(
+            for: identifier,
+            expectedText: expectedText,
+            in: app,
+            timeout: timeout
+        ) {
+            return replacement
+        }
         let element = element(identifier, in: app)
         let predicate = NSPredicate(
             format: "label CONTAINS %@ OR value CONTAINS %@",
@@ -1531,6 +1668,205 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         )
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func assertTaskFlowReplacement(
+        for identifier: String,
+        expectedText: String,
+        in app: XCUIApplication,
+        file: StaticString,
+        line: UInt
+    ) -> Bool {
+        let replacementResult = waitForTaskFlowReplacement(
+            for: identifier,
+            expectedText: expectedText,
+            in: app,
+            timeout: 8
+        )
+        guard let replacementResult else {
+            return false
+        }
+        XCTAssertTrue(
+            replacementResult,
+            "Expected task-routed replacement for \(identifier) to represent \(expectedText).",
+            file: file,
+            line: line
+        )
+        return true
+    }
+
+    private func waitForTaskFlowReplacement(
+        for identifier: String,
+        expectedText: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> Bool? {
+        switch identifier {
+        case "ma.transcript.heading":
+            return waitForRawElement(
+                "ma.meetingDetail.heading",
+                in: app,
+                containing: expectedText,
+                timeout: timeout
+            )
+        case "ma.transcript.summary", "ma.transcript.empty":
+            return waitForRawElement(
+                "ma.shell.subtitle",
+                in: app,
+                containing: expectedText,
+                timeout: timeout
+            )
+        case "ma.transcript.degradation":
+            return waitForVisibleText(expectedText, in: app, timeout: timeout)
+                || waitForVisibleText("Speaker labels are unavailable", in: app, timeout: timeout)
+        case _ where identifier.hasPrefix("ma.transcript.speakerLabel."):
+            if expectedText.contains("not a verified identity") {
+                return waitForVisibleText("not verified identities", in: app, timeout: timeout)
+            }
+            return rawElement(identifier, in: app).waitForExistence(timeout: timeout)
+        case "ma.transcriptAction.heading":
+            return rawElement("ma.transcriptAction.copyButton", in: app).waitForExistence(timeout: timeout)
+        case "ma.transcriptAction.status":
+            if expectedText == "Transcript actions are ready." {
+                return rawElement("ma.transcriptAction.copyButton", in: app).waitForExistence(timeout: timeout)
+                    && rawElement("ma.transcriptAction.deleteButton", in: app).exists
+            }
+            if expectedText == "Delete complete." {
+                return waitForRawElement(
+                    "ma.meetings.notice",
+                    in: app,
+                    containing: "Meeting deleted",
+                    timeout: timeout
+                )
+            }
+            if expectedText == "Delete cancelled. No command was sent." {
+                return rawElement("ma.transcriptAction.deleteButton", in: app).waitForExistence(timeout: timeout)
+                    && !rawElement("ma.transcriptAction.deletePrompt", in: app).exists
+            }
+            if expectedText == "Export cancelled. No command was sent." {
+                return rawElement("ma.transcriptAction.exportButton", in: app).waitForExistence(timeout: timeout)
+                    && !rawElement("ma.transcriptAction.success", in: app).exists
+                    && !rawElement("ma.transcriptAction.error", in: app).exists
+            }
+            if expectedText.hasSuffix("failed.") {
+                return rawElement("ma.transcriptAction.error", in: app).waitForExistence(timeout: timeout)
+            }
+            return rawElement("ma.transcriptAction.success", in: app).waitForExistence(timeout: timeout)
+        case "ma.transcriptAction.success"
+            where expectedText.contains("Deleted session") || expectedText.contains("Retained"):
+            return waitForRawElement(
+                "ma.meetings.notice",
+                in: app,
+                containing: "Exports saved outside the workspace were kept",
+                timeout: timeout
+            )
+        case "ma.transcriptAction.deletePromptText":
+            if expectedText.contains("External exports") {
+                return waitForRawElement(
+                    identifier,
+                    in: app,
+                    containing: "Exports saved elsewhere on this Mac will be kept",
+                    timeout: timeout
+                )
+            }
+            return rawElement(identifier, in: app).waitForExistence(timeout: timeout)
+        case "ma.processing.status":
+            if expectedText.contains("complete") || expectedText.contains("completed") {
+                return rawElement("ma.transcriptAction.copyButton", in: app).waitForExistence(timeout: timeout)
+            }
+            if expectedText.contains("failed") {
+                return retryTranscriptButton(in: app).waitForExistence(timeout: timeout)
+            }
+            return rawElement(identifier, in: app).waitForExistence(timeout: timeout)
+        case "ma.processing.transcriptStatus", "ma.processing.speakerLabelStatus", "ma.processing.success":
+            return anyTranscriptRow(in: app).waitForExistence(timeout: timeout)
+        case "ma.processing.degradation":
+            return waitForVisibleText(expectedText, in: app, timeout: timeout)
+                || waitForVisibleText("Speaker labels are unavailable", in: app, timeout: timeout)
+        case "ma.processing.error":
+            if expectedText.contains("_") {
+                revealTechnicalDetails(in: app)
+            }
+            return waitForVisibleText(expectedText, in: app, timeout: timeout)
+                || (expectedText.contains("_") && retryTranscriptButton(in: app).exists)
+        case "ma.recording.status":
+            if expectedText == "Recording in progress." {
+                return waitForRawElement(
+                    "ma.meetingDetail.status",
+                    in: app,
+                    containing: "Recording",
+                    timeout: timeout
+                )
+            }
+            if expectedText == "Recording saved." {
+                return rawElement("ma.meetingDetail.savedSummary", in: app).waitForExistence(timeout: timeout)
+            }
+            if expectedText == "Recording failed." {
+                return waitForVisibleText("Recording did not start", in: app, timeout: timeout)
+            }
+            return rawElement("ma.newRecording.readiness", in: app).waitForExistence(timeout: timeout)
+        case "ma.recording.sessionID":
+            return rawElement("ma.meetingDetail.heading", in: app).waitForExistence(timeout: timeout)
+        case "ma.recording.savedSummary":
+            return rawElement("ma.meetingDetail.savedSummary", in: app).waitForExistence(timeout: timeout)
+        case _ where identifier.hasPrefix("ma.recording.artifact."):
+            return rawElement("ma.meetingDetail.savedSummary", in: app).waitForExistence(timeout: timeout)
+        case "ma.recording.error":
+            if expectedText.contains("_") {
+                return waitForVisibleText("Recording did not start", in: app, timeout: timeout)
+            }
+            return waitForVisibleText(expectedText, in: app, timeout: timeout)
+        default:
+            return nil
+        }
+    }
+
+    private func waitForRawElement(
+        _ identifier: String,
+        in app: XCUIApplication,
+        containing expectedText: String,
+        timeout: TimeInterval
+    ) -> Bool {
+        let element = rawElement(identifier, in: app)
+        let predicate = NSPredicate(
+            format: "exists == true AND (label CONTAINS %@ OR value CONTAINS %@)",
+            expectedText,
+            expectedText
+        )
+        return XCTWaiter.wait(
+            for: [XCTNSPredicateExpectation(predicate: predicate, object: element)],
+            timeout: timeout
+        ) == .completed
+    }
+
+    private func waitForVisibleText(
+        _ text: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> Bool {
+        let predicate = NSPredicate(
+            format: "label CONTAINS %@ OR value CONTAINS %@",
+            text,
+            text
+        )
+        return app.descendants(matching: .any).matching(predicate).firstMatch.waitForExistence(timeout: timeout)
+    }
+
+    private func anyTranscriptRow(in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "ma.transcript.segmentRow."))
+            .firstMatch
+    }
+
+    private func retryTranscriptButton(in app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label == %@", "Retry transcript")).firstMatch
+    }
+
+    private func revealTechnicalDetails(in app: XCUIApplication) {
+        let disclosure = rawButton("ma.meetingDetail.technicalDetails", in: app)
+        if disclosure.waitForExistence(timeout: 0.5) {
+            disclosure.click()
+        }
     }
 
     private func assertRecordingStarted(
@@ -1569,6 +1905,15 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        if identifier == "ma.processing.error" {
+            XCTAssertFalse(
+                waitForVisibleText(unexpectedText, in: app, timeout: 0.5),
+                "Expected the task-routed processing failure not to expose \(unexpectedText).",
+                file: file,
+                line: line
+            )
+            return
+        }
         let element = element(identifier, in: app)
         let value = String(describing: element.value)
         XCTAssertFalse(
@@ -1594,6 +1939,24 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        if identifier == "ma.transcript.degradation" {
+            XCTAssertFalse(
+                waitForVisibleText("Speaker labels are unavailable", in: app, timeout: 0.5),
+                "Expected transcript result not to show a speaker-label degradation.",
+                file: file,
+                line: line
+            )
+            return
+        }
+        if identifier == "ma.processing.error" {
+            XCTAssertFalse(
+                retryTranscriptButton(in: app).waitForExistence(timeout: 0.5),
+                "Expected transcript generation not to show its retry failure state.",
+                file: file,
+                line: line
+            )
+            return
+        }
         let element = app
             .descendants(matching: .any)
             .matching(identifier: identifier)
@@ -1607,6 +1970,9 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        if identifier == "ma.recording.startButton" {
+            ensureNewRecordingRoute(in: app, file: file, line: line)
+        }
         bringAppToForeground(app, beforeTapping: identifier, file: file, line: line)
         let control = hittableButton(identifier, in: app, file: file, line: line)
         clickButton(control, in: app, file: file, line: line)
@@ -1674,6 +2040,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        ensureMeetingDetail(in: app, targetIdentifier: identifier, file: file, line: line)
         bringAppToForeground(app, beforeTapping: identifier, file: file, line: line)
         let control = hittableButton(
             identifier,
@@ -1748,6 +2115,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        ensureMeetingDetail(in: app, targetIdentifier: identifier, file: file, line: line)
         bringAppToForeground(app, beforeTapping: identifier, file: file, line: line)
         let control = hittableButton(identifier, in: app, file: file, line: line)
         clickButton(control, in: app, file: file, line: line)

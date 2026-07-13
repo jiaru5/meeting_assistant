@@ -3,6 +3,7 @@ import Foundation
 public actor FakeRecordingCommandClient: RecordingCommandClient {
     public enum Script: Equatable, Sendable {
         case success
+        case successWithArtifacts([RecordingCommandArtifact])
         case startFailure(code: String, message: String)
         case stopFailure(code: String, message: String)
     }
@@ -50,6 +51,13 @@ public actor FakeRecordingCommandClient: RecordingCommandClient {
                 command: .stopRecording,
                 code: code,
                 message: message
+            )
+        }
+
+        if case .successWithArtifacts(let artifacts) = script {
+            return .successfulStop(
+                sessionID: request.sessionID,
+                artifacts: artifacts
             )
         }
 

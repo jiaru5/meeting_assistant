@@ -207,27 +207,32 @@ func assertSourceContains(_ url: URL, _ requiredSnippets: [String], label: Strin
 }
 
 func assertDesignedShellContract(repoRootURL: URL) {
-    let sectionIDs = DesignedNativeShellSection.allCases.map(\\.rawValue)
-    guard sectionIDs == ["preflight", "recording", "artifacts", "processing", "transcript", "actions"] else {
-        fail("designed native shell section order drifted: \\(sectionIDs)")
+    let routeIDs = MeetingWorkspaceRoute.allCases.map(\\.rawValue)
+    guard routeIDs == ["meetings", "newRecording", "meetingDetail", "diagnostics"] else {
+        fail("task-based meeting route order drifted: \\(routeIDs)")
     }
-    guard DesignedNativeShellSection.recording.title == "Record meeting" else {
-        fail("designed native shell recording section title drifted")
+    guard MeetingWorkspaceRoute.meetings.title == "Meetings",
+          MeetingWorkspaceRoute.newRecording.title == "New recording",
+          MeetingWorkspaceRoute.meetingDetail.title == "Meeting detail",
+          MeetingWorkspaceRoute.diagnostics.title == "Settings & diagnostics" else {
+        fail("task-based meeting route title drifted")
     }
     guard DesignedNativeShellAccessibilityID.root == "ma.shell.root" else {
         fail("designed native shell root locator drifted")
     }
-    guard DesignedNativeShellAccessibilityID.navButton(.processing) == "ma.shell.nav.processing" else {
-        fail("designed native shell processing nav locator drifted")
+    guard MeetingTaskAccessibilityID.navigation == "ma.shell.navigation" else {
+        fail("task-based meeting navigation locator drifted")
     }
-    guard DesignedNativeShellAccessibilityID.section(.actions) == "ma.shell.section.actions" else {
-        fail("designed native shell actions section locator drifted")
+    guard MeetingTaskAccessibilityID.meetingsHeading == "ma.meetings.heading",
+          MeetingTaskAccessibilityID.newRecordingHeading == "ma.newRecording.heading",
+          MeetingTaskAccessibilityID.detailHeading == "ma.meetingDetail.heading" else {
+        fail("task-based meeting heading locators drifted")
     }
-    guard DesignedNativeShellAccessibilityID.processingStep("speakerLabels") == "ma.shell.processingStep.speakerLabels" else {
-        fail("designed native shell processing step locator drifted")
+    guard MeetingTaskAccessibilityID.recoveryStatus == "ma.meetingDetail.recoveryStatus" else {
+        fail("task-based meeting recovery locator drifted")
     }
-    guard DesignedNativeShellAccessibilityID.artifactStatus("mixed_audio") == "ma.sessionArtifact.mixed_audio.status" else {
-        fail("designed native shell artifact status locator drifted")
+    guard MeetingTaskAccessibilityID.meetingRow("session-bridge") == "ma.meetings.row.session-bridge" else {
+        fail("task-based meeting row locator drifted")
     }
 
     let appSourceURL = repoRootURL.appendingPathComponent("platform/native-app/App/MeetingAssistantNativeApp.swift")
@@ -238,10 +243,11 @@ func assertDesignedShellContract(repoRootURL: URL) {
         fail("designed native shell app root: could not read source at \\(appSourceURL.path): \\(error)")
     }
     for snippet in [
-        "@StateObject private var shellViewModel: DesignedNativeShellViewModel",
-        "_shellViewModel = StateObject(wrappedValue: DesignedNativeShellViewModel())",
+        "@StateObject private var workspaceCoordinator: MeetingWorkspaceCoordinator",
+        "_workspaceCoordinator = StateObject(",
+        "wrappedValue: MeetingWorkspaceCoordinator(",
         "DesignedNativeShellView(",
-        "shellViewModel: shellViewModel",
+        "coordinator: workspaceCoordinator",
         "permissionViewModel: permissionViewModel",
         "recordingViewModel: recordingViewModel",
         "processingViewModel: processingViewModel",
@@ -259,15 +265,18 @@ func assertDesignedShellContract(repoRootURL: URL) {
         shellSourceURL,
         [
             "Text(\\\"Meeting Assistant\\\")",
-            "Designed native app shell",
+            "Text(\\\"Local meeting capture\\\")",
             ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.root)",
-            ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.statusBoard)",
-            ".accessibilityIdentifier(DesignedNativeShellAccessibilityID.commandRail)",
+            ".accessibilityIdentifier(MeetingTaskAccessibilityID.navigation)",
+            "private var routeContent: some View",
+            "case .meetings:",
+            "case .newRecording:",
+            "case .meetingDetail:",
+            "case .diagnostics:",
             "PermissionDependencyStatusView(viewModel: permissionViewModel)",
-            "RecordingControlView(viewModel: recordingViewModel)",
-            "ProcessingStateView(viewModel: processingViewModel)",
-            "TranscriptReviewView(viewModel: transcriptViewModel)",
-            "TranscriptReviewActionsView(viewModel: transcriptActionViewModel)",
+            ".accessibilityIdentifier(MeetingTaskAccessibilityID.newRecordingButton)",
+            ".accessibilityIdentifier(MeetingTaskAccessibilityID.detailHeading)",
+            ".accessibilityIdentifier(MeetingTaskAccessibilityID.recoveryStatus)",
         ],
         label: "designed native shell source"
     )

@@ -326,6 +326,7 @@ enum AppleScreenCaptureKitMixedAudioExtractionError: Error, LocalizedError, Send
     case noAudioTrack
     case exportSessionUnavailable
     case exportFailed
+    case exportTimedOut
 
     var errorDescription: String? {
         switch self {
@@ -335,11 +336,19 @@ enum AppleScreenCaptureKitMixedAudioExtractionError: Error, LocalizedError, Send
             return "AVFoundation could not create an audio export session for the combined recording."
         case .exportFailed:
             return "AVFoundation audio export failed for the combined recording."
+        case .exportTimedOut:
+            return "AVFoundation audio export did not finish before timeout."
         }
     }
 }
 
 struct AVFoundationAppleScreenCaptureKitMixedAudioExtractor: AppleScreenCaptureKitMixedAudioExtracting {
+    private let exportTimeoutNanoseconds: UInt64
+
+    init(exportTimeoutNanoseconds: UInt64 = 60_000_000_000) {
+        self.exportTimeoutNanoseconds = max(1, exportTimeoutNanoseconds)
+    }
+
     func extractMixedAudio(
         from combinedRecordingURL: URL,
         to outputURL: URL
@@ -360,10 +369,14 @@ struct AVFoundationAppleScreenCaptureKitMixedAudioExtractor: AppleScreenCaptureK
         }
         exportSession.outputURL = outputURL
         exportSession.outputFileType = .m4a
-        await withCheckedContinuation { continuation in
-            exportSession.exportAsynchronously {
-                continuation.resume()
-            }
+        do {
+            try await AppleScreenCaptureKitMediaOperationWaiter.wait(
+                for: AppleScreenCaptureKitAssetExportOperation(exportSession: exportSession),
+                timeoutNanoseconds: exportTimeoutNanoseconds
+            )
+        } catch AppleScreenCaptureKitMediaOperationWaitError.timedOut {
+            try? FileManager.default.removeItem(at: outputURL)
+            throw AppleScreenCaptureKitMixedAudioExtractionError.exportTimedOut
         }
         guard exportSession.status == .completed else {
             throw AppleScreenCaptureKitMixedAudioExtractionError.exportFailed
@@ -373,6 +386,98 @@ struct AVFoundationAppleScreenCaptureKitMixedAudioExtractor: AppleScreenCaptureK
             throw AppleScreenCaptureKitMixedAudioExtractionError.exportFailed
         }
         return AppleScreenCaptureKitMixedAudioFile(url: outputURL, format: "m4a")
+    }
+}
+
+protocol AppleScreenCaptureKitCancellableMediaOperation: Sendable {
+    func start(completionHandler: @escaping @Sendable () -> Void)
+    func cancel()
+}
+
+enum AppleScreenCaptureKitMediaOperationWaitError: Error, Equatable, Sendable {
+    case timedOut
+}
+
+enum AppleScreenCaptureKitMediaOperationWaiter {
+    static func wait(
+        for operation: any AppleScreenCaptureKitCancellableMediaOperation,
+        timeoutNanoseconds: UInt64
+    ) async throws {
+        let state = AppleScreenCaptureKitMediaOperationWaitState(operation: operation)
+        try await state.wait(timeoutNanoseconds: max(1, timeoutNanoseconds))
+    }
+}
+
+private final class AppleScreenCaptureKitMediaOperationWaitState: @unchecked Sendable {
+    private let lock = NSLock()
+    private let operation: any AppleScreenCaptureKitCancellableMediaOperation
+    private var continuation: CheckedContinuation<Void, Error>?
+    private var isResolved = false
+
+    init(operation: any AppleScreenCaptureKitCancellableMediaOperation) {
+        self.operation = operation
+    }
+
+    func wait(timeoutNanoseconds: UInt64) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.withLock {
+                self.continuation = continuation
+            }
+            operation.start { [weak self] in
+                self?.resolveSuccessfully()
+            }
+            let deadline = DispatchTime.now() + .nanoseconds(
+                Int(min(timeoutNanoseconds, UInt64(Int.max)))
+            )
+            DispatchQueue.global().asyncAfter(deadline: deadline) { [weak self] in
+                self?.resolveByTimingOut()
+            }
+        }
+    }
+
+    private func resolveSuccessfully() {
+        let continuation = takeContinuationIfUnresolved()
+        continuation?.resume()
+    }
+
+    private func resolveByTimingOut() {
+        let continuation = takeContinuationIfUnresolved()
+        guard let continuation else {
+            return
+        }
+        operation.cancel()
+        continuation.resume(throwing: AppleScreenCaptureKitMediaOperationWaitError.timedOut)
+    }
+
+    private func takeContinuationIfUnresolved() -> CheckedContinuation<Void, Error>? {
+        lock.withLock {
+            guard !isResolved else {
+                return nil
+            }
+            isResolved = true
+            let continuation = continuation
+            self.continuation = nil
+            return continuation
+        }
+    }
+}
+
+private final class AppleScreenCaptureKitAssetExportOperation:
+    AppleScreenCaptureKitCancellableMediaOperation,
+    @unchecked Sendable
+{
+    private let exportSession: AVAssetExportSession
+
+    init(exportSession: AVAssetExportSession) {
+        self.exportSession = exportSession
+    }
+
+    func start(completionHandler: @escaping @Sendable () -> Void) {
+        exportSession.exportAsynchronously(completionHandler: completionHandler)
+    }
+
+    func cancel() {
+        exportSession.cancelExport()
     }
 }
 
@@ -678,8 +783,9 @@ private final class ScreenCaptureKitAudioOutput: NSObject, SCStreamOutput, @unch
             isFinishing = true
             return (systemAudio: systemAudioWriter, microphoneAudio: microphoneAudioWriter)
         }
-        let systemAudio = await writers.systemAudio?.finish()
-        let microphoneAudio = await writers.microphoneAudio?.finish()
+        async let systemAudioResult = writers.systemAudio?.finish()
+        async let microphoneAudioResult = writers.microphoneAudio?.finish()
+        let (systemAudio, microphoneAudio) = await (systemAudioResult, microphoneAudioResult)
         return ScreenCaptureKitAudioOutputFiles(
             systemAudio: systemAudio,
             microphoneAudio: microphoneAudio
@@ -700,13 +806,18 @@ private final class ScreenCaptureKitAudioOutput: NSObject, SCStreamOutput, @unch
 @available(macOS 15.0, *)
 private final class ScreenCaptureKitAudioTrackWriter: @unchecked Sendable {
     private let outputURL: URL
+    private let finishTimeoutNanoseconds: UInt64
     private var writer: AVAssetWriter?
     private var input: AVAssetWriterInput?
     private var didAppendSample = false
     private var failed = false
 
-    init(outputURL: URL) {
+    init(
+        outputURL: URL,
+        finishTimeoutNanoseconds: UInt64 = 15_000_000_000
+    ) {
         self.outputURL = outputURL
+        self.finishTimeoutNanoseconds = max(1, finishTimeoutNanoseconds)
     }
 
     func append(_ sampleBuffer: CMSampleBuffer) {
@@ -750,7 +861,15 @@ private final class ScreenCaptureKitAudioTrackWriter: @unchecked Sendable {
         }
 
         input.markAsFinished()
-        await writer.finishWriting()
+        do {
+            try await AppleScreenCaptureKitMediaOperationWaiter.wait(
+                for: AppleScreenCaptureKitAssetWriterFinishOperation(writer: writer),
+                timeoutNanoseconds: finishTimeoutNanoseconds
+            )
+        } catch {
+            cleanupOutput()
+            return nil
+        }
         guard writer.status == .completed, outputFileIsReadable() else {
             cleanupOutput()
             return nil
@@ -804,6 +923,26 @@ private final class ScreenCaptureKitAudioTrackWriter: @unchecked Sendable {
         if FileManager.default.fileExists(atPath: outputURL.path) {
             try? FileManager.default.removeItem(at: outputURL)
         }
+    }
+}
+
+@available(macOS 15.0, *)
+private final class AppleScreenCaptureKitAssetWriterFinishOperation:
+    AppleScreenCaptureKitCancellableMediaOperation,
+    @unchecked Sendable
+{
+    private let writer: AVAssetWriter
+
+    init(writer: AVAssetWriter) {
+        self.writer = writer
+    }
+
+    func start(completionHandler: @escaping @Sendable () -> Void) {
+        writer.finishWriting(completionHandler: completionHandler)
+    }
+
+    func cancel() {
+        writer.cancelWriting()
     }
 }
 

@@ -1,318 +1,195 @@
-import Foundation
 import Testing
 @testable import MeetingAssistantNative
 
-@Suite("Designed native shell")
-@MainActor
+@Suite("Task-based native shell")
 struct DesignedNativeShellViewModelTests {
     @Test
-    func exposesStableSectionsAndNavigationIdentifiers() {
-        let viewModel = DesignedNativeShellViewModel()
-
-        #expect(viewModel.sections == [
-            .preflight,
-            .recording,
-            .artifacts,
-            .processing,
-            .transcript,
-            .actions,
+    func exposesStableTaskRoutesInsteadOfPipelineSections() {
+        #expect(MeetingWorkspaceRoute.allCases == [
+            .meetings,
+            .newRecording,
+            .meetingDetail,
+            .diagnostics,
         ])
-        #expect(viewModel.selectedSection == .preflight)
-        #expect(viewModel.selectedSectionLabel == "Preflight selected.")
-        #expect(DesignedNativeShellAccessibilityID.root == "ma.shell.root")
-        #expect(DesignedNativeShellAccessibilityID.heading == "ma.shell.heading")
-        #expect(DesignedNativeShellAccessibilityID.navigation == "ma.shell.navigation")
-        #expect(DesignedNativeShellAccessibilityID.commandRail == "ma.shell.commandRail")
-        #expect(DesignedNativeShellAccessibilityID.navButton(.recording) == "ma.shell.nav.recording")
-        #expect(DesignedNativeShellAccessibilityID.section(.artifacts) == "ma.shell.section.artifacts")
+        #expect(MeetingWorkspaceRoute.meetings.title == "Meetings")
+        #expect(MeetingWorkspaceRoute.newRecording.title == "New recording")
+        #expect(MeetingWorkspaceRoute.meetingDetail.title == "Meeting detail")
+        #expect(MeetingWorkspaceRoute.diagnostics.title == "Settings & diagnostics")
+    }
+
+    @Test
+    func taskLocatorsUseUserJourneyPrefixes() {
+        #expect(MeetingTaskAccessibilityID.navigation == "ma.shell.navigation")
+        #expect(MeetingTaskAccessibilityID.meetingsHeading == "ma.meetings.heading")
+        #expect(MeetingTaskAccessibilityID.newRecordingButton == "ma.meetings.newRecordingButton")
+        #expect(MeetingTaskAccessibilityID.newRecordingHeading == "ma.newRecording.heading")
+        #expect(MeetingTaskAccessibilityID.titleField == "ma.newRecording.titleField")
+        #expect(MeetingTaskAccessibilityID.detailHeading == "ma.meetingDetail.heading")
+        #expect(MeetingTaskAccessibilityID.recoveryStatus == "ma.meetingDetail.recoveryStatus")
+        #expect(MeetingTaskAccessibilityID.startNewRecording == "ma.meetingDetail.startNewRecording")
+        #expect(MeetingTaskAccessibilityID.diagnosticsHeading == "ma.diagnostics.heading")
         #expect(
-            DesignedNativeShellAccessibilityID.artifactStatus("screen_video")
-                == "ma.sessionArtifact.screen_video.status"
+            MeetingTaskAccessibilityID.meetingRow("session-1")
+                == "ma.meetings.row.session-1"
         )
+    }
+
+    @Test
+    func recordingDraftUsesUserInputAndDoesNotInventATitle() {
+        var draft = MeetingRecordingDraft(
+            title: "   ",
+            captureSystemAudio: true,
+            captureMicrophoneAudio: false
+        )
+
+        #expect(draft.normalizedTitle == nil)
+        #expect(draft.captureSystemAudio)
+        #expect(draft.captureMicrophoneAudio == false)
+
+        draft.title = "  Design review  "
+        #expect(draft.normalizedTitle == "Design review")
+    }
+
+    @Test
+    func onlyInProgressActivitiesLockNavigation() {
+        #expect(MeetingWorkspaceActivity.idle.locksNavigation == false)
+        #expect(MeetingWorkspaceActivity.startingRecording.locksNavigation)
+        #expect(MeetingWorkspaceActivity.recording.locksNavigation)
+        #expect(MeetingWorkspaceActivity.saving.locksNavigation)
+        #expect(MeetingWorkspaceActivity.processing.locksNavigation)
+    }
+
+    @Test
+    func meetingTimestampAcceptsISO8601WithAndWithoutFractionalSeconds() throws {
+        let wholeSeconds = try #require(
+            meetingTimestampDate("2026-07-13T08:09:10Z")
+        )
+        let fractionalSeconds = try #require(
+            meetingTimestampDate("2026-07-13T08:09:10.000Z")
+        )
+
+        #expect(wholeSeconds == fractionalSeconds)
+        #expect(meetingTimestampDate("not-a-timestamp") == nil)
+        #expect(meetingFriendlyDate("not-a-timestamp") == "Meeting date unavailable")
+    }
+
+    @Test
+    func savedArtifactSummaryTreatsUnrequestedAudioAsNeutral() {
+        let artifacts = [
+            readyArtifact(id: "screen", type: "screen_video"),
+            notRequestedArtifact(id: "microphone", type: "microphone_audio"),
+        ]
+
         #expect(
-            DesignedNativeShellAccessibilityID.processingStep("speakerLabels")
-                == "ma.shell.processingStep.speakerLabels"
+            recordingSavedArtifactSummary(artifacts: artifacts, fallbackCount: 0)
+                == "1 meeting file is ready. Optional audio was left out as requested."
         )
     }
 
     @Test
-    func selectingSectionUpdatesAccessibleSelectionLabel() {
-        let viewModel = DesignedNativeShellViewModel(initialSection: .recording)
-
-        #expect(viewModel.selectedSectionLabel == "Record meeting selected.")
-
-        viewModel.select(.actions)
-
-        #expect(viewModel.selectedSection == .actions)
-        #expect(viewModel.selectedSectionLabel == "Export and delete selected.")
-    }
-
-    @Test
-    func projectsStatusBoardFromExistingViewModelStates() {
-        let items = DesignedNativeShellViewModel.statusItems(
-            readiness: readyReadinessState(),
-            recording: .recording(sessionID: "session-shell"),
-            processing: completedProcessingState(),
-            transcript: availableTranscriptState(),
-            actions: readyActionState()
-        )
-
-        #expect(items.map(\.id) == ["preflight", "recording", "processing", "transcript", "actions"])
-        #expect(items.map(\.value) == ["Ready", "Recording", "Complete", "Available", "Ready"])
-        #expect(items.map(\.tone) == ["success", "recording", "success", "success", "neutral"])
-    }
-
-    @Test
-    func projectsBlockedAndDegradedStatesWithoutPromotingReleaseEvidence() {
-        let items = DesignedNativeShellViewModel.statusItems(
-            readiness: blockedReadinessState(),
-            recording: RecordingControlState(
-                phase: .failed,
-                statusText: "Recording failed.",
-                sessionID: "session-shell",
-                artifacts: [],
-                errorCode: .captureFailed,
-                errorMessage: "Recording could not be saved.",
-                savedSummary: nil,
-                warnings: []
+    func savedArtifactSummaryCountsOnlyRequestedUnavailableSourcesAsFailures() {
+        let artifacts = [
+            readyArtifact(id: "screen", type: "screen_video"),
+            RecordingCommandArtifact(
+                id: "system",
+                artifactType: "system_audio",
+                captureStatus: "missing",
+                degradationReason: "System audio permission was unavailable."
             ),
-            processing: degradedProcessingState(),
-            transcript: degradedTranscriptState(),
-            actions: .unavailable
-        )
+            notRequestedArtifact(id: "microphone", type: "microphone_audio"),
+        ]
 
-        #expect(items.map(\.value) == ["Blocked", "Failed", "Transcript-only", "Available", "Unavailable"])
-        #expect(items.map(\.tone) == ["error", "error", "fallback", "fallback", "neutral"])
+        #expect(
+            recordingSavedArtifactSummary(artifacts: artifacts, fallbackCount: 0)
+                == "1 meeting file is ready; 1 requested source was unavailable. Successful files were kept. Optional audio was left out as requested."
+        )
     }
 
     @Test
-    func artifactRowsCoverAllRequiredArtifactTypesAndDegradationReasons() {
-        let rows = DesignedNativeShellViewModel.artifactRows(
-            from: [
-                RecordingCommandArtifact(
-                    id: "artifact-screen",
-                    sessionID: "session-shell",
-                    artifactType: "screen_video",
-                    format: "mov",
-                    path: "sessions/session-shell/artifacts/screen_video.mov"
-                ),
-                RecordingCommandArtifact(
-                    id: "artifact-microphone",
-                    sessionID: "session-shell",
-                    artifactType: "microphone_audio",
-                    captureStatus: "degraded",
-                    degradationReason: "microphone input clipped"
-                ),
-            ]
+    func savedArtifactAccessibilityUsesUserLanguageInsteadOfRawTypeAndStatus() {
+        let degradedAudio = RecordingCommandArtifact(
+            id: "meeting-audio",
+            artifactType: "mixed_audio",
+            path: "sessions/session/artifacts/meeting-audio.wav",
+            captureStatus: "degraded",
+            degradationReason: "Meeting audio was recovered with limited quality.",
+            checksum: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        )
+        let missingMicrophone = RecordingCommandArtifact(
+            id: "microphone",
+            artifactType: "microphone_audio",
+            captureStatus: "missing",
+            degradationReason: "Microphone access was unavailable."
         )
 
-        #expect(rows.map(\.artifactType) == ["screen_video", "system_audio", "microphone_audio", "mixed_audio"])
-        #expect(rows.map(\.status) == ["available", "pending", "degraded", "pending"])
-        #expect(rows[0].detail == "sessions/session-shell/artifacts/screen_video.mov")
-        #expect(rows[1].detail == "Pending until recording stops.")
-        #expect(rows[2].detail == "microphone input clipped")
+        let degradedLabel = recordingArtifactAccessibilityLabel(degradedAudio)
+        let missingLabel = recordingArtifactAccessibilityLabel(missingMicrophone)
+
+        #expect(degradedLabel == "Meeting audio, Saved with limited quality.")
+        #expect(missingLabel == "Microphone, Not captured. Microphone access was unavailable.")
+        #expect(!degradedLabel.contains("mixed_audio"))
+        #expect(!degradedLabel.contains("degraded"))
+        #expect(!missingLabel.contains("microphone_audio"))
+        #expect(!missingLabel.contains("missing"))
     }
 
     @Test
-    func processingStepsExposePipelineReadinessFailureAndFallback() {
-        let completed = DesignedNativeShellViewModel.processingSteps(from: completedProcessingState())
-        #expect(completed.map(\.id) == ["normalizedAudio", "transcript", "speakerLabels", "exportReady"])
-        #expect(completed[0].status == "Processing input selected through command contract.")
-        #expect(completed[1].status == "Transcript transcript-shell generated with 2 segments.")
-        #expect(completed[2].status == "Speaker labels artifact artifact-speakers-shell is available.")
-        #expect(completed[3].status == "Transcript can be reviewed before user-triggered export.")
+    func savedArtifactUserStatusHidesRawContractFieldsFromProviderReason() {
+        let missingMicrophone = RecordingCommandArtifact(
+            id: "microphone",
+            artifactType: "microphone_audio",
+            captureStatus: "missing",
+            degradationReason: "capture_status=missing"
+        )
 
-        let degraded = DesignedNativeShellViewModel.processingSteps(from: degradedProcessingState())
-        #expect(degraded[2].status == "Speaker labels degraded: speaker labeling runtime unavailable")
-        #expect(degraded[3].status == "Transcript can be reviewed before user-triggered export.")
+        let status = recordingArtifactUserStatus(missingMicrophone)
 
-        let failed = DesignedNativeShellViewModel.processingSteps(from: failedProcessingState())
-        #expect(failed[0].status == "Retained for retry; original media remains protected.")
-        #expect(failed[3].status == "Export blocked until processing succeeds or transcript is loaded.")
+        #expect(status == "Not captured. This source was not saved.")
+        #expect(!status.contains("microphone_audio"))
+        #expect(!status.contains("capture_status"))
     }
 
     @Test
-    func recordingSetupTextMatchesRequestedAudioFlags() {
-        #expect(
-            DesignedNativeShellViewModel.recordingSetupText(
-                captureSystemAudio: true,
-                captureMicrophoneAudio: true
-            )
-            == "Capture target: screen. System audio and microphone capture are requested through the recording command client."
-        )
-        #expect(
-            DesignedNativeShellViewModel.recordingSetupText(
-                captureSystemAudio: true,
-                captureMicrophoneAudio: false
-            )
-            == "Capture target: screen. System audio capture is requested; microphone capture is not requested for this run."
-        )
-        #expect(
-            DesignedNativeShellViewModel.recordingSetupText(
-                captureSystemAudio: false,
-                captureMicrophoneAudio: true
-            )
-            == "Capture target: screen. Microphone capture is requested; system audio capture is not requested for this run."
-        )
-        #expect(
-            DesignedNativeShellViewModel.recordingSetupText(
-                captureSystemAudio: false,
-                captureMicrophoneAudio: false
-            )
-            == "Capture target: screen. Audio capture is not requested for this run; unavailable audio artifacts must stay missing with reasons."
+    func historicalIncompleteStatusesUseRecoveryLanguageInsteadOfSaved() {
+        let expected = [
+            "created": "Recording not started",
+            "recording": "Recording interrupted",
+            "processing": "Transcript interrupted",
+            "failed": "Needs attention",
+        ]
+
+        for (status, userStatus) in expected {
+            #expect(historicalMeetingRecoveryStatus(status) == userStatus)
+            #expect(meetingUserStatus(status, hasTranscript: false) == userStatus)
+            #expect(meetingUserStatus(status, hasTranscript: true) == userStatus)
+            #expect(!meetingUserStatus(status, hasTranscript: false).contains("Saved"))
+        }
+
+        #expect(historicalMeetingRecoveryStatus("recorded") == nil)
+        #expect(historicalMeetingRecoveryStatus("transcribed") == nil)
+        #expect(historicalMeetingRecoveryStatus("unexpected") == "Needs attention")
+        #expect(meetingUserStatus("recorded", hasTranscript: false) == "Ready to transcribe")
+        #expect(meetingUserStatus("transcribed", hasTranscript: true) == "Transcript ready")
+        #expect(meetingUserStatus("unexpected", hasTranscript: false) == "Needs attention")
+        #expect(meetingUserStatus("unexpected", hasTranscript: true) == "Needs attention")
+    }
+
+    private func readyArtifact(id: String, type: String) -> RecordingCommandArtifact {
+        RecordingCommandArtifact(
+            id: id,
+            artifactType: type,
+            path: "sessions/session/artifacts/\(id)",
+            captureStatus: "available",
+            checksum: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
         )
     }
-}
 
-private func readyReadinessState() -> PermissionDependencyStatusState {
-    PermissionDependencyStatusState.from(
-        DependencyCheckResponse(
-            ok: true,
-            requestID: "local-ready",
-            checks: [
-                dependencyCheck("permission.screen_recording", status: "granted", required: false, ok: true),
-                dependencyCheck("permission.microphone", status: "granted", required: false, ok: true),
-                dependencyCheck("media_tool.ffmpeg", status: "available", required: true, ok: true),
-            ]
+    private func notRequestedArtifact(id: String, type: String) -> RecordingCommandArtifact {
+        RecordingCommandArtifact(
+            id: id,
+            artifactType: type,
+            captureStatus: "missing",
+            degradationReason: "\(type) was not requested for this native capture session."
         )
-    )
-}
-
-private func blockedReadinessState() -> PermissionDependencyStatusState {
-    PermissionDependencyStatusState.from(
-        DependencyCheckResponse(
-            ok: true,
-            requestID: "local-blocked",
-            checks: [
-                dependencyCheck("permission.screen_recording", status: "denied", required: false, ok: false),
-                dependencyCheck("permission.microphone", status: "granted", required: false, ok: true),
-                dependencyCheck("media_tool.ffmpeg", status: "missing", required: true, ok: false),
-            ]
-        )
-    )
-}
-
-private func dependencyCheck(
-    _ id: String,
-    status: String,
-    required: Bool,
-    ok: Bool
-) -> DependencyCheckItem {
-    DependencyCheckItem(
-        id: id,
-        status: status,
-        required: required,
-        ok: ok,
-        message: "\(id) is \(status)."
-    )
-}
-
-private func completedProcessingState() -> ProcessingState {
-    ProcessingState(
-        phase: .completed,
-        statusText: "Processing complete.",
-        sessionID: "session-shell",
-        transcriptID: "transcript-shell",
-        transcriptArtifactID: "artifact-transcript-shell",
-        transcriptStatus: "Transcript transcript-shell generated with 2 segments.",
-        segmentCount: 2,
-        labelStatus: "labeled",
-        speakerLabelsArtifactID: "artifact-speakers-shell",
-        speakerLabelStatus: "Speaker labels artifact artifact-speakers-shell is available.",
-        successSummary: "Generated transcript and speaker labels for session session-shell.",
-        degradationReason: nil,
-        errorCode: nil,
-        errorMessage: nil,
-        errorDetails: [],
-        warnings: []
-    )
-}
-
-private func degradedProcessingState() -> ProcessingState {
-    ProcessingState(
-        phase: .degraded,
-        statusText: "Processing completed with transcript-only speaker labels.",
-        sessionID: "session-shell",
-        transcriptID: "transcript-shell",
-        transcriptArtifactID: "artifact-transcript-shell",
-        transcriptStatus: "Transcript transcript-shell generated with 2 segments.",
-        segmentCount: 2,
-        labelStatus: "transcript_only",
-        speakerLabelsArtifactID: "artifact-speakers-shell",
-        speakerLabelStatus: "Speaker labels degraded: speaker labeling runtime unavailable",
-        successSummary: nil,
-        degradationReason: "speaker labeling runtime unavailable",
-        errorCode: nil,
-        errorMessage: nil,
-        errorDetails: [],
-        warnings: []
-    )
-}
-
-private func failedProcessingState() -> ProcessingState {
-    ProcessingState(
-        phase: .failed,
-        statusText: "Processing failed.",
-        sessionID: "session-shell",
-        transcriptID: "transcript-shell",
-        transcriptArtifactID: "artifact-transcript-shell",
-        transcriptStatus: "Transcript transcript-shell generated with 2 segments.",
-        segmentCount: 2,
-        labelStatus: nil,
-        speakerLabelsArtifactID: nil,
-        speakerLabelStatus: nil,
-        successSummary: nil,
-        degradationReason: nil,
-        errorCode: .processingFailed,
-        errorMessage: "Transcript adapter failed.",
-        errorDetails: [],
-        warnings: []
-    )
-}
-
-private func availableTranscriptState() -> TranscriptReviewState {
-    TranscriptReviewState(
-        contentState: .available,
-        heading: "Shell transcript",
-        summary: "Transcript has 1 segment for review.",
-        segments: [
-            TranscriptReviewVisibleSegment(
-                id: "seg-shell",
-                timestampLabel: "00:01-00:03",
-                text: "Shell transcript segment.",
-                speakerDisplayLabel: "Anonymous speaker SPEAKER_01 (not a verified identity)"
-            ),
-        ],
-        degradationReason: nil
-    )
-}
-
-private func degradedTranscriptState() -> TranscriptReviewState {
-    TranscriptReviewState(
-        contentState: .available,
-        heading: "Shell transcript",
-        summary: "Transcript has 1 segment for review.",
-        segments: [
-            TranscriptReviewVisibleSegment(
-                id: "seg-shell",
-                timestampLabel: "00:01-00:03",
-                text: "Shell transcript segment.",
-                speakerDisplayLabel: nil
-            ),
-        ],
-        degradationReason: "speaker labeling runtime unavailable"
-    )
-}
-
-private func readyActionState() -> TranscriptReviewActionsState {
-    TranscriptReviewActionsState(
-        phase: .ready,
-        sessionID: "session-shell",
-        sessionTitle: "Shell transcript",
-        statusText: "Transcript actions are ready.",
-        successSummary: nil,
-        failureSummary: nil,
-        warnings: [],
-        isDeletePromptVisible: false
-    )
+    }
 }

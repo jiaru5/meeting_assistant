@@ -162,10 +162,10 @@ def is_truthy(value):
     return value in {"1", "true", "TRUE", "yes", "YES"}
 
 
-required_controls = {
+required_projected_controls = {
     "ma.recording.startButton": True,
     "ma.recording.stopButton": False,
-    "ma.processing.startButton": True,
+    "ma.processing.startButton": False,
     "ma.processing.retryButton": False,
 }
 
@@ -203,15 +203,15 @@ def state_errors(state):
         errors.append(f"recording phase={recording.get('phase')!r}, expected 'ready'")
     if recording.get("status_text") != "Ready to start recording.":
         errors.append("recording ready status text missing")
-    if processing.get("phase") != "idle":
-        errors.append(f"processing phase={processing.get('phase')!r}, expected 'idle'")
-    if processing.get("status_text") != "Processing is ready to run.":
-        errors.append("processing ready status text missing")
+    if processing.get("phase") != "blocked":
+        errors.append(f"processing phase={processing.get('phase')!r}, expected 'blocked'")
+    if processing.get("status_text") != "Choose a recorded meeting before generating a transcript.":
+        errors.append("processing current-session guard status text missing")
     controls = {
         control.get("identifier"): control.get("enabled")
         for control in state.get("checked_controls", [])
     }
-    for identifier, expected_enabled in required_controls.items():
+    for identifier, expected_enabled in required_projected_controls.items():
         if identifier not in controls:
             errors.append(f"{identifier} missing")
             continue
@@ -262,7 +262,7 @@ report = {
         "Meeting Assistant",
         state["preflight"]["summary"],
         "Ready to start recording.",
-        "Processing is ready to run.",
+        "Choose a recorded meeting before generating a transcript.",
         expected_recording_setup_marker,
     ],
     "checked_recording_setup_text": expected_recording_setup_marker,
@@ -272,9 +272,10 @@ report = {
         "capture_microphone_audio": is_truthy(capture_microphone_audio),
     },
     "checked_controls": state["checked_controls"],
+    "checked_control_evidence": "app_state_view_model_projection",
     "checked_visible_window": window_report,
     "verifies_app_state_report": True,
-    "verifies_action_control_identifiers": True,
+    "verifies_action_control_identifiers": False,
     "modifies_tcc_or_system_settings": False,
     "opens_system_settings": False,
     "starts_recording": False,

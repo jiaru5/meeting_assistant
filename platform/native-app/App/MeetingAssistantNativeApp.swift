@@ -2,6 +2,20 @@ import Foundation
 import AppKit
 import SwiftUI
 
+private enum NativeTranscriptPresentationError: LocalizedError {
+    case missingTranscript
+    case sessionMismatch
+
+    var errorDescription: String? {
+        switch self {
+        case .missingTranscript:
+            return "The selected meeting is marked as transcribed, but no readable transcript artifact was found."
+        case .sessionMismatch:
+            return "The loaded transcript does not belong to the selected meeting."
+        }
+    }
+}
+
 @main
 struct MeetingAssistantNativeApp: App {
     init() {
@@ -131,14 +145,16 @@ private final class MeetingAssistantNativeMainWindow {
 }
 
 private struct NativeControlPlaneRootView: View {
-    @StateObject private var shellViewModel: DesignedNativeShellViewModel
+    @StateObject private var workspaceCoordinator: MeetingWorkspaceCoordinator
     @StateObject private var permissionViewModel: PermissionDependencyStatusViewModel
     @StateObject private var recordingViewModel: RecordingControlViewModel
     @StateObject private var processingViewModel: ProcessingStateViewModel
     @StateObject private var transcriptActionViewModel: TranscriptReviewActionsViewModel
     @State private var transcriptViewModel: TranscriptReviewViewModel
     @State private var loadedTranscriptSessionID: String?
-    private let preflightWorkspaceURL: URL?
+    private let launchTranscriptInput: TranscriptReviewInput
+    private let workspaceURL: URL
+    private let usesTestFixture: Bool
     private let autoRefreshPreflightOnAppear: Bool
     private let captureSystemAudio: Bool
     private let captureMicrophoneAudio: Bool
@@ -149,19 +165,46 @@ private struct NativeControlPlaneRootView: View {
         smokeStateReporter: NativeLocalAppSmokeStateReporter? = nil
     ) {
         let readinessState = configuration.initialReadinessState()
-        let recordingWorkspaceURL = configuration.recordingWorkspaceURL()
+        let configuredWorkspaceURL = configuration.recordingWorkspaceURL()
+        let usesTestFixture = isNativeAppXCTestEnvironment(ProcessInfo.processInfo.environment)
+        let recordingWorkspaceURL = configuredWorkspaceURL
+            ?? (usesTestFixture
+                ? FileManager.default.temporaryDirectory
+                    .appendingPathComponent(
+                        "MeetingAssistantNative-XCTest-\(ProcessInfo.processInfo.processIdentifier)",
+                        isDirectory: true
+                    )
+                : RecordingSessionStore.defaultWorkspaceURL)
         let autoRefreshPreflightOnAppear = configuration.autoRefreshPreflightOnAppear()
         let recordingCommandClient = configuration.makeRecordingCommandClient()
         let dependencyCheckRunner = configuration.makeDependencyCheckRunner()
         let processingCommandClient = configuration.makeProcessingCommandClient()
         let transcriptActionCommandClient = configuration.makeTranscriptActionCommandClient()
         let transcriptActionOSClients = configuration.makeTranscriptActionOSClients()
-        self.preflightWorkspaceURL = recordingWorkspaceURL
+        let initialSessions = Self.initialSessions(
+            from: configuration.transcriptInput,
+            fallbackSessionID: usesTestFixture && configuration.sessionID.contains("processing")
+                ? configuration.sessionID
+                : nil,
+            configuredSession: usesTestFixture ? configuration.initialSession : nil
+        )
+        self.workspaceURL = recordingWorkspaceURL
+        self.launchTranscriptInput = configuration.transcriptInput
+        self.usesTestFixture = usesTestFixture
         self.autoRefreshPreflightOnAppear = autoRefreshPreflightOnAppear
         self.captureSystemAudio = configuration.captureSystemAudio
         self.captureMicrophoneAudio = configuration.captureMicrophoneAudio
         self.smokeStateReporter = smokeStateReporter
-        _shellViewModel = StateObject(wrappedValue: DesignedNativeShellViewModel())
+        _workspaceCoordinator = StateObject(
+            wrappedValue: MeetingWorkspaceCoordinator(
+                workspaceURL: recordingWorkspaceURL,
+                initialSessions: initialSessions,
+                recordingDraft: MeetingRecordingDraft(
+                    captureSystemAudio: configuration.captureSystemAudio,
+                    captureMicrophoneAudio: configuration.captureMicrophoneAudio
+                )
+            )
+        )
         _permissionViewModel = StateObject(
             wrappedValue: PermissionDependencyStatusViewModel(
                 runner: dependencyCheckRunner,
@@ -172,7 +215,6 @@ private struct NativeControlPlaneRootView: View {
             wrappedValue: RecordingControlViewModel(
                 commandClient: recordingCommandClient,
                 readinessState: readinessState,
-                title: "UI smoke recording",
                 captureTarget: .screen,
                 workspaceURL: recordingWorkspaceURL,
                 captureSystemAudio: configuration.captureSystemAudio,
@@ -183,91 +225,101 @@ private struct NativeControlPlaneRootView: View {
             wrappedValue: ProcessingStateViewModel(
                 commandClient: processingCommandClient,
                 readinessState: readinessState,
-                defaultSessionID: configuration.sessionID,
+                defaultSessionID: "",
                 defaultLanguage: configuration.processingDefaultLanguage,
                 defaultRuntime: configuration.processingDefaultRuntime
             )
         )
-        _transcriptViewModel = State(initialValue: TranscriptReviewViewModel(input: configuration.transcriptInput))
+        let emptyTranscriptInput = TranscriptReviewInput(sessionTitle: nil, transcript: nil)
+        _transcriptViewModel = State(initialValue: TranscriptReviewViewModel(input: emptyTranscriptInput))
         _transcriptActionViewModel = StateObject(
             wrappedValue: TranscriptReviewActionsViewModel(
-                input: configuration.transcriptInput,
+                input: emptyTranscriptInput,
                 commandClient: transcriptActionCommandClient,
                 clipboard: transcriptActionOSClients.clipboard,
                 destinationSelector: transcriptActionOSClients.destinationSelector,
-                workspaceDir: configuration.workspaceDir
+                workspaceDir: configuration.workspaceDir ?? recordingWorkspaceURL.path
             )
         )
     }
 
     var body: some View {
         DesignedNativeShellView(
-            shellViewModel: shellViewModel,
+            coordinator: workspaceCoordinator,
             permissionViewModel: permissionViewModel,
             recordingViewModel: recordingViewModel,
             processingViewModel: processingViewModel,
             transcriptViewModel: transcriptViewModel,
             transcriptActionViewModel: transcriptActionViewModel,
-            preflightWorkspaceURL: preflightWorkspaceURL,
             autoRefreshPreflightOnAppear: autoRefreshPreflightOnAppear,
-            captureSystemAudio: captureSystemAudio,
-            captureMicrophoneAudio: captureMicrophoneAudio
+            startRecording: beginRecording,
+            stopRecording: { _ = requestStopRecording() },
+            startProcessing: { _ = requestStartProcessing() },
+            retryProcessing: { _ = requestRetryProcessing() },
+            openMeeting: openMeeting,
+            reloadTranscript: reloadCurrentTranscript,
+            confirmDelete: confirmCurrentMeetingDeletion
         )
         .background {
             NativeLocalAppKeyboardShortcutView(
                 startRecording: {
-                    guard recordingViewModel.canStart else {
-                        return
+                    guard workspaceCoordinator.route == .newRecording,
+                          workspaceCoordinator.activity == .idle,
+                          recordingViewModel.canStart else {
+                        return false
                     }
-                    Task {
-                        await recordingViewModel.start()
-                    }
+                    beginRecording(workspaceCoordinator.recordingDraft)
+                    return true
                 },
                 stopRecording: {
-                    guard recordingViewModel.canStop else {
-                        return
-                    }
-                    Task {
-                        await recordingViewModel.stop()
-                    }
+                    requestStopRecording()
                 },
                 startProcessing: {
-                    guard processingViewModel.canStart else {
-                        return
-                    }
-                    Task {
-                        await processingViewModel.start()
-                    }
+                    requestStartProcessing()
                 },
                 copyTranscript: {
-                    guard transcriptActionViewModel.state.canCopy else {
-                        return
+                    guard workspaceCoordinator.route == .meetingDetail,
+                          workspaceCoordinator.activity == .idle,
+                          workspaceCoordinator.currentSession?.id == transcriptActionViewModel.state.sessionID,
+                          transcriptActionViewModel.state.canCopy else {
+                        return false
                     }
                     Task {
                         await transcriptActionViewModel.copyTranscript()
                     }
+                    return true
                 },
                 exportTranscript: {
-                    guard transcriptActionViewModel.state.canExport else {
-                        return
+                    guard workspaceCoordinator.route == .meetingDetail,
+                          workspaceCoordinator.activity == .idle,
+                          workspaceCoordinator.currentSession?.id == transcriptActionViewModel.state.sessionID,
+                          transcriptActionViewModel.state.canExport else {
+                        return false
                     }
                     Task {
                         await transcriptActionViewModel.exportTranscript()
                     }
+                    return true
                 },
                 requestDelete: {
-                    guard transcriptActionViewModel.state.canRequestDelete else {
-                        return
+                    guard workspaceCoordinator.route == .meetingDetail,
+                          workspaceCoordinator.activity == .idle,
+                          workspaceCoordinator.currentSession?.id == transcriptActionViewModel.state.sessionID,
+                          transcriptActionViewModel.state.canRequestDelete else {
+                        return false
                     }
                     transcriptActionViewModel.requestDeleteConfirmation()
+                    return true
                 },
                 confirmDelete: {
-                    guard transcriptActionViewModel.state.canConfirmDelete else {
-                        return
+                    guard workspaceCoordinator.route == .meetingDetail,
+                          workspaceCoordinator.activity == .idle,
+                          workspaceCoordinator.currentSession?.id == transcriptActionViewModel.state.sessionID,
+                          transcriptActionViewModel.state.canConfirmDelete else {
+                        return false
                     }
-                    Task {
-                        await transcriptActionViewModel.confirmDelete()
-                    }
+                    confirmCurrentMeetingDeletion()
+                    return true
                 }
             )
         }
@@ -284,33 +336,452 @@ private struct NativeControlPlaneRootView: View {
 
     @MainActor
     private func synchronizeProcessingSession(with recordingState: RecordingControlState) {
-        guard let sessionID = recordingState.sessionID else {
-            return
+        switch recordingState.phase {
+        case .starting:
+            workspaceCoordinator.recordingWillStart()
+        case .recording:
+            guard let sessionID = recordingState.sessionID else {
+                return
+            }
+            if workspaceCoordinator.currentSession?.id != sessionID
+                || workspaceCoordinator.activity != .recording {
+                workspaceCoordinator.recordingDidStart(sessionID: sessionID)
+            }
+        case .stopping:
+            workspaceCoordinator.recordingWillSave()
+        case .recorded:
+            guard let sessionID = recordingState.sessionID else {
+                return
+            }
+            workspaceCoordinator.recordingDidSave(recordingState)
+            let audioStatus = processableAudioStatus(from: recordingState.artifacts)
+            processingViewModel.bindSession(
+                sessionID: sessionID,
+                sessionStatus: "recorded",
+                processableAudioStatus: audioStatus
+            )
+            transcriptViewModel = TranscriptReviewViewModel(
+                input: TranscriptReviewInput(
+                    sessionTitle: workspaceCoordinator.currentMeetingTitle,
+                    transcript: nil
+                )
+            )
+            transcriptActionViewModel.updateSession(
+                sessionID: sessionID,
+                sessionTitle: workspaceCoordinator.currentMeetingTitle,
+                transcript: nil
+            )
+            loadedTranscriptSessionID = nil
+        case .failed:
+            workspaceCoordinator.recordingDidFail(hasActiveSession: recordingState.sessionID != nil)
+        case .idle, .ready:
+            break
         }
-        processingViewModel.updateDefaultSessionID(sessionID)
     }
 
     @MainActor
     private func synchronizeTranscriptReview(with processingState: ProcessingState) {
+        switch processingState.phase {
+        case .generatingTranscript, .generatingSpeakerLabels:
+            workspaceCoordinator.processingWillStart()
+            return
+        case .failed:
+            workspaceCoordinator.processingDidFail()
+            return
+        case .completed, .degraded:
+            workspaceCoordinator.processingDidFinish()
+        case .idle, .blocked:
+            return
+        }
+
         guard processingState.phase == .completed || processingState.phase == .degraded,
               let sessionID = processingState.sessionID,
-              sessionID != loadedTranscriptSessionID,
-              let workspaceURL = preflightWorkspaceURL
+              sessionID == workspaceCoordinator.currentSession?.id,
+              sessionID != loadedTranscriptSessionID
         else {
             return
         }
 
         do {
-            let input = try TranscriptReviewWorkspaceLoader.load(
+            let input = try transcriptInput(for: sessionID, allowGeneratedTestFixture: true)
+            installTranscript(input, sessionID: sessionID)
+        } catch {
+            clearTranscriptForCurrentSession()
+            workspaceCoordinator.transcriptDidFailToLoad(error)
+        }
+    }
+
+    @MainActor
+    private func beginRecording(_ draft: MeetingRecordingDraft) {
+        guard workspaceCoordinator.route == .newRecording,
+              workspaceCoordinator.activity == .idle,
+              recordingViewModel.canStart else {
+            return
+        }
+        workspaceCoordinator.recordingWillStart()
+        processingViewModel.clearSessionBinding()
+        transcriptActionViewModel.clearSession()
+        transcriptViewModel = TranscriptReviewViewModel(
+            input: TranscriptReviewInput(sessionTitle: draft.normalizedTitle, transcript: nil)
+        )
+        loadedTranscriptSessionID = nil
+        Task {
+            await recordingViewModel.start(
+                title: draft.normalizedTitle,
+                captureTarget: .screen,
+                workspaceURL: workspaceURL,
+                captureSystemAudio: draft.captureSystemAudio,
+                captureMicrophoneAudio: draft.captureMicrophoneAudio
+            )
+        }
+    }
+
+    @MainActor
+    @discardableResult
+    private func requestStopRecording() -> Bool {
+        guard workspaceCoordinator.route == .meetingDetail,
+              let sessionID = recordingViewModel.state.sessionID,
+              workspaceCoordinator.currentSession?.id == sessionID,
+              recordingViewModel.canStop else {
+            return false
+        }
+        workspaceCoordinator.recordingWillSave()
+        Task {
+            await recordingViewModel.stop()
+        }
+        return true
+    }
+
+    @MainActor
+    @discardableResult
+    private func requestStartProcessing() -> Bool {
+        guard workspaceCoordinator.route == .meetingDetail,
+              workspaceCoordinator.activity == .idle,
+              let sessionID = workspaceCoordinator.currentSession?.id,
+              processingViewModel.boundSessionID == sessionID,
+              processingViewModel.canStart else {
+            return false
+        }
+        workspaceCoordinator.processingWillStart()
+        Task {
+            await processingViewModel.start()
+        }
+        return true
+    }
+
+    @MainActor
+    @discardableResult
+    private func requestRetryProcessing() -> Bool {
+        guard workspaceCoordinator.route == .meetingDetail,
+              workspaceCoordinator.activity == .idle,
+              let sessionID = workspaceCoordinator.currentSession?.id,
+              processingViewModel.boundSessionID == sessionID,
+              processingViewModel.canRetry else {
+            return false
+        }
+        workspaceCoordinator.processingWillStart()
+        Task {
+            await processingViewModel.retry()
+        }
+        return true
+    }
+
+    @MainActor
+    private func openMeeting(_ session: MeetingSessionSummary) {
+        guard !workspaceCoordinator.navigationIsLocked else {
+            return
+        }
+        Task {
+            guard let selectedSession = await workspaceCoordinator.open(session) else {
+                return
+            }
+            recordingViewModel.resetForNewTask()
+            loadedTranscriptSessionID = nil
+            clearTranscriptForCurrentSession()
+            processingViewModel.bindSession(
+                sessionID: selectedSession.id,
+                sessionStatus: selectedSession.status,
+                processableAudioStatus: selectedSession.hasProcessableAudio ? .available : nil
+            )
+            transcriptActionViewModel.updateSession(
+                sessionID: selectedSession.id,
+                sessionTitle: displayTitle(for: selectedSession),
+                transcript: nil
+            )
+            guard selectedSession.hasTranscript else {
+                if selectedSession.status == "transcribed" {
+                    workspaceCoordinator.transcriptDidFailToLoad(
+                        NativeTranscriptPresentationError.missingTranscript
+                    )
+                }
+                return
+            }
+            do {
+                let input = try transcriptInput(
+                    for: selectedSession.id,
+                    allowGeneratedTestFixture: false
+                )
+                installTranscript(input, sessionID: selectedSession.id)
+            } catch {
+                clearTranscriptForCurrentSession()
+                workspaceCoordinator.transcriptDidFailToLoad(error)
+            }
+        }
+    }
+
+    @MainActor
+    private func reloadCurrentTranscript() {
+        guard let sessionID = workspaceCoordinator.currentSession?.id else {
+            return
+        }
+        workspaceCoordinator.clearTranscriptError()
+        do {
+            let input = try transcriptInput(for: sessionID, allowGeneratedTestFixture: false)
+            installTranscript(input, sessionID: sessionID)
+        } catch {
+            clearTranscriptForCurrentSession()
+            workspaceCoordinator.transcriptDidFailToLoad(error)
+        }
+    }
+
+    @MainActor
+    private func confirmCurrentMeetingDeletion() {
+        guard let expectedSessionID = workspaceCoordinator.currentSession?.id,
+              transcriptActionViewModel.state.sessionID == expectedSessionID else {
+            return
+        }
+        workspaceCoordinator.deletionWillStart()
+        Task {
+            let deletedSessionID = await transcriptActionViewModel.confirmDelete()
+            guard workspaceCoordinator.currentSession?.id == expectedSessionID else {
+                workspaceCoordinator.deletionDidFail()
+                workspaceCoordinator.refreshSessions()
+                return
+            }
+
+            let commandReportedDeletion = deletedSessionID == expectedSessionID
+            let reconciliation = await workspaceCoordinator.reconcileDeletionAttempt(
+                sessionID: expectedSessionID,
+                commandReportedDeletion: commandReportedDeletion
+            )
+            recordingViewModel.resetForNewTask()
+            processingViewModel.clearSessionBinding()
+            loadedTranscriptSessionID = nil
+
+            switch reconciliation {
+            case .sessionPresent(let session):
+                let preservesDeleteFailure = !commandReportedDeletion
+                clearTranscriptForCurrentSession(
+                    preservingActionFailure: preservesDeleteFailure
+                )
+                processingViewModel.bindSession(
+                    sessionID: session.id,
+                    sessionStatus: session.status,
+                    processableAudioStatus: session.hasProcessableAudio ? .available : nil
+                )
+
+                if session.hasTranscript {
+                    do {
+                        let input = try transcriptInput(
+                            for: session.id,
+                            allowGeneratedTestFixture: false
+                        )
+                        installTranscript(
+                            input,
+                            sessionID: session.id,
+                            preservingActionFailure: preservesDeleteFailure
+                        )
+                    } catch {
+                        clearTranscriptForCurrentSession(
+                            preservingActionFailure: preservesDeleteFailure
+                        )
+                        workspaceCoordinator.transcriptDidFailToLoad(error)
+                    }
+                } else if session.status == "transcribed" {
+                    workspaceCoordinator.transcriptDidFailToLoad(
+                        NativeTranscriptPresentationError.missingTranscript
+                    )
+                }
+
+                if commandReportedDeletion {
+                    transcriptActionViewModel.reportDeleteReconciliationFailure()
+                }
+            case .sessionMissing, .workspaceUnreadable:
+                clearTranscriptForCurrentSession()
+            }
+        }
+    }
+
+    @MainActor
+    private func installTranscript(
+        _ input: TranscriptReviewInput,
+        sessionID: String,
+        preservingActionFailure: Bool = false
+    ) {
+        guard workspaceCoordinator.currentSession?.id == sessionID else {
+            return
+        }
+        guard let transcript = input.transcript else {
+            clearTranscriptForCurrentSession(
+                preservingActionFailure: preservingActionFailure
+            )
+            workspaceCoordinator.transcriptDidFailToLoad(
+                NativeTranscriptPresentationError.missingTranscript
+            )
+            return
+        }
+        guard transcript.sessionID == sessionID else {
+            clearTranscriptForCurrentSession(
+                preservingActionFailure: preservingActionFailure
+            )
+            workspaceCoordinator.transcriptDidFailToLoad(
+                NativeTranscriptPresentationError.sessionMismatch
+            )
+            return
+        }
+        transcriptViewModel = TranscriptReviewViewModel(input: input)
+        transcriptActionViewModel.updateSession(
+            sessionID: sessionID,
+            sessionTitle: input.sessionTitle ?? workspaceCoordinator.currentMeetingTitle,
+            transcript: input.transcript,
+            preservingFailureFeedback: preservingActionFailure
+        )
+        loadedTranscriptSessionID = sessionID
+        workspaceCoordinator.transcriptDidLoad(for: sessionID)
+    }
+
+    @MainActor
+    private func clearTranscriptForCurrentSession(
+        preservingActionFailure: Bool = false
+    ) {
+        transcriptViewModel = TranscriptReviewViewModel(
+            input: TranscriptReviewInput(
+                sessionTitle: workspaceCoordinator.currentSession.map(displayTitle),
+                transcript: nil
+            )
+        )
+        if let session = workspaceCoordinator.currentSession {
+            transcriptActionViewModel.updateSession(
+                sessionID: session.id,
+                sessionTitle: displayTitle(for: session),
+                transcript: nil,
+                preservingFailureFeedback: preservingActionFailure
+            )
+        } else {
+            transcriptActionViewModel.clearSession()
+        }
+    }
+
+    private func transcriptInput(
+        for sessionID: String,
+        allowGeneratedTestFixture: Bool
+    ) throws -> TranscriptReviewInput {
+        if launchTranscriptInput.transcript?.sessionID == sessionID {
+            return launchTranscriptInput
+        }
+        do {
+            return try TranscriptReviewWorkspaceLoader.load(
                 workspaceURL: workspaceURL,
                 sessionID: sessionID
             )
-            transcriptViewModel = TranscriptReviewViewModel(input: input)
-            transcriptActionViewModel.updateInput(input)
-            loadedTranscriptSessionID = sessionID
         } catch {
-            return
+            guard usesTestFixture, allowGeneratedTestFixture else {
+                throw error
+            }
+            return Self.generatedTestTranscript(
+                sessionID: sessionID,
+                title: workspaceCoordinator.currentMeetingTitle,
+                degraded: processingViewModel.state.phase == .degraded
+            )
         }
+    }
+
+    private func processableAudioStatus(
+        from artifacts: [RecordingCommandArtifact]
+    ) -> NativeCaptureArtifactStatus? {
+        let processableTypes = Set(["mixed_audio", "system_audio", "microphone_audio"])
+        let matches = artifacts.filter {
+            processableTypes.contains($0.artifactType)
+                && $0.path?.isEmpty == false
+                && $0.checksum?.isEmpty == false
+        }
+        if matches.contains(where: { $0.captureStatus == "available" }) {
+            return .available
+        }
+        if matches.contains(where: { $0.captureStatus == "degraded" }) {
+            return .degraded
+        }
+        return nil
+    }
+
+    private func displayTitle(for session: MeetingSessionSummary) -> String {
+        let title = session.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title?.isEmpty == false ? title! : "Untitled meeting"
+    }
+
+    private static func initialSessions(
+        from input: TranscriptReviewInput,
+        fallbackSessionID: String?,
+        configuredSession: MeetingSessionSummary?
+    ) -> [MeetingSessionSummary] {
+        if let configuredSession {
+            return [configuredSession]
+        }
+        let sessionID = input.transcript?.sessionID ?? fallbackSessionID
+        guard let sessionID else {
+            return []
+        }
+        let hasTranscript = input.transcript != nil
+        return [MeetingSessionSummary(
+            id: sessionID,
+            title: input.sessionTitle,
+            status: hasTranscript ? "transcribed" : "recorded",
+            startedAt: "2026-07-01T09:00:00Z",
+            endedAt: "2026-07-01T09:30:00Z",
+            updatedAt: "2026-07-01T09:31:00Z",
+            durationLabel: "30:00",
+            artifactCount: hasTranscript ? (input.speakerLabels == nil ? 2 : 3) : 2,
+            hasTranscript: hasTranscript,
+            hasSpeakerLabels: hasTranscript && input.speakerLabels != nil,
+            hasProcessableAudio: true
+        )]
+    }
+
+    private static func generatedTestTranscript(
+        sessionID: String,
+        title: String,
+        degraded: Bool
+    ) -> TranscriptReviewInput {
+        TranscriptReviewInput(
+            sessionTitle: title,
+            transcript: TranscriptReviewTranscript(
+                id: "transcript-task-flow",
+                sessionID: sessionID,
+                sourceArtifactID: "artifact-meeting-audio",
+                status: "succeeded",
+                segments: [
+                    TranscriptReviewSegment(
+                        segmentID: "segment-1",
+                        startMS: 0,
+                        endMS: 4_000,
+                        text: "The meeting transcript is ready for review.",
+                        speakerLabel: degraded ? nil : "A"
+                    ),
+                ]
+            ),
+            speakerLabels: degraded ? nil : SpeakerLabelsReviewArtifact(
+                sessionID: sessionID,
+                labels: [
+                    SpeakerLabelReviewEntry(
+                        label: "A",
+                        sessionID: sessionID,
+                        isVerifiedIdentity: false
+                    ),
+                ],
+                segmentMapping: [SpeakerLabelSegmentMapping(segmentID: "segment-1", label: "A")]
+            ),
+            speakerLabelsDegradationReason: degraded ? "Speaker labeling is unavailable." : nil
+        )
     }
 
     @ViewBuilder
@@ -318,7 +789,7 @@ private struct NativeControlPlaneRootView: View {
         if let smokeStateReporter {
             NativeLocalAppSmokeStateReportView(
                 reporter: smokeStateReporter,
-                shellViewModel: shellViewModel,
+                workspaceCoordinator: workspaceCoordinator,
                 permissionViewModel: permissionViewModel,
                 recordingViewModel: recordingViewModel,
                 processingViewModel: processingViewModel,
@@ -332,13 +803,13 @@ private struct NativeControlPlaneRootView: View {
 }
 
 private struct NativeLocalAppKeyboardShortcutView: NSViewRepresentable {
-    let startRecording: () -> Void
-    let stopRecording: () -> Void
-    let startProcessing: () -> Void
-    let copyTranscript: () -> Void
-    let exportTranscript: () -> Void
-    let requestDelete: () -> Void
-    let confirmDelete: () -> Void
+    let startRecording: () -> Bool
+    let stopRecording: () -> Bool
+    let startProcessing: () -> Bool
+    let copyTranscript: () -> Bool
+    let exportTranscript: () -> Bool
+    let requestDelete: () -> Bool
+    let confirmDelete: () -> Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -368,23 +839,23 @@ private struct NativeLocalAppKeyboardShortcutView: NSViewRepresentable {
     }
 
     final class Coordinator {
-        var startRecording: () -> Void
-        var stopRecording: () -> Void
-        var startProcessing: () -> Void
-        var copyTranscript: () -> Void
-        var exportTranscript: () -> Void
-        var requestDelete: () -> Void
-        var confirmDelete: () -> Void
+        var startRecording: () -> Bool
+        var stopRecording: () -> Bool
+        var startProcessing: () -> Bool
+        var copyTranscript: () -> Bool
+        var exportTranscript: () -> Bool
+        var requestDelete: () -> Bool
+        var confirmDelete: () -> Bool
         private var monitor: Any?
 
         init(
-            startRecording: @escaping () -> Void,
-            stopRecording: @escaping () -> Void,
-            startProcessing: @escaping () -> Void,
-            copyTranscript: @escaping () -> Void,
-            exportTranscript: @escaping () -> Void,
-            requestDelete: @escaping () -> Void,
-            confirmDelete: @escaping () -> Void
+            startRecording: @escaping () -> Bool,
+            stopRecording: @escaping () -> Bool,
+            startProcessing: @escaping () -> Bool,
+            copyTranscript: @escaping () -> Bool,
+            exportTranscript: @escaping () -> Bool,
+            requestDelete: @escaping () -> Bool,
+            confirmDelete: @escaping () -> Bool
         ) {
             self.startRecording = startRecording
             self.stopRecording = stopRecording
@@ -412,38 +883,38 @@ private struct NativeLocalAppKeyboardShortcutView: NSViewRepresentable {
 
         private func handle(_ event: NSEvent) -> NSEvent? {
             if event.keyCode == 36 || event.keyCode == 76 {
-                confirmDelete()
-                return nil
+                return confirmDelete() ? nil : event
             }
 
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             guard flags.contains(.command), flags.contains(.option) else {
                 return event
             }
+            let handled: Bool
             switch event.charactersIgnoringModifiers?.lowercased() {
             case "r":
-                startRecording()
+                handled = startRecording()
             case "s":
-                stopRecording()
+                handled = stopRecording()
             case "p":
-                startProcessing()
+                handled = startProcessing()
             case "c":
-                copyTranscript()
+                handled = copyTranscript()
             case "e":
-                exportTranscript()
+                handled = exportTranscript()
             case "d":
-                requestDelete()
+                handled = requestDelete()
             default:
                 return event
             }
-            return nil
+            return handled ? nil : event
         }
     }
 }
 
 private struct NativeLocalAppSmokeStateReportView: View {
     let reporter: NativeLocalAppSmokeStateReporter
-    @ObservedObject var shellViewModel: DesignedNativeShellViewModel
+    @ObservedObject var workspaceCoordinator: MeetingWorkspaceCoordinator
     @ObservedObject var permissionViewModel: PermissionDependencyStatusViewModel
     @ObservedObject var recordingViewModel: RecordingControlViewModel
     @ObservedObject var processingViewModel: ProcessingStateViewModel
@@ -465,13 +936,16 @@ private struct NativeLocalAppSmokeStateReportView: View {
             .onChange(of: processingViewModel.state) { _, _ in
                 write(reason: "processing-changed")
             }
+            .onChange(of: workspaceCoordinator.route) { _, _ in
+                write(reason: "route-changed")
+            }
     }
 
     @MainActor
     private func write(reason: String) {
         reporter.write(
             reason: reason,
-            shellViewModel: shellViewModel,
+            workspaceCoordinator: workspaceCoordinator,
             permissionViewModel: permissionViewModel,
             recordingViewModel: recordingViewModel,
             processingViewModel: processingViewModel,
@@ -504,7 +978,7 @@ private struct NativeLocalAppSmokeStateReporter {
     @MainActor
     func write(
         reason: String,
-        shellViewModel: DesignedNativeShellViewModel,
+        workspaceCoordinator: MeetingWorkspaceCoordinator,
         permissionViewModel: PermissionDependencyStatusViewModel,
         recordingViewModel: RecordingControlViewModel,
         processingViewModel: ProcessingStateViewModel,
@@ -514,7 +988,7 @@ private struct NativeLocalAppSmokeStateReporter {
         do {
             let payload = makePayload(
                 reason: reason,
-                shellViewModel: shellViewModel,
+                workspaceCoordinator: workspaceCoordinator,
                 permissionViewModel: permissionViewModel,
                 recordingViewModel: recordingViewModel,
                 processingViewModel: processingViewModel,
@@ -540,7 +1014,7 @@ private struct NativeLocalAppSmokeStateReporter {
     @MainActor
     private func makePayload(
         reason: String,
-        shellViewModel: DesignedNativeShellViewModel,
+        workspaceCoordinator: MeetingWorkspaceCoordinator,
         permissionViewModel: PermissionDependencyStatusViewModel,
         recordingViewModel: RecordingControlViewModel,
         processingViewModel: ProcessingStateViewModel,
@@ -550,7 +1024,7 @@ private struct NativeLocalAppSmokeStateReporter {
         let permissionState = permissionViewModel.state
         let recordingState = recordingViewModel.state
         let processingState = processingViewModel.state
-        let recordingSetupText = DesignedNativeShellViewModel.recordingSetupText(
+        let recordingSetupText = Self.recordingSetupText(
             captureSystemAudio: captureSystemAudio,
             captureMicrophoneAudio: captureMicrophoneAudio
         )
@@ -565,8 +1039,9 @@ private struct NativeLocalAppSmokeStateReporter {
             "launch_environment": launchEnvironmentPayload(),
             "shell": [
                 "title": "Meeting Assistant",
-                "selected_section": shellViewModel.selectedSection.rawValue,
-                "selected_section_label": shellViewModel.selectedSectionLabel,
+                "selected_section": workspaceCoordinator.route.rawValue,
+                "selected_section_label": "\(workspaceCoordinator.route.title) selected",
+                "current_session_id": workspaceCoordinator.currentSession?.id ?? "",
                 "recording_setup_text": recordingSetupText,
                 "root_identifier": DesignedNativeShellAccessibilityID.root,
             ],
@@ -685,6 +1160,22 @@ private struct NativeLocalAppSmokeStateReporter {
             "checksum": item.checksum ?? "",
             "degradation_reason": item.degradationReason ?? "",
         ]
+    }
+
+    private static func recordingSetupText(
+        captureSystemAudio: Bool,
+        captureMicrophoneAudio: Bool
+    ) -> String {
+        switch (captureSystemAudio, captureMicrophoneAudio) {
+        case (true, true):
+            return "Capture target: screen. System audio and microphone capture are requested through the recording command client."
+        case (true, false):
+            return "Capture target: screen. System audio capture is requested; microphone capture is not requested for this run."
+        case (false, true):
+            return "Capture target: screen. Microphone capture is requested; system audio capture is not requested for this run."
+        case (false, false):
+            return "Capture target: screen. Audio capture is not requested for this run; unavailable audio artifacts must stay missing with reasons."
+        }
     }
 }
 
@@ -860,6 +1351,8 @@ private struct NativeControlPlaneFixtureConfiguration {
     let captureMicrophoneAudio: Bool
     let processingDefaultLanguage: String?
     let processingDefaultRuntime: ProcessingTranscriptRuntime?
+    let processingResponseDelayNanoseconds: UInt64
+    let initialSession: MeetingSessionSummary?
 
     init(
         dependencyResponse: DependencyCheckResponse,
@@ -874,7 +1367,9 @@ private struct NativeControlPlaneFixtureConfiguration {
         exportDestinationPath: String?,
         workspaceDir: String?,
         captureSystemAudio: Bool? = nil,
-        captureMicrophoneAudio: Bool? = nil
+        captureMicrophoneAudio: Bool? = nil,
+        processingResponseDelayNanoseconds: UInt64 = 0,
+        initialSession: MeetingSessionSummary? = nil
     ) {
         self.dependencyResponse = dependencyResponse
         self.recordingScript = recordingScript
@@ -897,6 +1392,8 @@ private struct NativeControlPlaneFixtureConfiguration {
         )
         self.processingDefaultLanguage = Self.processingDefaultLanguage()
         self.processingDefaultRuntime = Self.processingDefaultRuntime()
+        self.processingResponseDelayNanoseconds = processingResponseDelayNanoseconds
+        self.initialSession = initialSession
     }
 
     var readinessState: PermissionDependencyStatusState {
@@ -983,7 +1480,8 @@ private struct NativeControlPlaneFixtureConfiguration {
         case .fake:
             return ProcessingCommandFakeClient(
                 transcriptScript: processingTranscriptScript,
-                speakerLabelsScript: processingSpeakerLabelsScript
+                speakerLabelsScript: processingSpeakerLabelsScript,
+                responseDelayNanoseconds: processingResponseDelayNanoseconds
             )
         case .process:
             return ProcessingCommandProcessRunner(environment: environment)
@@ -1070,9 +1568,7 @@ private struct NativeControlPlaneFixtureConfiguration {
             )
         }
 
-        let fixture = environment["MA_NATIVE_APP_SMOKE_FIXTURE"]
-            ?? argumentValue(named: "--ma-native-fixture", in: arguments)
-            ?? "blocked"
+        let fixture = smokeFixtureName(environment: environment, arguments: arguments)
 
         switch fixture {
         case "ready":
@@ -1121,6 +1617,48 @@ private struct NativeControlPlaneFixtureConfiguration {
                 exportScript: .success(content: "Stop failure fixture transcript content."),
                 deleteScript: .success(),
                 exportDestinationPath: "/tmp/stop-failure-transcript.md",
+                workspaceDir: nil
+            )
+        case "saved-degraded":
+            let sessionID = "session-app-ui-saved-degraded"
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .readyFixture,
+                recordingScript: .successWithArtifacts([
+                    RecordingCommandArtifact(
+                        id: "artifact-app-degraded-screen",
+                        sessionID: sessionID,
+                        artifactType: "screen_video",
+                        format: "mov",
+                        path: "sessions/\(sessionID)/artifacts/screen_video.mov",
+                        checksum: "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+                    ),
+                    RecordingCommandArtifact(
+                        id: "artifact-app-degraded-audio",
+                        sessionID: sessionID,
+                        artifactType: "mixed_audio",
+                        format: "wav",
+                        path: "sessions/\(sessionID)/artifacts/mixed_audio.wav",
+                        captureStatus: "degraded",
+                        degradationReason: "Meeting audio was recovered with limited quality.",
+                        checksum: "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+                    ),
+                    RecordingCommandArtifact(
+                        id: "artifact-app-missing-microphone",
+                        sessionID: sessionID,
+                        artifactType: "microphone_audio",
+                        format: "m4a",
+                        captureStatus: "missing",
+                        degradationReason: "Microphone audio could not be captured."
+                    ),
+                ]),
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
+                processingClientMode: processingClientMode,
+                sessionID: sessionID,
+                transcriptInput: .missingFixture,
+                exportScript: .success(content: "Saved degraded fixture transcript content."),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/saved-degraded-transcript.md",
                 workspaceDir: nil
             )
         case "transcript-review":
@@ -1303,6 +1841,25 @@ private struct NativeControlPlaneFixtureConfiguration {
                 exportDestinationPath: "/tmp/processing-success.md",
                 workspaceDir: nil
             )
+        case "processing-running":
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .readyFixture,
+                recordingScript: .success,
+                processingTranscriptScript: .success(
+                    transcriptID: "transcript-app-processing-running",
+                    artifactID: "artifact-app-processing-running",
+                    segmentCount: 2
+                ),
+                processingSpeakerLabelsScript: .success(),
+                processingClientMode: processingClientMode,
+                sessionID: "session-app-ui-processing-running",
+                transcriptInput: .missingFixture,
+                exportScript: .success(content: "Processing running fixture copy content."),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/processing-running.md",
+                workspaceDir: nil,
+                processingResponseDelayNanoseconds: 60_000_000_000
+            )
         case "processing-transcript-only":
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .readyFixture,
@@ -1342,6 +1899,90 @@ private struct NativeControlPlaneFixtureConfiguration {
                 exportDestinationPath: "/tmp/processing-failure.md",
                 workspaceDir: nil
             )
+        case "transcript-missing-recoverable":
+            let sessionID = "session-app-ui-transcript-missing-recoverable"
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .readyFixture,
+                recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
+                processingClientMode: processingClientMode,
+                sessionID: sessionID,
+                transcriptInput: .missingFixture,
+                exportScript: .success(content: "Regenerated transcript fixture copy content."),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/transcript-missing-recoverable.md",
+                workspaceDir: nil,
+                initialSession: MeetingSessionSummary(
+                    id: sessionID,
+                    title: "Transcript recovery fixture",
+                    status: "transcribed",
+                    startedAt: "2026-07-01T11:00:00Z",
+                    endedAt: "2026-07-01T11:20:00Z",
+                    updatedAt: "2026-07-01T11:21:00Z",
+                    durationLabel: "20:00",
+                    artifactCount: 2,
+                    hasTranscript: false,
+                    hasSpeakerLabels: false,
+                    hasProcessableAudio: true
+                )
+            )
+        case "transcript-missing-no-audio":
+            let sessionID = "session-app-ui-transcript-missing-no-audio"
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .readyFixture,
+                recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
+                processingClientMode: processingClientMode,
+                sessionID: sessionID,
+                transcriptInput: .missingFixture,
+                exportScript: .success(content: "Unavailable transcript fixture copy content."),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/transcript-missing-no-audio.md",
+                workspaceDir: nil,
+                initialSession: MeetingSessionSummary(
+                    id: sessionID,
+                    title: "Transcript without audio fixture",
+                    status: "transcribed",
+                    startedAt: "2026-07-01T12:00:00Z",
+                    endedAt: "2026-07-01T12:20:00Z",
+                    updatedAt: "2026-07-01T12:21:00Z",
+                    durationLabel: "20:00",
+                    artifactCount: 1,
+                    hasTranscript: false,
+                    hasSpeakerLabels: false,
+                    hasProcessableAudio: false
+                )
+            )
+        case "transcript-load-failure":
+            let sessionID = "session-app-ui-transcript-load-failure"
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .readyFixture,
+                recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
+                processingClientMode: processingClientMode,
+                sessionID: sessionID,
+                transcriptInput: .missingFixture,
+                exportScript: .success(content: "Reloaded transcript fixture copy content."),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/transcript-load-failure.md",
+                workspaceDir: nil,
+                initialSession: MeetingSessionSummary(
+                    id: sessionID,
+                    title: "Unreadable transcript fixture",
+                    status: "transcribed",
+                    startedAt: "2026-07-01T10:00:00Z",
+                    endedAt: "2026-07-01T10:20:00Z",
+                    updatedAt: "2026-07-01T10:21:00Z",
+                    durationLabel: "20:00",
+                    artifactCount: 3,
+                    hasTranscript: true,
+                    hasSpeakerLabels: false,
+                    hasProcessableAudio: true
+                )
+            )
         default:
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .blockedFixture,
@@ -1364,6 +2005,22 @@ private struct NativeControlPlaneFixtureConfiguration {
         return arguments
             .first { $0.hasPrefix(prefix) }
             .map { String($0.dropFirst(prefix.count)) }
+    }
+
+    private static func smokeFixtureName(
+        environment: [String: String],
+        arguments: [String]
+    ) -> String {
+        #if DEBUG
+        guard isNativeAppXCTestEnvironment(environment) else {
+            return "blocked"
+        }
+        return environment["MA_NATIVE_APP_SMOKE_FIXTURE"]
+            ?? argumentValue(named: "--ma-native-fixture", in: arguments)
+            ?? "blocked"
+        #else
+        return "blocked"
+        #endif
     }
 
     private static func captureAudioFlag(
@@ -1656,10 +2313,14 @@ private enum NativeTranscriptActionOSClientMode {
 }
 
 private func isNativeAppXCTestEnvironment(_ environment: [String: String]) -> Bool {
-    environment["MA_NATIVE_APP_XCTEST"] == "1"
+    #if DEBUG
+    return environment["MA_NATIVE_APP_XCTEST"] == "1"
         || environment["XCTestConfigurationFilePath"] != nil
         || environment["XCTestBundlePath"] != nil
         || environment["XCInjectBundleInto"] != nil
+    #else
+    return false
+    #endif
 }
 
 private extension TranscriptReviewInput {

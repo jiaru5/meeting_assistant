@@ -493,6 +493,45 @@ struct NativeRecordingCommandClientTests {
     }
 
     @Test
+    func screenCaptureKitMediaOperationCompletionDoesNotCancel() async throws {
+        let operation = GatedAppleScreenCaptureKitMediaOperation()
+        let wait = Task {
+            try await AppleScreenCaptureKitMediaOperationWaiter.wait(
+                for: operation,
+                timeoutNanoseconds: 1_000_000_000
+            )
+        }
+        while operation.startCount == 0 {
+            await Task.yield()
+        }
+
+        operation.complete()
+        try await wait.value
+
+        #expect(operation.cancelCount == 0)
+    }
+
+    @Test
+    func screenCaptureKitWriterAndExportTimeoutGatesCancelTheirOperations() async throws {
+        let writerFinish = GatedAppleScreenCaptureKitMediaOperation()
+        let audioExport = GatedAppleScreenCaptureKitMediaOperation()
+
+        for operation in [writerFinish, audioExport] {
+            do {
+                try await AppleScreenCaptureKitMediaOperationWaiter.wait(
+                    for: operation,
+                    timeoutNanoseconds: 20_000_000
+                )
+                Issue.record("Expected the ScreenCaptureKit media operation to time out.")
+            } catch AppleScreenCaptureKitMediaOperationWaitError.timedOut {
+                // Expected: the same gate backs writer finalization and mixed-audio export.
+            }
+            #expect(operation.startCount == 1)
+            #expect(operation.cancelCount == 1)
+        }
+    }
+
+    @Test
     func screenCaptureKitRecordingEventStateFailureResumesStartAndFinishWaiters() async throws {
         let eventState = ScreenCaptureKitRecordingEventState()
         let startWait = Task {
@@ -812,6 +851,51 @@ struct NativeRecordingCommandClientTests {
             readSessionJSON(workspace: workspace, sessionID: "session-idempotent-stop")["artifacts"] as? [[String: Any]]
         )
         #expect(artifacts.count == 4)
+    }
+
+    @Test
+    func concurrentStopRequestsShareOneAdapterStopAndOneFinalization() async throws {
+        let workspace = try temporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let adapter = GatedNativeCaptureAdapter()
+        let client = nativeClient(
+            workspace: workspace,
+            sessionID: "session-concurrent-stop",
+            adapter: adapter
+        )
+        _ = try await client.startNativeRecording(startRequest(workspace: workspace))
+
+        let first = Task {
+            try await client.stopRecording(
+                StopRecordingRequest(sessionID: "session-concurrent-stop")
+            )
+        }
+        while await adapter.stopCount == 0 {
+            await Task.yield()
+        }
+        let second = Task {
+            try await client.stopRecording(
+                StopRecordingRequest(sessionID: "session-concurrent-stop")
+            )
+        }
+        for _ in 0..<20 {
+            await Task.yield()
+        }
+
+        #expect(await adapter.stopCount == 1)
+        await adapter.releaseStop()
+        let firstResponse = try await first.value
+        let secondResponse = try await second.value
+
+        #expect(firstResponse.ok)
+        #expect(secondResponse.ok)
+        #expect(firstResponse.artifacts == secondResponse.artifacts)
+        #expect(await adapter.stopCount == 1)
+        let session = try readSessionJSON(
+            workspace: workspace,
+            sessionID: "session-concurrent-stop"
+        )
+        #expect(session["status"] as? String == "recorded")
     }
 
     @Test
@@ -1525,6 +1609,86 @@ private func checksum(for url: URL) throws -> String {
 
 private enum NativeRecordingCommandClientTestError: Error {
     case invalidSessionJSON
+}
+
+private actor GatedNativeCaptureAdapter: NativeCaptureAdapter {
+    private var startedSessions: Set<String> = []
+    private var stopWaiters: [CheckedContinuation<Void, Never>] = []
+    private var stopIsReleased = false
+    private(set) var stopCount = 0
+
+    func start(_ context: NativeCaptureStartContext) async throws {
+        startedSessions.insert(context.sessionID)
+    }
+
+    func stop(_ context: NativeCaptureStopContext) async throws -> NativeCaptureStopResult {
+        guard startedSessions.contains(context.sessionID) else {
+            throw NativeCaptureAdapterFailure.stopFailed(
+                message: "Native capture session was not started.",
+                partialArtifacts: []
+            )
+        }
+        stopCount += 1
+        if !stopIsReleased {
+            await withCheckedContinuation { continuation in
+                stopWaiters.append(continuation)
+            }
+        }
+        startedSessions.remove(context.sessionID)
+        return NativeCaptureStopResult(
+            artifacts: [
+                .available(.screenVideo, data: data("concurrent-screen")),
+                .available(.mixedAudio, data: data("concurrent-audio")),
+            ]
+        )
+    }
+
+    func releaseStop() {
+        stopIsReleased = true
+        let waiters = stopWaiters
+        stopWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+}
+
+private final class GatedAppleScreenCaptureKitMediaOperation:
+    AppleScreenCaptureKitCancellableMediaOperation,
+    @unchecked Sendable
+{
+    private let lock = NSLock()
+    private var completionHandler: (@Sendable () -> Void)?
+    private var starts = 0
+    private var cancellations = 0
+
+    var startCount: Int {
+        lock.withLock { starts }
+    }
+
+    var cancelCount: Int {
+        lock.withLock { cancellations }
+    }
+
+    func start(completionHandler: @escaping @Sendable () -> Void) {
+        lock.withLock {
+            starts += 1
+            self.completionHandler = completionHandler
+        }
+    }
+
+    func cancel() {
+        lock.withLock {
+            cancellations += 1
+        }
+    }
+
+    func complete() {
+        let handler = lock.withLock {
+            let handler = completionHandler
+            self.completionHandler = nil
+            return handler
+        }
+        handler?()
+    }
 }
 
 private actor FakeAppleScreenCaptureKitRuntime: AppleScreenCaptureKitRecordingRuntime {

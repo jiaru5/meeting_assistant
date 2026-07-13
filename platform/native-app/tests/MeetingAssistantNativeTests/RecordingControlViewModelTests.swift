@@ -106,14 +106,17 @@ struct RecordingControlViewModelTests {
         #expect(viewModel.state.phase == .failed)
         #expect(viewModel.state.errorCode == .permissionDenied)
         #expect(viewModel.state.errorMessage?.contains("Native capture permissions are denied or unknown.") == true)
-        #expect(viewModel.state.errorMessage?.contains("Screen Recording permission is denied.") == true)
+        #expect(viewModel.state.errorMessage?.contains("Screen Recording permission is denied.") == false)
         #expect(viewModel.state.errorMessage?.contains("System Settings > Privacy & Security") == true)
-        #expect(viewModel.state.errorMessage?.contains("/Users/jerry/Applications/MeetingAssistantNativeLocal.app") == true)
-        #expect(viewModel.state.errorMessage?.contains("local.meeting-assistant.native.localdirect") == true)
-        #expect(viewModel.state.errorMessage?.contains("designated requirement: identifier") == true)
-        #expect(viewModel.state.errorMessage?.contains("Meeting Assistant Local Code Signing") == true)
-        #expect(viewModel.state.errorMessage?.contains("ca3e033b67f6b4b8cabb9245cc9c7d9f0b7290db") == true)
-        #expect(viewModel.state.errorMessage?.contains("remove stale ad-hoc") == true)
+        #expect(viewModel.state.errorMessage?.contains("/Users/jerry") == false)
+        let technicalDetails = viewModel.state.technicalDetails.joined(separator: " ")
+        #expect(technicalDetails.contains("Screen Recording permission is denied."))
+        #expect(technicalDetails.contains("/Users/jerry/Applications/MeetingAssistantNativeLocal.app"))
+        #expect(technicalDetails.contains("local.meeting-assistant.native.localdirect"))
+        #expect(technicalDetails.contains("designated requirement: identifier"))
+        #expect(technicalDetails.contains("Meeting Assistant Local Code Signing"))
+        #expect(technicalDetails.contains("ca3e033b67f6b4b8cabb9245cc9c7d9f0b7290db"))
+        #expect(technicalDetails.contains("remove stale ad-hoc"))
     }
 
     @Test
@@ -139,6 +142,64 @@ struct RecordingControlViewModelTests {
 
         startTask.cancel()
         _ = await startTask.result
+    }
+
+    @Test
+    @MainActor
+    func lateSuccessfulStartAfterTimeoutIsStoppedWithoutReplacingFailure() async {
+        let client = LateStartRecordingCommandClient()
+        let viewModel = RecordingControlViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState(),
+            startTimeoutNanoseconds: 5_000_000
+        )
+
+        let startTask = Task {
+            await viewModel.start()
+        }
+
+        #expect(await waitForRecordingPhase(.failed, in: viewModel))
+        #expect(!viewModel.canStart)
+        await viewModel.start()
+        #expect(await client.startRequestCount == 1)
+        await client.completeStart()
+        _ = await startTask.result
+
+        #expect(viewModel.state.phase == .failed)
+        #expect(viewModel.state.sessionID == nil)
+        #expect(viewModel.canStart)
+        #expect(await client.stopRequests == [
+            StopRecordingRequest(sessionID: "session-late-start")
+        ])
+    }
+
+    @Test
+    @MainActor
+    func stopTimeoutKeepsSessionRetryableAndLateSuccessCompletesSave() async {
+        let client = LateStopRecordingCommandClient()
+        let viewModel = RecordingControlViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState(),
+            stopTimeoutNanoseconds: 5_000_000
+        )
+        await viewModel.start()
+
+        let stopTask = Task {
+            await viewModel.stop()
+        }
+
+        #expect(await waitForRecordingPhase(.failed, in: viewModel))
+        #expect(viewModel.state.sessionID == "session-late-stop")
+        #expect(viewModel.canStop)
+
+        await client.completeStop()
+        _ = await stopTask.result
+
+        #expect(viewModel.state.phase == .recorded)
+        #expect(viewModel.state.sessionID == "session-late-stop")
+        #expect(await client.stopRequests == [
+            StopRecordingRequest(sessionID: "session-late-stop")
+        ])
     }
 
     @Test
@@ -323,6 +384,60 @@ private actor HangingRecordingCommandClient: RecordingCommandClient {
 
     func stopRecording(_ request: StopRecordingRequest) async throws -> RecordingCommandResponse {
         .successfulStop(sessionID: request.sessionID)
+    }
+}
+
+private actor LateStartRecordingCommandClient: RecordingCommandClient {
+    private(set) var stopRequests: [StopRecordingRequest] = []
+    private(set) var startRequestCount = 0
+    private var startContinuation: CheckedContinuation<Void, Never>?
+    private var shouldCompleteStart = false
+
+    func startNativeRecording(_ request: StartNativeRecordingRequest) async throws -> RecordingCommandResponse {
+        startRequestCount += 1
+        if !shouldCompleteStart {
+            await withCheckedContinuation { continuation in
+                startContinuation = continuation
+            }
+        }
+        return .successfulStart(sessionID: "session-late-start")
+    }
+
+    func stopRecording(_ request: StopRecordingRequest) async throws -> RecordingCommandResponse {
+        stopRequests.append(request)
+        return .successfulStop(sessionID: request.sessionID)
+    }
+
+    func completeStart() {
+        shouldCompleteStart = true
+        startContinuation?.resume()
+        startContinuation = nil
+    }
+}
+
+private actor LateStopRecordingCommandClient: RecordingCommandClient {
+    private(set) var stopRequests: [StopRecordingRequest] = []
+    private var stopContinuation: CheckedContinuation<Void, Never>?
+    private var shouldCompleteStop = false
+
+    func startNativeRecording(_ request: StartNativeRecordingRequest) async throws -> RecordingCommandResponse {
+        .successfulStart(sessionID: "session-late-stop")
+    }
+
+    func stopRecording(_ request: StopRecordingRequest) async throws -> RecordingCommandResponse {
+        stopRequests.append(request)
+        if !shouldCompleteStop {
+            await withCheckedContinuation { continuation in
+                stopContinuation = continuation
+            }
+        }
+        return .successfulStop(sessionID: request.sessionID)
+    }
+
+    func completeStop() {
+        shouldCompleteStop = true
+        stopContinuation?.resume()
+        stopContinuation = nil
     }
 }
 

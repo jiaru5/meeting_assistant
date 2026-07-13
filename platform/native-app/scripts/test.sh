@@ -17,6 +17,7 @@ is_truthy() {
 
 real_runtime_bridge_smoke="${MA_NATIVE_REAL_RUNTIME_BRIDGE_SMOKE:-0}"
 vs_ma21_hardening_bridge_smoke="${MA_NATIVE_VSMA21_HARDENING_BRIDGE_SMOKE:-0}"
+task_xcuitest="${MA_NATIVE_APP_RUN_TASK_XCUITEST:-0}"
 if is_truthy "$real_runtime_bridge_smoke"; then
   for name in \
     MEETING_ASSISTANT_TRANSCRIPTION_RUNTIME \
@@ -37,7 +38,7 @@ from pathlib import Path
 metadata = json.loads(Path("component.json").read_text(encoding="utf-8"))
 if metadata.get("kind") != "project-component":
     raise SystemExit("native-app test failed: component kind must be project-component")
-expected_behavior = "permission_dependency_status_fake_recording_controlled_and_apple_screencapturekit_native_capture_artifact_registration_processing_state_transcript_review_actions_and_designed_native_shell"
+expected_behavior = "permission_dependency_status_native_capture_processing_transcript_actions_and_task_based_local_meeting_workflow"
 if metadata.get("business_behavior") != expected_behavior:
     raise SystemExit(f"native-app test failed: business behavior must be {expected_behavior}")
 if metadata.get("allowed_before_project_mode") is not False:
@@ -66,6 +67,12 @@ if "native_capture_artifact_registration" not in metadata.get("allowed_capabilit
     raise SystemExit("native-app test failed: missing native capture artifact registration capability")
 if "designed_native_shell" not in metadata.get("allowed_capabilities", []):
     raise SystemExit("native-app test failed: missing designed native shell capability")
+if "read_only_workspace_session_projection" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app test failed: missing read-only workspace session projection capability")
+if "current_session_coordination" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app test failed: missing current-session coordination capability")
+if "task_based_local_meeting_workflow" not in metadata.get("allowed_capabilities", []):
+    raise SystemExit("native-app test failed: missing task-based local meeting workflow capability")
 
 architecture = Path("tests/ArchitectureTest.md").read_text(encoding="utf-8")
 required_phrases = (
@@ -86,10 +93,15 @@ required_phrases = (
     "NSPasteboard",
     "NSSavePanel",
     "VS-MA-19A designed native shell boundary",
+    "VS-MA-26 through VS-MA-30 task-based meeting workflow boundary",
     "ma.transcriptAction.*",
     "ma.processing.*",
     "ma.shell.*",
     "ma.sessionArtifact.*",
+    "ma.meetings.*",
+    "ma.newRecording.*",
+    "ma.meetingDetail.*",
+    "ma.diagnostics.*",
     "MA_NATIVE_RECORDING_CLIENT=controlled",
     "MA_NATIVE_RECORDING_CLIENT=apple_screencapturekit",
     "MA_NATIVE_PROCESSING_CLIENT=process",
@@ -148,6 +160,8 @@ required_paths = (
     Path("Sources/MeetingAssistantNative/ProcessingStateView.swift"),
     Path("Sources/MeetingAssistantNative/DesignedNativeShellViewModel.swift"),
     Path("Sources/MeetingAssistantNative/DesignedNativeShellView.swift"),
+    Path("Sources/MeetingAssistantNative/MeetingSessionWorkspaceRepository.swift"),
+    Path("Sources/MeetingAssistantNative/MeetingWorkspaceCoordinator.swift"),
     Path("test-fixtures/processing-command-fixture.sh"),
     Path("test-fixtures/transcript-action-command-fixture.sh"),
     Path("tests/MeetingAssistantNativeTests/PermissionDependencyStatusViewModelTests.swift"),
@@ -157,6 +171,8 @@ required_paths = (
     Path("tests/MeetingAssistantNativeTests/TranscriptReviewActionsViewModelTests.swift"),
     Path("tests/MeetingAssistantNativeTests/ProcessingStateViewModelTests.swift"),
     Path("tests/MeetingAssistantNativeTests/DesignedNativeShellViewModelTests.swift"),
+    Path("tests/MeetingAssistantNativeTests/MeetingSessionWorkspaceRepositoryTests.swift"),
+    Path("tests/MeetingAssistantNativeTests/MeetingWorkspaceCoordinatorTests.swift"),
     Path("UITests/MeetingAssistantNativeUITests/NativeControlPlaneSmokeTests.swift"),
     Path("UITests/MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests.swift"),
     Path("UITests/MeetingAssistantNativeAppUITests/DesignedNativeShellAppBundleTests.swift"),
@@ -209,17 +225,25 @@ if is_truthy "$vs_ma21_hardening_bridge_smoke"; then
   echo "native-app VS-MA-21 hardening bridge smoke passed."
 fi
 
+if is_truthy "$task_xcuitest"; then
+  if is_truthy "${MA_NATIVE_APP_RUN_XCUITEST:-0}"; then
+    echo "native-app test failed: choose either MA_NATIVE_APP_RUN_TASK_XCUITEST=1 or MA_NATIVE_APP_RUN_XCUITEST=1, not both." >&2
+    exit 2
+  fi
+  MA_NATIVE_APP_TASK_XCUITEST=1 "$component_dir/scripts/test-app-bundle.sh"
+else
 case "${MA_NATIVE_APP_RUN_XCUITEST:-0}" in
   1|true|TRUE|yes|YES)
     "$component_dir/scripts/test-app-bundle.sh"
     ;;
   0|false|FALSE|no|NO)
-    echo "native-app app-bundle XCUITest skipped. Run MA_NATIVE_APP_RUN_XCUITEST=1 ./platform/native-app/scripts/test.sh or ./platform/native-app/scripts/test-app-bundle.sh for full app-bundle UI smoke."
+    echo "native-app app-bundle XCUITest skipped. Run MA_NATIVE_APP_RUN_TASK_XCUITEST=1 ./platform/native-app/scripts/test.sh for the MVP.1 task suite, or MA_NATIVE_APP_RUN_XCUITEST=1 ./platform/native-app/scripts/test.sh / ./platform/native-app/scripts/test-app-bundle.sh for the full app-bundle UI smoke."
     ;;
   *)
     echo "native-app test failed: MA_NATIVE_APP_RUN_XCUITEST must be 0/1, true/false, or yes/no." >&2
     exit 2
     ;;
 esac
+fi
 
 echo "native-app tests passed."

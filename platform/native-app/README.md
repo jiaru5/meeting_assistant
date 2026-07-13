@@ -2,6 +2,15 @@
 
 本目录承载最小 Swift/SwiftUI 原生控制面。组件注册状态以 `harness/project-manifest.json` 为准。
 
+当前 MVP.1 产品入口已经从六区流水线控制面重组为任务式个人会议工作流：
+
+1. `MeetingWorkspaceCoordinator` 统一拥有 Meetings、New recording、Meeting detail、Settings & diagnostics 路由和 current session，录制或处理中锁定可能造成跨会话误操作的导航。
+2. `MeetingSessionWorkspaceRepository` 只读扫描既有 `workspace/sessions/*/session.json`，生成最近会议投影；单个损坏会话进入 diagnostics，不影响其余会话，不新增持久索引。
+3. New recording 使用用户填写的可选标题，并只显示当前 adapter 支持的整屏目标及系统音频/麦克风意图；生产启动不再携带 fixture 标题或 session。
+4. Meeting detail 按当前会话状态依次呈现专注录制、保存结果、用户主动生成 transcript、处理进度、transcript 成果和删除确认，一次只突出一个上下文主操作。
+5. Processing 必须显式绑定到同一个 `recorded` 且有 available/degraded 可处理音频的会话；会话切换、transcript 加载失败和删除成功都会清理旧会话子状态。
+6. 原始 session id、artifact type、error code 和路径只进入 Technical details 或 diagnostics；稳定 locator 使用 `ma.meetings.*`、`ma.newRecording.*`、`ma.meetingDetail.*`、`ma.diagnostics.*`，既有 command locator 只在对应任务中保留。
+
 当前已实现 VS-MA-12 权限和依赖状态面：
 
 1. `check_dependencies` JSON 契约的 Swift `Codable` 读模型。
@@ -20,6 +29,7 @@
 6. XCTest-hosted SwiftUI smoke 覆盖权限/依赖缺失状态、readiness blocked、fake recording start、recording、stop saved summary、start/stop failure，并通过生产 SwiftUI source contract 断言 `ma.permissionDependency.*` / `ma.recording.*` locator 和关键可见文案仍由视图定义使用。
 7. 持久 `MeetingAssistantNative.xcodeproj` 提供最小 macOS app bundle target 和 app-bundle XCUITest target；`AppBundleLocatorSmokeTests` 使用 `XCUIApplication()` 启动 `.app`，在有内置屏幕的本机通过 `MA_NATIVE_APP_TEST_DISPLAY=built-in` 将测试窗口定位到内置屏并断言窗口中心落在内置屏 frame 内，通过 deterministic launch fixture 覆盖默认 blocked readiness、ready fake start/stop、start failure error locator，且不调用真实 helper/CLI/capture/runtime。
 8. `scripts/test.sh` 默认运行快速组件测试，不启动真实 `.app` XCUITest；需要完整 app-bundle UI smoke 时运行 `scripts/test-app-bundle.sh`，或设置 `MA_NATIVE_APP_RUN_XCUITEST=1 scripts/test.sh`。`scripts/test-app-bundle.sh` 默认复用忽略目录 `build/DerivedData/AppBundleUITests` 以减少重复 Xcode 构建时间，必要时可用 `MA_NATIVE_APP_DERIVED_DATA_PATH` 指向隔离目录；如果已经为当前 DerivedData 中的 app bundle 授予 TCC 权限，可设置 `MA_NATIVE_APP_REUSE_XCTESTRUN=1` 复用现有 `.xctestrun` 和 app bundle，避免重新构建导致 Debug ad-hoc 签名变化。显式 app-bundle smoke 默认只对 test body 前 Automation Mode blocker 重试 1 次，可用 `MA_NATIVE_APP_UI_AUTOMATION_RETRY_ATTEMPTS=0` 关闭；真实 TCC 或业务断言失败不会被重试吞掉。
+9. MVP.1 任务级 app-bundle suite 可用 `MA_NATIVE_APP_TASK_XCUITEST=1 scripts/test-app-bundle.sh` 单独选择，或用 `MA_NATIVE_APP_RUN_TASK_XCUITEST=1 scripts/test.sh` 在 fast gate 后追加；默认快速测试不会启动 UI automation。该 suite 覆盖 blocked、saved/degraded、processing running/failure/retry、停止保存失败重试和 transcript load failure/reload，并继续复用任务视图及既有 command locator。
 
 当前已实现 VS-MA-14/VS-MA-15 controlled native capture artifact registration 部分证据：
 

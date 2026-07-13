@@ -39,6 +39,8 @@ Playwright 只在后续引入 Web UI 时作为 Web mocked/full-stack E2E 工具�
 
 MVP.1 `PV-MA-014` 的自动化关闭条件不能继续使用“六个 section 和所有按钮同时存在”的旧控制面断言。Swift Testing 必须覆盖任务路由、current-session 不变量、处理 eligibility、最近会议 projection 和删除 reset；app-bundle XCUITest 必须覆盖首次用户主链、回访用户重开和至少一个 blocked/failed 恢复链。关键状态截图只用于视觉层级审查，不能替代任务断言。3-5 名代表性本地 Mac 用户的无指导任务测试作为补充人工体验证据，记录完成、求助、误点、犹豫和状态理解；agent、XCUITest 或截图不得冒充真人研究结论。
 
+`DesignedNativeShellAppBundleTests` 是 MVP.1 任务级 app-bundle suite，至少覆盖 ready/blocked preflight、recording、saved/degraded、processing 进行中、processing failed/retry、停止保存失败重试、transcript load failure/reload、历史重开和删除 reset。可用 `MA_NATIVE_APP_TASK_XCUITEST=1 ./platform/native-app/scripts/test-app-bundle.sh` 单独运行；默认组件 fast gate 继续只编译并运行 Swift/hosted 测试，不因缺少 UI automation 环境而失败。
+
 native-app 的默认组件 `test` gate 优先服务本地快速反馈：Swift Testing 覆盖 view model、契约 decode、状态机和文件边界，XCTest-hosted SwiftUI smoke 覆盖关键 locator/source contract。真实 app-bundle XCUITest 仍是 native UI 关键状态证据，但执行入口拆为显式命令 `./platform/native-app/scripts/test-app-bundle.sh`，或通过 `MA_NATIVE_APP_RUN_XCUITEST=1 ./platform/native-app/scripts/test.sh` 纳入同一次组件测试。验证矩阵和交付说明必须区分默认 fast gate 与 app-bundle UI smoke；只有运行 app-bundle 入口后，才能把 `.app` 启动、窗口定位和 `XCUIApplication()` locator 作为本轮证据。
 
 真实 OS clipboard/save-panel 证据不进入默认 fast gate。需要证明 copy/export/delete action 穿过系统 `NSPasteboard`、`NSSavePanel` 和 process-backed `export_transcript` / `delete_session` 时，显式运行 `MA_NATIVE_APP_REAL_ACTION_OS_SMOKE=1 ./platform/native-app/scripts/test-app-bundle.sh`，并在交付中记录该命令、日志和限制；该 opt-in gate 只能作为 PV closure/release-candidate 输入，不能替代 local-direct release bundle、跨机器 UI Automation/TCC 可重复性、最终 `release-preflight`，也不能替代未来显式 developer-id 商业分发门禁。

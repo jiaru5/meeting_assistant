@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 private enum TranscriptActionDetailsValue: Decodable {
@@ -342,11 +343,13 @@ public enum TranscriptActionBridgeError: Error, Equatable, LocalizedError, Senda
     case invalidJSON(command: TranscriptActionCommandName, code: TranscriptActionErrorCode)
     case launchFailed(command: TranscriptActionCommandName)
     case processFailed(command: TranscriptActionCommandName, exitCode: Int32, code: TranscriptActionErrorCode)
+    case timedOut(command: TranscriptActionCommandName)
     case unexpectedCommand(expected: TranscriptActionCommandName, actual: TranscriptActionCommandName)
 
     public var command: TranscriptActionCommandName {
         switch self {
-        case .invalidJSON(let command, _), .launchFailed(let command), .processFailed(let command, _, _):
+        case .invalidJSON(let command, _), .launchFailed(let command), .processFailed(let command, _, _),
+                .timedOut(let command):
             return command
         case .unexpectedCommand(let expected, _):
             return expected
@@ -357,7 +360,7 @@ public enum TranscriptActionBridgeError: Error, Equatable, LocalizedError, Senda
         switch self {
         case .invalidJSON(_, let code), .processFailed(_, _, let code):
             return code
-        case .launchFailed, .unexpectedCommand:
+        case .launchFailed, .unexpectedCommand, .timedOut:
             return "internal_error"
         }
     }
@@ -370,6 +373,8 @@ public enum TranscriptActionBridgeError: Error, Equatable, LocalizedError, Senda
             return "Transcript action command could not be launched."
         case .processFailed:
             return "Transcript action command failed before returning a contract response."
+        case .timedOut:
+            return "Transcript action command timed out and was stopped."
         case .unexpectedCommand:
             return "Transcript action command returned an unexpected response."
         }
@@ -449,17 +454,22 @@ public protocol TranscriptExportDestinationSelecting: Sendable {
 }
 
 public struct TranscriptActionProcessRunner: TranscriptActionCommandClient, Sendable {
+    public static let defaultTimeoutSeconds: TimeInterval = 60
+
     public let executablePath: String
     public let environment: [String: String]
+    public let timeoutSeconds: TimeInterval
 
     public init(
         executablePath: String? = nil,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        timeoutSeconds: TimeInterval = Self.defaultTimeoutSeconds
     ) {
         self.executablePath = executablePath
             ?? environment["MEETING_ASSISTANT_CLI_PATH"]
             ?? "meeting-assistant-cli"
         self.environment = environment
+        self.timeoutSeconds = Self.normalizedTimeoutSeconds(timeoutSeconds)
     }
 
     public func exportTranscript(
@@ -467,13 +477,15 @@ public struct TranscriptActionProcessRunner: TranscriptActionCommandClient, Send
     ) async throws -> ExportTranscriptResponse {
         let executablePath = executablePath
         let environment = environment
+        let timeoutSeconds = timeoutSeconds
         return try await Task.detached(priority: .userInitiated) {
             let arguments = Self.exportArguments(for: request)
             let result = try Self.runProcess(
                 command: .exportTranscript,
                 executablePath: executablePath,
                 arguments: arguments,
-                environment: environment
+                environment: environment,
+                timeoutSeconds: timeoutSeconds
             )
             if result.stdout.isEmpty && result.exitCode != 0 {
                 throw TranscriptActionBridgeError.processFailed(
@@ -498,13 +510,15 @@ public struct TranscriptActionProcessRunner: TranscriptActionCommandClient, Send
     ) async throws -> DeleteSessionResponse {
         let executablePath = executablePath
         let environment = environment
+        let timeoutSeconds = timeoutSeconds
         return try await Task.detached(priority: .userInitiated) {
             let arguments = Self.deleteArguments(for: request)
             let result = try Self.runProcess(
                 command: .deleteSession,
                 executablePath: executablePath,
                 arguments: arguments,
-                environment: environment
+                environment: environment,
+                timeoutSeconds: timeoutSeconds
             )
             if result.stdout.isEmpty && result.exitCode != 0 {
                 throw TranscriptActionBridgeError.processFailed(
@@ -555,35 +569,30 @@ public struct TranscriptActionProcessRunner: TranscriptActionCommandClient, Send
         command: TranscriptActionCommandName,
         executablePath: String,
         arguments: [String],
-        environment: [String: String]
+        environment: [String: String],
+        timeoutSeconds: TimeInterval
     ) throws -> (stdout: Data, stderr: Data, exitCode: Int32) {
-        let process = Process()
-        let stdout = Pipe()
-        let stderr = Pipe()
-
-        if executablePath.contains("/") {
-            process.executableURL = URL(fileURLWithPath: executablePath)
-            process.arguments = arguments
-        } else {
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = [executablePath] + arguments
-        }
-        process.environment = environment
-        process.standardOutput = stdout
-        process.standardError = stderr
-
         do {
-            try process.run()
+            let result = try NativeCommandProcess.run(
+                executablePath: executablePath,
+                arguments: arguments,
+                environment: environment,
+                timeoutSeconds: timeoutSeconds,
+                label: "local.meeting-assistant.transcript-action"
+            )
+            return (result.stdout, result.stderr, result.exitCode)
+        } catch NativeCommandProcessError.timedOut {
+            throw TranscriptActionBridgeError.timedOut(command: command)
         } catch {
             throw TranscriptActionBridgeError.launchFailed(command: command)
         }
-        process.waitUntilExit()
+    }
 
-        return (
-            stdout.fileHandleForReading.readDataToEndOfFile(),
-            stderr.fileHandleForReading.readDataToEndOfFile(),
-            process.terminationStatus
-        )
+    private static func normalizedTimeoutSeconds(_ timeoutSeconds: TimeInterval) -> TimeInterval {
+        guard timeoutSeconds.isFinite, timeoutSeconds > 0 else {
+            return defaultTimeoutSeconds
+        }
+        return timeoutSeconds
     }
 
     private static func errorCode(forExitCode exitCode: Int32) -> TranscriptActionErrorCode {

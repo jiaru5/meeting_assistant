@@ -382,6 +382,23 @@ tell application "System Events" to keystroke "{key}" using {{command down, opti
     pressed_controls.append(identifier)
 
 
+def press_with_retry(identifier: str, timeout: int) -> None:
+    deadline = time.monotonic() + timeout
+    last_error: Optional[SmokeFailure] = None
+    while time.monotonic() < deadline:
+        try:
+            press(identifier)
+            return
+        except SmokeFailure as exc:
+            last_error = exc
+            if exc.kind not in {"accessibility_error", "accessibility_timeout"}:
+                raise
+            time.sleep(0.5)
+    if last_error:
+        raise last_error
+    raise SmokeFailure("ui_marker_timeout", f"timed out pressing {identifier}")
+
+
 def start_audio_playback() -> Optional[subprocess.Popen]:
     if not audio_path:
         return None
@@ -598,6 +615,8 @@ def write_report(passed: bool) -> None:
 
 playback: Optional[subprocess.Popen] = None
 try:
+    press_with_retry("ma.meetings.newRecordingButton", min(timeout_seconds, 60))
+    wait_for_marker("ma.newRecording.heading", min(timeout_seconds, 60))
     wait_for_marker("Recording readiness is ready.", min(timeout_seconds, 60))
     press("ma.recording.startButton")
     wait_for_marker("Recording in progress.", min(timeout_seconds, 60))

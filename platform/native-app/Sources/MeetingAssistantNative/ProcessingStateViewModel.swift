@@ -70,6 +70,54 @@ public struct ProcessingState: Equatable, Sendable {
         errorDetails: [],
         warnings: []
     )
+
+    fileprivate static func sessionBlocked(_ statusText: String) -> ProcessingState {
+        ProcessingState(
+            phase: .blocked,
+            statusText: statusText,
+            sessionID: nil,
+            transcriptID: nil,
+            transcriptArtifactID: nil,
+            transcriptStatus: nil,
+            segmentCount: nil,
+            labelStatus: nil,
+            speakerLabelsArtifactID: nil,
+            speakerLabelStatus: nil,
+            successSummary: nil,
+            degradationReason: nil,
+            errorCode: nil,
+            errorMessage: nil,
+            errorDetails: [],
+            warnings: []
+        )
+    }
+}
+
+public struct ProcessingSessionBinding: Equatable, Sendable {
+    public let sessionID: String
+    public let sessionStatus: String
+    public let processableAudioStatus: NativeCaptureArtifactStatus?
+
+    public init(
+        sessionID: String,
+        sessionStatus: String,
+        processableAudioStatus: NativeCaptureArtifactStatus?
+    ) {
+        self.sessionID = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.sessionStatus = sessionStatus.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.processableAudioStatus = processableAudioStatus
+    }
+
+    public var hasSavedMediaState: Bool {
+        sessionStatus == "recorded" || sessionStatus == "transcribed"
+    }
+
+    public var isEligible: Bool {
+        guard !sessionID.isEmpty, hasSavedMediaState else {
+            return false
+        }
+        return processableAudioStatus == .available || processableAudioStatus == .degraded
+    }
 }
 
 private struct ProcessingRunRequest: Equatable, Sendable {
@@ -102,20 +150,29 @@ public final class ProcessingStateViewModel: ObservableObject {
     @Published public private(set) var state: ProcessingState
 
     public var canStart: Bool {
-        readinessState.canRunProcessing && !state.isBusy
+        readinessState.canRunProcessing
+            && !state.isBusy
+            && sessionBinding?.isEligible == true
     }
 
     public var canRetry: Bool {
         readinessState.canRunProcessing
             && !state.isBusy
             && state.phase == .failed
-            && lastRunRequest != nil
+            && lastRunRequest?.sessionID == sessionBinding?.sessionID
+            && sessionBinding?.isEligible == true
+    }
+
+    public var boundSessionID: String? {
+        sessionBinding?.sessionID
     }
 
     private let commandClient: any ProcessingCommandClient
     private var readinessState: PermissionDependencyStatusState
     private var lastRunRequest: ProcessingRunRequest?
     private var defaultSessionID: String
+    private var sessionBinding: ProcessingSessionBinding?
+    private var sessionBindingGeneration: UInt64 = 0
     private let defaultLanguage: String?
     private let defaultRuntime: ProcessingTranscriptRuntime?
 
@@ -128,10 +185,11 @@ public final class ProcessingStateViewModel: ObservableObject {
     ) {
         self.commandClient = commandClient
         self.readinessState = readinessState
-        self.defaultSessionID = defaultSessionID
+        self.defaultSessionID = defaultSessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.sessionBinding = nil
         self.defaultLanguage = defaultLanguage
         self.defaultRuntime = defaultRuntime
-        state = readinessState.canRunProcessing ? .idle : .blocked
+        state = Self.restingState(readinessState: readinessState, sessionBinding: nil)
     }
 
     public func updateReadiness(_ readinessState: PermissionDependencyStatusState) {
@@ -139,24 +197,50 @@ public final class ProcessingStateViewModel: ObservableObject {
         guard state.phase == .idle || state.phase == .blocked else {
             return
         }
-        state = readinessState.canRunProcessing ? .idle : .blocked
+        state = Self.restingState(
+            readinessState: readinessState,
+            sessionBinding: sessionBinding
+        )
     }
 
+    /// Compatibility shim for callers that only knew the former default-session API.
+    /// A session identifier alone never grants processing eligibility; callers must
+    /// use `bindSession` with recorded and artifact facts before processing can start.
     public func updateDefaultSessionID(_ sessionID: String) {
         let nextSessionID = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !nextSessionID.isEmpty else {
-            return
-        }
-        guard defaultSessionID != nextSessionID else {
+        guard defaultSessionID != nextSessionID || sessionBinding?.sessionID != nextSessionID else {
             return
         }
 
         defaultSessionID = nextSessionID
-        lastRunRequest = nil
-        guard !state.isBusy else {
+        replaceSessionBinding(nil)
+    }
+
+    public func bindSession(
+        sessionID: String?,
+        sessionStatus: String,
+        processableAudioStatus: NativeCaptureArtifactStatus?
+    ) {
+        let binding = sessionID.map {
+            ProcessingSessionBinding(
+                sessionID: $0,
+                sessionStatus: sessionStatus,
+                processableAudioStatus: processableAudioStatus
+            )
+        }
+        guard let binding, !binding.sessionID.isEmpty else {
+            defaultSessionID = ""
+            replaceSessionBinding(nil)
             return
         }
-        state = readinessState.canRunProcessing ? .idle : .blocked
+
+        defaultSessionID = binding.sessionID
+        replaceSessionBinding(binding)
+    }
+
+    public func clearSessionBinding() {
+        defaultSessionID = ""
+        replaceSessionBinding(nil)
     }
 
     public func start() async {
@@ -192,7 +276,12 @@ public final class ProcessingStateViewModel: ObservableObject {
             state = .blocked
             return
         }
-        guard let lastRunRequest, state.phase == .failed else {
+        guard let lastRunRequest,
+              state.phase == .failed,
+              let sessionBinding,
+              sessionBinding.isEligible,
+              sessionBinding.sessionID == lastRunRequest.sessionID
+        else {
             return
         }
         await run(lastRunRequest, rememberRequest: false)
@@ -206,27 +295,42 @@ public final class ProcessingStateViewModel: ObservableObject {
             state = .blocked
             return
         }
-        guard !request.sessionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            fail(
-                ProcessingCommandFailure(
-                    command: .generateTranscript,
-                    code: nil,
-                    message: "Processing session id is required."
-                ),
-                sessionID: nil,
-                transcriptStatus: nil
+        let normalizedSessionID = request.sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionID.isEmpty else {
+            state = Self.restingState(
+                readinessState: readinessState,
+                sessionBinding: sessionBinding
             )
             return
         }
+        guard let sessionBinding, sessionBinding.isEligible else {
+            state = Self.restingState(
+                readinessState: readinessState,
+                sessionBinding: sessionBinding
+            )
+            return
+        }
+        guard sessionBinding.sessionID == normalizedSessionID else {
+            return
+        }
+
+        let normalizedRequest = ProcessingRunRequest(
+            sessionID: normalizedSessionID,
+            sourceArtifactID: request.sourceArtifactID,
+            language: request.language,
+            runtime: request.runtime,
+            allowTranscriptOnlyFallback: request.allowTranscriptOnlyFallback
+        )
+        let runBindingGeneration = sessionBindingGeneration
 
         if rememberRequest {
-            lastRunRequest = request
+            lastRunRequest = normalizedRequest
         }
 
         state = ProcessingState(
             phase: .generatingTranscript,
             statusText: "Generating transcript...",
-            sessionID: request.sessionID,
+            sessionID: normalizedRequest.sessionID,
             transcriptID: nil,
             transcriptArtifactID: nil,
             transcriptStatus: "Transcript generation is running.",
@@ -243,17 +347,23 @@ public final class ProcessingStateViewModel: ObservableObject {
         )
 
         do {
-            let transcriptResponse = try await commandClient.generateTranscript(request.transcriptRequest)
+            let transcriptResponse = try await commandClient.generateTranscript(normalizedRequest.transcriptRequest)
+            guard isCurrentRun(
+                sessionID: normalizedRequest.sessionID,
+                bindingGeneration: runBindingGeneration
+            ) else {
+                return
+            }
             let transcript = try validateTranscriptResponse(
                 transcriptResponse,
-                expectedSessionID: request.sessionID
+                expectedSessionID: normalizedRequest.sessionID
             )
             let transcriptStatus = "Transcript \(transcript.id) generated with \(transcript.segmentCount) segments."
 
             state = ProcessingState(
                 phase: .generatingSpeakerLabels,
                 statusText: "Generating speaker labels...",
-                sessionID: request.sessionID,
+                sessionID: normalizedRequest.sessionID,
                 transcriptID: transcript.id,
                 transcriptArtifactID: transcript.artifactID,
                 transcriptStatus: transcriptStatus,
@@ -271,11 +381,17 @@ public final class ProcessingStateViewModel: ObservableObject {
             )
 
             let speakerResponse = try await commandClient.generateSpeakerLabels(
-                request.speakerLabelsRequest(transcriptID: transcript.id)
+                normalizedRequest.speakerLabelsRequest(transcriptID: transcript.id)
             )
+            guard isCurrentRun(
+                sessionID: normalizedRequest.sessionID,
+                bindingGeneration: runBindingGeneration
+            ) else {
+                return
+            }
             let speakerLabels = try validateSpeakerLabelsResponse(
                 speakerResponse,
-                expectedSessionID: request.sessionID,
+                expectedSessionID: normalizedRequest.sessionID,
                 expectedTranscriptID: transcript.id
             )
             complete(
@@ -285,28 +401,86 @@ public final class ProcessingStateViewModel: ObservableObject {
                 warnings: transcriptResponse.warnings + speakerResponse.warnings
             )
         } catch let failure as ProcessingCommandFailure {
-            fail(failure, sessionID: request.sessionID, transcriptStatus: state.transcriptStatus)
+            guard isCurrentRun(
+                sessionID: normalizedRequest.sessionID,
+                bindingGeneration: runBindingGeneration
+            ) else {
+                return
+            }
+            fail(failure, sessionID: normalizedRequest.sessionID, transcriptStatus: state.transcriptStatus)
         } catch let bridgeError as ProcessingCommandBridgeError {
+            guard isCurrentRun(
+                sessionID: normalizedRequest.sessionID,
+                bindingGeneration: runBindingGeneration
+            ) else {
+                return
+            }
             fail(
                 ProcessingCommandFailure(
                     command: bridgeError.command,
                     code: bridgeError.code,
                     message: bridgeError.safeMessage
                 ),
-                sessionID: request.sessionID,
+                sessionID: normalizedRequest.sessionID,
                 transcriptStatus: state.transcriptStatus
             )
         } catch {
+            guard isCurrentRun(
+                sessionID: normalizedRequest.sessionID,
+                bindingGeneration: runBindingGeneration
+            ) else {
+                return
+            }
             fail(
                 ProcessingCommandFailure(
                     command: state.phase == .generatingSpeakerLabels ? .generateSpeakerLabels : .generateTranscript,
                     code: .internalError,
                     message: "Processing command failed unexpectedly."
                 ),
-                sessionID: request.sessionID,
+                sessionID: normalizedRequest.sessionID,
                 transcriptStatus: state.transcriptStatus
             )
         }
+    }
+
+    private func replaceSessionBinding(_ nextBinding: ProcessingSessionBinding?) {
+        guard sessionBinding != nextBinding else {
+            return
+        }
+        sessionBinding = nextBinding
+        sessionBindingGeneration &+= 1
+        lastRunRequest = nil
+        state = Self.restingState(
+            readinessState: readinessState,
+            sessionBinding: sessionBinding
+        )
+    }
+
+    private func isCurrentRun(sessionID: String, bindingGeneration: UInt64) -> Bool {
+        sessionBindingGeneration == bindingGeneration
+            && sessionBinding?.sessionID == sessionID
+            && sessionBinding?.isEligible == true
+    }
+
+    private static func restingState(
+        readinessState: PermissionDependencyStatusState,
+        sessionBinding: ProcessingSessionBinding?
+    ) -> ProcessingState {
+        guard readinessState.canRunProcessing else {
+            return .blocked
+        }
+        guard let sessionBinding else {
+            return .sessionBlocked("Choose a recorded meeting before generating a transcript.")
+        }
+        guard sessionBinding.hasSavedMediaState else {
+            return .sessionBlocked("Finish and save this recording before generating a transcript.")
+        }
+        guard sessionBinding.processableAudioStatus == .available
+                || sessionBinding.processableAudioStatus == .degraded
+        else {
+            return .sessionBlocked("This meeting does not have processable audio for a transcript.")
+        }
+        return .idle
     }
 
     private func validateTranscriptResponse(
@@ -484,7 +658,7 @@ private extension Array where Element == String {
     }
 }
 
-private extension String {
+extension String {
     func processingSafeDisplayText(
         fallback: String,
         maxLength: Int = 160

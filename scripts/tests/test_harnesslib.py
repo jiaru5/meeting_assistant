@@ -1342,7 +1342,10 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn('"starts_recording": False', smoke_script)
         self.assertIn('"requires_developer_id_or_notarization": False', smoke_script)
         self.assertIn("Ready to start recording.", smoke_script)
-        self.assertIn("Processing is ready to run.", smoke_script)
+        self.assertIn(
+            "Choose a recorded meeting before generating a transcript.",
+            smoke_script,
+        )
         self.assertIn("checked_recording_setup_text", architecture)
         self.assertNotIn("CGRequestScreenCaptureAccess", smoke_script)
         self.assertNotIn("AVCaptureDevice.requestAccess", smoke_script)
@@ -1437,7 +1440,7 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertNotIn("applicationDidFinishLaunching", app_source)
         self.assertNotIn('WindowGroup("Meeting Assistant Native', app_source)
         self.assertIn("autoRefreshPreflightOnAppear", app_source)
-        self.assertIn("preflightWorkspaceURL: preflightWorkspaceURL", app_source)
+        self.assertIn("self.workspaceURL = recordingWorkspaceURL", app_source)
         self.assertIn(".onChange(of: permissionViewModel.state)", shell_source)
         self.assertIn("recordingViewModel.updateReadiness(readiness)", shell_source)
         self.assertIn("processingViewModel.updateReadiness(readiness)", shell_source)
@@ -1447,8 +1450,10 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn('.keyboardShortcut("c", modifiers: [.command, .option])', shell_source)
         self.assertIn('.keyboardShortcut("e", modifiers: [.command, .option])', shell_source)
         self.assertIn('.keyboardShortcut("d", modifiers: [.command, .option])', shell_source)
-        self.assertIn(".keyboardShortcut(.defaultAction)", shell_source)
-        self.assertIn("await permissionViewModel.refresh(workspaceURL: preflightWorkspaceURL)", shell_source)
+        self.assertIn(
+            "await permissionViewModel.refresh(workspaceURL: coordinator.workspaceURL)",
+            shell_source,
+        )
         self.assertIn("autoRefreshPreflightIfNeeded", shell_source)
 
         self.assertIn("run-local-app.sh", architecture)

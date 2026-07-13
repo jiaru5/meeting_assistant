@@ -2,7 +2,7 @@
   "id": "native-app",
   "kind": "project-component",
   "scope": "platform",
-  "business_behavior": "permission_dependency_status_fake_recording_controlled_and_apple_screencapturekit_native_capture_artifact_registration_processing_state_transcript_review_actions_and_designed_native_shell",
+  "business_behavior": "permission_dependency_status_native_capture_processing_transcript_actions_and_task_based_local_meeting_workflow",
   "allowed_before_project_mode": false,
   "planned_runtime": "Swift/SwiftUI native control surface",
   "allowed_capabilities": [
@@ -28,7 +28,10 @@
     "transcript_action_process_runner",
     "transcript_action_os_clipboard_and_save_panel",
     "transcript_copy_export_delete_action_view",
-    "designed_native_shell"
+    "designed_native_shell",
+    "read_only_workspace_session_projection",
+    "current_session_coordination",
+    "task_based_local_meeting_workflow"
   ],
   "forbidden_capabilities": [
     "uncontrolled_real_recording",

@@ -28,14 +28,18 @@ public struct RecordingControlState: Equatable, Sendable {
     public let errorCode: RecordingCommandErrorCode?
     public let errorMessage: String?
     public let savedSummary: String?
+    public let technicalDetails: [String]
     public let warnings: [String]
 
     public var canStart: Bool {
-        phase == .ready || phase == .recorded
+        phase == .ready
+            || phase == .recorded
+            || (phase == .failed && sessionID == nil)
     }
 
     public var canStop: Bool {
         phase == .recording
+            || (phase == .failed && sessionID != nil)
     }
 
     public static let idle = RecordingControlState(
@@ -46,6 +50,7 @@ public struct RecordingControlState: Equatable, Sendable {
         errorCode: nil,
         errorMessage: nil,
         savedSummary: nil,
+        technicalDetails: [],
         warnings: []
     )
 
@@ -57,6 +62,7 @@ public struct RecordingControlState: Equatable, Sendable {
         errorCode: nil,
         errorMessage: nil,
         savedSummary: nil,
+        technicalDetails: [],
         warnings: []
     )
 
@@ -72,6 +78,7 @@ public struct RecordingControlState: Equatable, Sendable {
             errorCode: nil,
             errorMessage: nil,
             savedSummary: nil,
+            technicalDetails: [],
             warnings: warnings
         )
     }
@@ -89,6 +96,7 @@ public struct RecordingControlState: Equatable, Sendable {
             errorCode: nil,
             errorMessage: nil,
             savedSummary: Self.savedSummary(for: artifacts),
+            technicalDetails: [],
             warnings: warnings
         )
     }
@@ -104,9 +112,10 @@ public struct RecordingControlState: Equatable, Sendable {
 @MainActor
 public final class RecordingControlViewModel: ObservableObject {
     @Published public private(set) var state: RecordingControlState
+    @Published private var startCommandIsPending = false
 
     public var canStart: Bool {
-        canStartRecording && state.canStart
+        canStartRecording && state.canStart && !startCommandIsPending
     }
 
     public var canStop: Bool {
@@ -122,8 +131,13 @@ public final class RecordingControlViewModel: ObservableObject {
     private let captureMicrophoneAudio: Bool
     private let permissionRepairIdentity: LocalAppPermissionIdentity
     private let startTimeoutNanoseconds: UInt64
+    private let stopTimeoutNanoseconds: UInt64
     private var activeStartAttemptID: UUID?
+    private var pendingStartCommandAttemptID: UUID?
+    private var startCommandTask: Task<RecordingCommandResponse, Error>?
     private var startTimeoutTask: Task<Void, Never>?
+    private var activeStopAttemptID: UUID?
+    private var stopTimeoutTask: Task<Void, Never>?
 
     public init(
         commandClient: any RecordingCaptureControlling = FakeRecordingCommandClient(),
@@ -134,7 +148,8 @@ public final class RecordingControlViewModel: ObservableObject {
         captureSystemAudio: Bool = true,
         captureMicrophoneAudio: Bool = true,
         permissionRepairIdentity: LocalAppPermissionIdentity = .current(),
-        startTimeoutNanoseconds: UInt64 = 15_000_000_000
+        startTimeoutNanoseconds: UInt64 = 15_000_000_000,
+        stopTimeoutNanoseconds: UInt64 = 90_000_000_000
     ) {
         self.commandClient = commandClient
         self.canStartRecording = readinessState.canStartRecording
@@ -145,6 +160,7 @@ public final class RecordingControlViewModel: ObservableObject {
         self.captureMicrophoneAudio = captureMicrophoneAudio
         self.permissionRepairIdentity = permissionRepairIdentity
         self.startTimeoutNanoseconds = startTimeoutNanoseconds
+        self.stopTimeoutNanoseconds = stopTimeoutNanoseconds
         self.state = readinessState.canStartRecording ? .ready : .idle
     }
 
@@ -171,6 +187,17 @@ public final class RecordingControlViewModel: ObservableObject {
 
     public func updateReadiness(_ readinessState: PermissionDependencyStatusState) {
         updateReadiness(canStartRecording: readinessState.canStartRecording)
+    }
+
+    public func resetForNewTask() {
+        activeStartAttemptID = nil
+        startCommandTask?.cancel()
+        startTimeoutTask?.cancel()
+        startTimeoutTask = nil
+        activeStopAttemptID = nil
+        stopTimeoutTask?.cancel()
+        stopTimeoutTask = nil
+        state = canStartRecording ? .ready : .idle
     }
 
     public func start() async {
@@ -204,26 +231,35 @@ public final class RecordingControlViewModel: ObservableObject {
             errorCode: nil,
             errorMessage: nil,
             savedSummary: nil,
+            technicalDetails: [],
             warnings: []
         )
         let attemptID = UUID()
         activeStartAttemptID = attemptID
+        pendingStartCommandAttemptID = attemptID
+        startCommandIsPending = true
         armStartTimeout(for: attemptID)
         defer {
             clearStartAttemptIfCurrent(attemptID)
+            finishStartCommandIfCurrent(attemptID)
         }
 
         do {
-            let response = try await commandClient.startNativeRecording(
-                StartNativeRecordingRequest(
-                    title: title,
-                    captureTarget: captureTarget,
-                    workspaceURL: workspaceURL ?? self.workspaceURL,
-                    captureSystemAudio: captureSystemAudio,
-                    captureMicrophoneAudio: captureMicrophoneAudio
-                )
+            let request = StartNativeRecordingRequest(
+                title: title,
+                captureTarget: captureTarget,
+                workspaceURL: workspaceURL ?? self.workspaceURL,
+                captureSystemAudio: captureSystemAudio,
+                captureMicrophoneAudio: captureMicrophoneAudio
             )
+            let client = commandClient
+            let commandTask = Task {
+                try await client.startNativeRecording(request)
+            }
+            startCommandTask = commandTask
+            let response = try await commandTask.value
             guard activeStartAttemptID == attemptID else {
+                await stopLateRecordingIfNeeded(response)
                 return
             }
             try handleStartResponse(response)
@@ -231,17 +267,28 @@ public final class RecordingControlViewModel: ObservableObject {
             guard activeStartAttemptID == attemptID else {
                 return
             }
-            fail(code: failure.code, message: visibleFailureMessage(for: failure), sessionID: nil)
+            fail(
+                code: failure.code,
+                message: visibleFailureMessage(for: failure),
+                sessionID: nil,
+                technicalDetails: technicalFailureDetails(for: failure)
+            )
         } catch {
             guard activeStartAttemptID == attemptID else {
                 return
             }
-            fail(code: nil, message: error.localizedDescription, sessionID: nil)
+            fail(
+                code: nil,
+                message: error.localizedDescription.processingSafeDisplayText(
+                    fallback: "Recording could not start."
+                ),
+                sessionID: nil
+            )
         }
     }
 
     public func stop() async {
-        guard state.phase == .recording, let sessionID = state.sessionID else {
+        guard state.canStop, let sessionID = state.sessionID else {
             return
         }
 
@@ -253,18 +300,47 @@ public final class RecordingControlViewModel: ObservableObject {
             errorCode: nil,
             errorMessage: nil,
             savedSummary: nil,
+            technicalDetails: [],
             warnings: []
         )
+
+        let attemptID = UUID()
+        activeStopAttemptID = attemptID
+        armStopTimeout(for: attemptID, sessionID: sessionID)
+        defer {
+            clearStopAttemptIfCurrent(attemptID)
+        }
 
         do {
             let response = try await commandClient.stopRecording(
                 StopRecordingRequest(sessionID: sessionID)
             )
+            guard activeStopAttemptID == attemptID else {
+                handleLateStopResponseIfUseful(response, sessionID: sessionID)
+                return
+            }
             try handleStopResponse(response, existingSessionID: sessionID)
         } catch let failure as RecordingCommandFailure {
-            fail(code: failure.code, message: visibleFailureMessage(for: failure), sessionID: sessionID)
+            guard activeStopAttemptID == attemptID else {
+                return
+            }
+            fail(
+                code: failure.code,
+                message: visibleFailureMessage(for: failure),
+                sessionID: sessionID,
+                technicalDetails: technicalFailureDetails(for: failure)
+            )
         } catch {
-            fail(code: nil, message: error.localizedDescription, sessionID: sessionID)
+            guard activeStopAttemptID == attemptID else {
+                return
+            }
+            fail(
+                code: nil,
+                message: error.localizedDescription.processingSafeDisplayText(
+                    fallback: "Recording could not be saved."
+                ),
+                sessionID: sessionID
+            )
         }
     }
 
@@ -291,6 +367,7 @@ public final class RecordingControlViewModel: ObservableObject {
             errorCode: nil,
             errorMessage: nil,
             savedSummary: nil,
+            technicalDetails: [],
             warnings: response.warnings
         )
     }
@@ -321,11 +398,17 @@ public final class RecordingControlViewModel: ObservableObject {
             errorCode: nil,
             errorMessage: nil,
             savedSummary: RecordingControlState.savedSummary(for: response.artifacts),
+            technicalDetails: [],
             warnings: response.warnings
         )
     }
 
-    private func fail(code: RecordingCommandErrorCode?, message: String, sessionID: String?) {
+    private func fail(
+        code: RecordingCommandErrorCode?,
+        message: String,
+        sessionID: String?,
+        technicalDetails: [String] = []
+    ) {
         state = RecordingControlState(
             phase: .failed,
             statusText: "Recording failed.",
@@ -334,19 +417,32 @@ public final class RecordingControlViewModel: ObservableObject {
             errorCode: code,
             errorMessage: message,
             savedSummary: nil,
+            technicalDetails: technicalDetails,
             warnings: []
         )
     }
 
     private func visibleFailureMessage(for failure: RecordingCommandFailure) -> String {
+        let safeMessage = failure.message.processingSafeDisplayText(
+            fallback: failure.command == .startNativeRecording
+                ? "Recording could not start."
+                : "Recording could not be saved."
+        )
         guard failure.code == .permissionDenied else {
-            return failure.message
+            return safeMessage
         }
-        let details = failure.details
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && !failure.message.contains($0) }
         let repairHint = "Open System Settings > Privacy & Security and grant the missing Screen Recording / Screen & System Audio Recording or Microphone permission, then relaunch and retry."
-        return ([failure.message] + details + [repairHint, permissionRepairIdentity.recordingPermissionFailureHint]).joined(separator: " ")
+        return [safeMessage, repairHint].joined(separator: " ")
+    }
+
+    private func technicalFailureDetails(for failure: RecordingCommandFailure) -> [String] {
+        var details = failure.details.map {
+            $0.processingSafeDisplayText(fallback: "<redacted>")
+        }
+        if failure.code == .permissionDenied {
+            details.append(permissionRepairIdentity.recordingPermissionFailureHint)
+        }
+        return details
     }
 
     private func armStartTimeout(for attemptID: UUID) {
@@ -377,10 +473,85 @@ public final class RecordingControlViewModel: ObservableObject {
         }
         activeStartAttemptID = nil
         startTimeoutTask = nil
+        startCommandTask?.cancel()
         fail(
             code: .captureFailed,
-            message: "Native recording did not start before timeout. Check macOS Screen Recording permission prompts and try again.",
+            message: "Native recording did not start before timeout. The pending start was cancelled; wait for any macOS permission prompt to close before trying again.",
             sessionID: nil
         )
+    }
+
+    private func finishStartCommandIfCurrent(_ attemptID: UUID) {
+        guard pendingStartCommandAttemptID == attemptID else {
+            return
+        }
+        pendingStartCommandAttemptID = nil
+        startCommandTask = nil
+        startCommandIsPending = false
+    }
+
+    private func stopLateRecordingIfNeeded(_ response: RecordingCommandResponse) async {
+        guard response.ok,
+              response.command == .startNativeRecording,
+              response.status == "recording",
+              let sessionID = response.sessionID else {
+            return
+        }
+
+        // A native start may finish after the UI timeout or after the user has
+        // moved to another task. Never surface that stale session, but stop it
+        // best-effort so the app cannot leave an invisible recording running.
+        _ = try? await commandClient.stopRecording(
+            StopRecordingRequest(sessionID: sessionID)
+        )
+    }
+
+    private func armStopTimeout(for attemptID: UUID, sessionID: String) {
+        stopTimeoutTask?.cancel()
+        let timeout = stopTimeoutNanoseconds
+        stopTimeoutTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: timeout)
+            } catch {
+                return
+            }
+            self?.failStopIfStillPending(attemptID, sessionID: sessionID)
+        }
+    }
+
+    private func clearStopAttemptIfCurrent(_ attemptID: UUID) {
+        guard activeStopAttemptID == attemptID else {
+            return
+        }
+        activeStopAttemptID = nil
+        stopTimeoutTask?.cancel()
+        stopTimeoutTask = nil
+    }
+
+    private func failStopIfStillPending(_ attemptID: UUID, sessionID: String) {
+        guard activeStopAttemptID == attemptID,
+              state.phase == .stopping,
+              state.sessionID == sessionID else {
+            return
+        }
+        activeStopAttemptID = nil
+        stopTimeoutTask = nil
+        fail(
+            code: .captureFailed,
+            message: "Saving did not finish before timeout. The current recording session is still selected; try saving again.",
+            sessionID: sessionID
+        )
+    }
+
+    private func handleLateStopResponseIfUseful(
+        _ response: RecordingCommandResponse,
+        sessionID: String
+    ) {
+        guard activeStopAttemptID == nil,
+              state.phase == .failed,
+              state.sessionID == sessionID else {
+            return
+        }
+        try? handleStopResponse(response, existingSessionID: sessionID)
     }
 }
