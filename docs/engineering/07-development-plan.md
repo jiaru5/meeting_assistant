@@ -44,6 +44,7 @@ TDG 按具体命令、artifact、UI 状态或纵切逐项关闭；同一个 TDG 
 | TDG-MA-006 | 负向安全边界不足：权限、依赖、路径、delete、no-auto-upload/no-auto-download | `VS-MA-01`, `VS-MA-03`, `VS-MA-06`, `VS-MA-09`, `VS-MA-10`, `VS-MA-18`, `VS-MA-19`, `VS-MA-21`, `VS-MA-22` | `PV-MA-001`, `PV-MA-004`, `PV-MA-005`, `PV-MA-007`, `PV-MA-009`, `PV-MA-011`, `PV-MA-012` | `docs/product-spec/06-api-contracts.md`, `docs/product-spec/07-data-and-events.md`, `docs/product-spec/13-security-and-compliance.md`, `docs/engineering/10-security-and-supply-chain.md` | 自动化测试覆盖 `permission_denied`、`dependency_missing`、`invalid_input`、`artifact_missing`、`path_conflict`、symlink 逃逸、workspace 外导出保留、无自动上传和无自动下载 |
 | TDG-MA-007 | 验证矩阵证据入口和关闭条件不足 | `VS-MA-00`, `VS-MA-01`-`VS-MA-23`, `VS-MA-19A` | 所有 `PV-MA-*` | `docs/engineering/03-test-strategy.md`, `docs/engineering/04-review-and-ci-gates.md`, `docs/engineering/06-product-validation-matrix.md` | 每个 planned/partial/manual-evidence 行都有目标测试文件或命令、当前证据、阻塞 `TDG-MA-*`、关闭条件和标准门禁入口；review report 能引用实际执行证据 |
 | TDG-MA-008 | 设计化 native shell、视觉状态回归、主操作触发和 Debug/Release fixture 隔离证据不足 | `VS-MA-19A`, `VS-MA-20`, `VS-MA-23` | `PV-MA-013`; 同时影响 `PV-MA-001`, `PV-MA-002`, `PV-MA-006`-`PV-MA-012` 的 UI 入口证据 | `docs/product-spec/04-user-journeys-and-ui.md`, `docs/product-spec/12-ui-ux-design.md`, `docs/engineering/03-test-strategy.md`, `docs/engineering/06-product-validation-matrix.md` | app-bundle XCUITest 和 Swift Testing 覆盖 Preflight、recording、artifacts、processing、transcript、export/delete 的 designed shell navigation、状态层级、主操作触发、locator、failure/degraded 状态和 Debug/Release hook 隔离；可选截图证据只能补充，不能替代自动化断言 |
+| TDG-MA-009 | 任务路由、current-session 一致性、最近会议 projection、单一上下文主操作和任务级体验证据不足 | `VS-MA-26`-`VS-MA-30` | `PV-MA-014`; 同时回归 `PV-MA-001`-`PV-MA-003`, `PV-MA-006`-`PV-MA-013` 的 UI 入口 | `docs/product-spec/04-user-journeys-and-ui.md`, `docs/product-spec/09-acceptance-criteria.md`, `docs/product-spec/12-ui-ux-design.md`, `docs/engineering/03-test-strategy.md`, `docs/engineering/06-product-validation-matrix.md` | Swift Testing 覆盖 workspace/session repository、route reducer、processing eligibility、跨会话清理和 delete reset；app-bundle XCUITest 覆盖首次用户、回访用户和失败恢复任务链；辅助截图和真人研究分别记录且不替代自动化 |
 
 ## 阶段化契约交付策略
 
@@ -111,11 +112,13 @@ Phase 2 以后按“大阶段管理、纵切交付、契约验收”的方式推
 | 状态分类 | 当前纵切 | 证明入口 | 下一步含义 |
 |---|---|---|---|
 | 已达退出口径 | `VS-MA-00`-`VS-MA-05`, `VS-MA-07`, `VS-MA-09`-`VS-MA-23`, `VS-MA-19A` | `./scripts/vs-stage-check.py current-phase`; `./scripts/vs-stage-check.py release`; `./scripts/product-validation-check.py release`; `./scripts/release-preflight.sh` | 不再按 VS 顺序重复实现这些纵切；后续只处理回归证据或未来分发模式 |
-| partial evidence | `VS-MA-06`, `VS-MA-08` | 状态表、真实 runtime / speaker fallback 证据和当前产品范围 | `VS-MA-06/08` 的剩余风险不阻塞当前 local-direct 本机 MVP 主链路；若未来引入更强 runtime/diarization 承诺，先走 spec-change |
+| partial evidence | `VS-MA-06`, `VS-MA-08`, `VS-MA-26`-`VS-MA-30` | 状态表、真实 runtime / speaker fallback 证据和 `PV-MA-014` 当前目标入口 | `VS-MA-06/08` 的剩余风险不阻塞当前 local-direct 本机 MVP 主链路；`VS-MA-26`-`VS-MA-30` 是 MVP 完成后的当前产品体验工作轴 |
 | 未进入 release-scope | 当前无 `VS-MA-14`-`VS-MA-23` 纵切处于此状态 | `./scripts/vs-stage-check.py release`; `./scripts/release-preflight.sh` | release-scope 不再回到 VS-MA-14/15/16/17/18/19/20/21/22/23 的阶段入口；后续失败应落到具体 gate 或未来分发模式 |
 | MVP 外 | `VS-MA-24`, `VS-MA-25` | 状态表 | Developer ID/公证/App Store/商业化分发和自动纪要不作为当前本机功能收口前置条件 |
 
 当前 product release blocker 已从矩阵层面关闭：`PV-MA-002`, `PV-MA-003`, `PV-MA-006`, `PV-MA-007`, `PV-MA-008`, `PV-MA-009`, `PV-MA-010`, `PV-MA-011`, `PV-MA-012` 均已推进为 `covered`。这些 covered 只代表当前 local-direct 本机直接安装候选和当前声明目标集合，不代表 Developer ID、公证、App Store、自动更新、商业化分发或未来更大目标集合。
+
+2026-07-13 MVP.1 产品体验启动补充：用户确认 Phase 1 MVP 的功能链路已经完成，下一阶段继续聚焦个人产品功能和交互体验，并把 Developer ID、公证、App Store、自动更新、团队功能和自动纪要保持低优先级。新增 `CAP-MA-014` / `AC-MA-014` / `PV-MA-014` 与 `VS-MA-26`-`VS-MA-30`，用于把现有流水线控制面重构为 Meetings、New recording、Meeting detail 和 Settings/diagnostics 的任务式工作流。既有 `PV-MA-001`-`PV-MA-013` covered 和历史 local-direct release-preflight 证据不回退；`PV-MA-014` 在任务级自动化和体验证据闭合前保持非 covered，当前实现不得把旧“所有 section/按钮同时存在”测试当作新体验通过证据。
 
 根据当前用户确认，短期执行目标先收敛为“本机可安装、可启动、核心功能可跑通”，且这些功能证据已经进入 `PV-MA-* covered`。当前 `release-preflight` 已在 local-direct 分发模式通过；Developer ID、公证、App Store、商业化分发、自动更新和 SLSA/Sigstore 继续保留为未来分发 gate。当前 `VS-MA-23` 的本机功能执行结果：
 
@@ -177,6 +180,11 @@ Phase 2 以后按“大阶段管理、纵切交付、契约验收”的方式推
 | `VS-MA-23` | 已达退出口径 | `release-bundle-create.py` / `release-candidate-inputs.py` 默认 local-direct 已构建并校验本机 Release app bundle；`install-local-app.sh` 已把本机安装目标收敛到 `~/Applications/MeetingAssistantNativeLocal.app`、`CFBundleIdentifier=local.meeting-assistant.native.localdirect` 和 stable-local 自签名 Code Signing identity，使 TCC 授权绑定 bundle id + certificate root 而不是 rebuild-specific ad-hoc CDHash；`local-direct-smoke.sh` 已证明 installed app 可通过 LaunchServices 普通路径启动、显示可见主窗口并同步 Preflight/Recording/Processing ready 状态；默认 `open` 路径的 `local-direct-same-chain-smoke.sh` 已把 recording -> processing -> actions 收敛为单命令可复跑证据，覆盖本机录制 Start/Stop、`screen_video`/`system_audio`/`mixed_audio` artifact、真实 `whisper.cpp` transcript、transcript-only speaker fallback、copy/export/delete、外部 export 保留和 delete event 边界；`release-local-direct-target-smoke.sh` / `release-local-direct-repeatability-report.sh` 已补齐逐目标和 expected target 聚合证据入口；`product-validation-check.py release` 通过 `covered=23`；当前 HEAD `26d0630d24a6eb2f095ef42df3a8059c458d1cef` 的 `./scripts/release-preflight.sh` 通过，release evidence 绑定同一 commit 且 `review-report --require-release-evidence` 通过 | 当前 local-direct 本机 release candidate 已进入人工审查/使用前检查口径；Developer ID、公证、App Store/商业分发、自动更新、SLSA/Sigstore、developer-id all-target sidecar 和跨机器 TCC/display repeatability 继续放到 MVP 外/后续集中处理 |
 | `VS-MA-24` | MVP 外 | 团队分发、Developer ID 签名公证、自动更新、SLSA/Sigstore 商业化分发不属于当前 MVP | 用户重新纳入范围时先走 spec-change 和 ADR |
 | `VS-MA-25` | MVP 外 | 自动纪要或模型集成受 `OD-MA-009` watch 约束 | 用户确认自动 GPT/Qwen 后再新增 `CAP/AC/PV` |
+| `VS-MA-26` | partial evidence | `CAP/AC/PV-MA-014`、任务式 IA 和 ADR 已有事实源；既有 native view model/client 可复用 | 实现非空 workspace/current-session 协调、Meetings 首页、New recording 表单和单一导航；关闭相关 `TDG-MA-009` 单元证据 |
+| `VS-MA-27` | partial evidence | 现有 recording command/state/locator 和效果图可作为实现输入，但产品 root 仍硬编码录制配置 | 实现 focused Recording live、计时、稳定 Stop、失败恢复和真实录制配置传递；同步 Swift Testing/XCUITest |
+| `VS-MA-28` | partial evidence | 已有 artifact、processing、transcript loader 和 action client，但仍缺同一 session 的连续交接 | 实现 Saved -> 用户主动 Processing -> Transcript handoff、处理 eligibility、加载失败可见和会话身份不变量 |
+| `VS-MA-29` | partial evidence | `MeetingSessionSummaryView` 与可重建 workspace metadata 已定义，但 native app 尚无 session list consumer | 实现最近会议 repository/projection、recorded/transcribed 重开、无 transcript 会话删除和删除后的完整 reset；Import media 保持次级入口 |
+| `VS-MA-30` | partial evidence | 现有 accessibility locator、app-bundle fixture 和 local-direct smoke 可复用，但旧测试仍以控制面存在性为中心 | 收敛用户文案/技术详情/视觉层级/键盘/VoiceOver；完成首次、回访、错误恢复任务级 XCUITest、辅助截图、人工体验研究记录和最终门禁 |
 
 2026-07-07 本机功能复跑补充：01:13 CST 在用户完成当前 Debug app-bundle 的 Screen Recording / Screen & System Audio Recording 授权后，执行 `MA_NATIVE_APP_XCODE_DESTINATION='platform=macOS,arch=arm64' MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE=1 ./platform/native-app/scripts/test-app-bundle.sh` 通过，单个 app-bundle XCUITest 0 failure，完成真实 `.app` 录制 start/stop、保存、processing、transcript review、copy、Markdown export、delete confirmation、session delete 和外部 export 保留。当前后续开发优先关闭本机应用功能可用性缺口；Developer ID、签名、公证、App Store 或商业化分发物料保留为 MVP 外/未来分发工作，不作为本机功能跑通的前置条件。
 
@@ -251,6 +259,16 @@ Phase 2 以后按“大阶段管理、纵切交付、契约验收”的方式推
 | VS-MA-24 | 产品化分发准备 | 用户重新提出商业化分发、签名公证、自动更新、跨设备共享或集中支持诉求 | 分发、安装、签名/公证、权限、共享和支持规则 | 更新 product-spec、security、production readiness、供应链门禁和相应 E2E | 当前不提供团队分发或团队支持；进入范围前必须先走 spec-change 和 ADR |
 | VS-MA-25 | 自动纪要或模型集成 | `OD-MA-009` 关闭并写入 API、安全、数据和 ADR 后 | 本地 Qwen 或外部 API adapter、密钥边界、隐私告知、质量验收 | 新增 `CAP/AC/PV`、安全测试、外部集成契约测试、无自动上传负向测试 | 这是后续范围；MVP 只允许用户主动复制或导出 transcript |
 
+## MVP.1 产品体验纵切
+
+| 顺序 | 纵切 | 目标 | 主要实现表面 | 最小验证 | 退出口径 |
+|---|---|---|---|---|---|
+| VS-MA-26 | 任务式 IA、Meetings 和 New recording | 建立非空 workspace/current-session 单一协调源；把六区流水线壳重组为单一导航和任务视图；录制标题与音轨意图由用户输入 | native app coordinator、session repository、Meetings/New recording SwiftUI、app root | repository/coordinator Swift Testing；空/ready/blocked 首页和 setup app-bundle XCUITest | 一次只呈现一个任务；无 current session 时 processing 不可执行；生产启动不携带 fixture session/title；关闭对应 `TDG-MA-009` |
+| VS-MA-27 | Focused recording live | 录制中持续显示状态、计时、目标/音轨摘要和唯一主 Stop；开始/停止失败可恢复 | recording state/view model、Recording live SwiftUI、keyboard/accessibility | start request 字段测试、计时/状态测试、ready -> live -> saving/failed XCUITest | Stop 稳定可见；录制中不暴露 processing/export/delete；失败保留正确 session 和恢复动作 |
+| VS-MA-28 | Saved、Processing 和 Transcript 连续交接 | 停止后解释 artifact 完整性并由用户主动处理；processing 只绑定可处理的 recorded session；成功进入同一 transcript | current-session coordinator、processing eligibility、artifact projection、transcript loader/detail | eligibility/session invariant Swift Testing；saved -> processing -> transcript 及失败/retry XCUITest | 不自动处理；没有音频/录制中/已删除会话 fail closed；loader 失败持久可见且不保留旧会话 action |
+| VS-MA-29 | Recent Meetings、重开和删除 reset | 从 workspace 投影最近会议；recorded/transcribed 会话分别恢复处理/回查；无 transcript 会话也可安全删除 | session workspace repository、meeting detail、session delete coordination | projection 安全/排序/回退测试；returning-user 和 delete reset XCUITest | 不新增持久 schema；所有子状态绑定 current session；删除后刷新列表并回 Meetings，外部导出边界不变 |
+| VS-MA-30 | 文案、技术详情、可访问性和体验验证 | 清除默认工程术语和重复卡片；完成 diagnostics、键盘、VoiceOver、辅助截图及首次/回访/错误恢复验证 | native SwiftUI visual hierarchy、accessibility、UITests、evidence | native fast gate、app-bundle task XCUITest、关键截图、3-5 名代表性用户结构化任务记录、阶段/root 门禁 | `PV-MA-014` 达到 `covered`；无 P0/P1 体验问题；旧 `PV-MA-*` 不回归；人工研究不由 agent 或自动化冒充 |
+
 ## Phase 0: Starter 校准
 
 目标：
@@ -306,6 +324,22 @@ Phase 2 以后按“大阶段管理、纵切交付、契约验收”的方式推
 4. `native-app` 接入 Swift Testing 和 XCUITest 或等价 XCTest UI smoke，覆盖 `PV-MA-001`、`PV-MA-002`、`PV-MA-010`、`PV-MA-011` 和 `PV-MA-012` 的关键 UI 状态和 accessible locator。
 5. `native-app` 完成 designed native shell 纵切，`PV-MA-013` 至少达到有明确阻塞缺口和关闭条件的 `partial`；primitive debug UI 不能作为 MVP UI 完成口径。
 6. `./scripts/phase-preflight.sh`、`./scripts/agent-workflow-check.sh` 和 `./scripts/review-report.sh` 能引用真实组件测试证据；未覆盖的 `PV-MA-*` 必须保持 `planned` 或 `partial`，不能报 `covered`。
+
+## Phase 2.1: MVP.1 个人日常可用体验
+
+目标：
+
+1. 在不改变既有命令、artifact、错误码和安全边界的前提下，完成 `VS-MA-26` 至 `VS-MA-30`。
+2. 让首次用户和回访用户分别通过任务式 native app 完成 `JRN-MA-007` 和 `JRN-MA-008`。
+3. 保留 Phase 1 MVP 已完成事实，并以新增 `PV-MA-014` 单独追踪体验完成度。
+
+退出标准：
+
+1. `VS-MA-26` 至 `VS-MA-30` 均达到退出口径，`TDG-MA-009` 有标准门禁证据。
+2. `PV-MA-014` 达到 `covered`，且旧 `PV-MA-001` 至 `PV-MA-013` 不回归。
+3. `./platform/native-app/scripts/test.sh` 和任务级 `./platform/native-app/scripts/test-app-bundle.sh` 通过。
+4. `./scripts/phase-preflight.sh`、`./scripts/agent-workflow-check.sh` 和 `./scripts/review-report.sh` 通过；需要声明当前 HEAD local-direct 候选时再运行 `./scripts/release-preflight.sh`。
+5. 代表性用户任务研究单独记录真实参与者结果；没有真实参与者时不得用 agent 走查、截图或自动化替代，也不得据此声称主观易用性已验证。
 
 ## Phase 3: 产品能力扩展和适配器硬化
 

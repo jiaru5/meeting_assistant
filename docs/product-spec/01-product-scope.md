@@ -11,6 +11,7 @@
 | 阶段 | 范围 | 说明 |
 |---|---|---|
 | Phase 1 MVP | 个人自用、本地 macOS、Apple Silicon、原生 macOS 录制优先、设计化原生 app shell、文件化产物流水线、音频转写、best-effort 匿名 speaker labels | MVP 实现目标 |
+| MVP.1 产品体验 | 不扩大底层能力边界，把已经跑通的本地录制、处理和 transcript 能力重组为任务式个人工作流，补齐最近会议、会话重开、上下文主操作和用户语言层 | MVP 后的当前产品体验目标 |
 | 本地各自运行 | 多个使用者各自在自己的 Mac 上独立运行 | 不提供团队分发、共享空间、团队账号、集中审计或团队支持 |
 | 未来原生产品化 | 签名、公证、自动更新、自动纪要和商业化分发体验 | 不属于 MVP 必需能力 |
 
@@ -25,10 +26,11 @@
 | GOAL-MA-005 | 保持模块解耦和可替换流水线 | 录制、媒体处理、转写、speaker labeling 和导出通过命令、文件和元数据衔接 | `AC-MA-004`, `AC-MA-005`, `AC-MA-009`, `AC-MA-011`, `PV-MA-004`, `PV-MA-005`, `PV-MA-009`, `PV-MA-011` |
 | GOAL-MA-006 | 让用户控制本地会议数据生命周期 | 用户能删除本地会话目录内的媒体、transcript、speaker labels、导出包和日志；workspace 外导出文件不由应用自动删除 | `AC-MA-012`, `PV-MA-012` |
 | GOAL-MA-007 | 用设计化原生 UI 承载完整本地工作流 | 用户不需要依赖原始调试 UI，也能在一个状态清晰、层级稳定、可访问的原生 shell 中触发预检、录制、处理、回查、导出和删除 | `AC-MA-013`, `PV-MA-013` |
+| GOAL-MA-008 | 把功能流水线提升为个人可日常使用的任务体验 | 首次用户无需 README、CLI、Finder、session id 或工程术语即可完成核心旅程；回访用户能从最近会议继续处理或回查，每个阶段只有一个明确主操作 | `AC-MA-014`, `PV-MA-014` |
 
-## MVP 产品能力矩阵
+## 产品能力矩阵
 
-本表定义 Phase 1 MVP 的产品能力边界，是后续技术方案、代码实现、自动化测试和审查工作的能力索引。字段、命令、文件、UI 状态和安全细节仍由对应主责分卷维护；本表不复制那些细节。
+本表定义 Phase 1 MVP 和 MVP.1 产品体验的能力边界，是后续技术方案、代码实现、自动化测试和审查工作的能力索引。`CAP-MA-001` 至 `CAP-MA-013` 是已完成的 Phase 1 MVP 能力；`CAP-MA-014` 是当前 MVP.1 目标。字段、命令、文件、UI 状态和安全细节仍由对应主责分卷维护；本表不复制那些细节。
 
 | 能力 ID | 能力 | 用户价值 | 主入口 | 主责分卷 | 验收 | 验证 |
 |---|---|---|---|---|---|---|
@@ -45,6 +47,7 @@
 | CAP-MA-011 | transcript 复制或导出，且不自动上传外部工具 | 用户能主动把 transcript 带出本系统；应用不自动调用 GPT 或云端模型 | `export_transcript`, Transcript review/export surface | `06-api-contracts.md`, `07-data-and-events.md`, `13-security-and-compliance.md` | `AC-MA-011` | `PV-MA-011` |
 | CAP-MA-012 | 删除本地会议会话 | 用户能删除本地 workspace 内某个会话目录及其应用管理的产物 | `delete_session` | `03-permissions-and-identity.md`, `06-api-contracts.md`, `07-data-and-events.md`, `13-security-and-compliance.md` | `AC-MA-012` | `PV-MA-012` |
 | CAP-MA-013 | 设计化原生 app shell | 用户在接近效果图目标的原生界面中完成预检、录制、保存、处理、回查、导出和删除，而不是依赖仅有功能的调试控件 | Swift/SwiftUI app | `04-user-journeys-and-ui.md`, `12-ui-ux-design.md` | `AC-MA-013` | `PV-MA-013` |
+| CAP-MA-014 | 任务式个人会议工作流 | 用户围绕“新建并录制一场会议、得到 transcript、回开历史会议”完成工作，不需要理解内部流水线、命令或文件布局 | Swift/SwiftUI app | `04-user-journeys-and-ui.md`, `12-ui-ux-design.md` | `AC-MA-014` | `PV-MA-014` |
 
 ## 非目标
 

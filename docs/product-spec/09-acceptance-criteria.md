@@ -30,6 +30,7 @@
 | AC-MA-011 | transcript 复制或导出，且不自动上传外部工具 | transcript 已生成 | 用户复制或运行 `export_transcript` | 产出 `plain_text`、`markdown`、`json` 中至少一种格式或返回可复制文本；外部 GPT 处理仅由用户主动发起；应用不保存外部 API key、不自动上传 transcript、音频或视频 | `PV-MA-011` |
 | AC-MA-012 | 删除本地会议会话 | 会话位于当前 workspace，用户明确选择删除该会话 | 用户运行 `delete_session` 或在本地 UI 中确认删除 | 删除该会话目录内的媒体、transcript、speaker labels、导出包和日志；返回删除摘要；workspace 外导出文件不被自动删除；路径不存在或越界时返回可解释错误 | `PV-MA-012` |
 | AC-MA-013 | 设计化原生 app shell | 预检、录制、保存、处理、回查、导出和删除的 command/helper/adapter contract 已存在，或自动化测试使用受控 Debug/XCTest fixture | 用户打开 Swift/SwiftUI app，并在同一 designed native shell 中完成预检、开始/停止录制、查看 artifacts、触发处理、回查 transcript、复制/导出和删除确认 | UI 不再只是裸调试控件；必须具备稳定导航、清晰信息层级、状态面板或状态标记、可见主操作和可访问 locator；生产目标的主操作触发现有允许的 command/helper/adapter 边界，不在 UI 本地伪造成功；Debug/XCTest fake 必须与 Release 默认行为隔离；真实 capture、真实 processing、真实 OS 集成和发布放行仍以各自 `PV-MA-*` covered 证据为准 | `PV-MA-013` |
+| AC-MA-014 | 任务式个人会议工作流 | Phase 1 MVP 的本地 command/helper/adapter 已通过；workspace 中可为空、存在 recorded 会话或存在 transcribed 会话 | 首次用户从 Meetings 新建会议并完成预检、录制、停止保存、主动生成 transcript 和回查；回访用户从最近会议重新打开一个会话继续处理或查看 transcript；用户可从 diagnostics 查看技术详情 | 应用只有一套主导航且一次呈现一个任务；每个阶段只有一个明确上下文主操作；New recording 使用用户输入标题和当前真实支持的录制/音轨配置；Processing 只对已保存且有可处理音频的会话开放；用户无需 README、CLI、Finder、session id、原始 artifact type 或内部命令即可完成主路径；失败状态持续显示“发生了什么、数据是否安全、下一步动作”，技术 code/path 渐进披露；删除成功后清空当前会话并刷新最近会议；任务级 Swift Testing 与 app-bundle XCUITest 覆盖空首页、ready/blocked preflight、录制、保存、处理、transcript、历史会话重开、失败恢复和删除 reset | `PV-MA-014` |
 
 ## 高风险验收维度
 

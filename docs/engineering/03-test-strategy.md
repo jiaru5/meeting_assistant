@@ -31,10 +31,13 @@ Phase 1 是本地 macOS 工具，不以 Web 前端、远程 HTTP API 或数据�
 | Native app 状态测试 | Swift Testing | Swift/SwiftUI view model、权限/依赖状态、录制状态转换 |
 | Native UI smoke | XCUITest | 开始/停止、权限缺失、录制中、失败/降级、导出入口和 accessible locator |
 | Native designed shell regression | Swift Testing、XCUITest、可选截图证据 | Preflight、recording、artifacts、processing、transcript、export/delete 的设计化 shell 导航、状态层级、主操作触发和 Debug/Release fixture 隔离 |
+| Native task experience regression | Swift Testing、app-bundle XCUITest、可访问性检查、辅助截图和结构化人工体验记录 | Meetings/New recording/Meeting detail/Diagnostics 的任务路由、单一上下文主操作、current-session 一致性、最近会议重开、失败恢复、删除 reset，以及首次/回访用户主路径 |
 | 本地文件契约测试 | Python/Swift 测试 | `session.json`、artifact registry、原始媒体保护、派生产物重试 |
 | Smoke E2E | manifest 驱动脚本 | `native-app` + `processing-cli` + workspace fixture 的受控端到端路径 |
 
 Playwright 只在后续引入 Web UI 时作为 Web mocked/full-stack E2E 工具；当前 native macOS UI 自动化优先使用 Swift Testing 和 XCUITest。
+
+MVP.1 `PV-MA-014` 的自动化关闭条件不能继续使用“六个 section 和所有按钮同时存在”的旧控制面断言。Swift Testing 必须覆盖任务路由、current-session 不变量、处理 eligibility、最近会议 projection 和删除 reset；app-bundle XCUITest 必须覆盖首次用户主链、回访用户重开和至少一个 blocked/failed 恢复链。关键状态截图只用于视觉层级审查，不能替代任务断言。3-5 名代表性本地 Mac 用户的无指导任务测试作为补充人工体验证据，记录完成、求助、误点、犹豫和状态理解；agent、XCUITest 或截图不得冒充真人研究结论。
 
 native-app 的默认组件 `test` gate 优先服务本地快速反馈：Swift Testing 覆盖 view model、契约 decode、状态机和文件边界，XCTest-hosted SwiftUI smoke 覆盖关键 locator/source contract。真实 app-bundle XCUITest 仍是 native UI 关键状态证据，但执行入口拆为显式命令 `./platform/native-app/scripts/test-app-bundle.sh`，或通过 `MA_NATIVE_APP_RUN_XCUITEST=1 ./platform/native-app/scripts/test.sh` 纳入同一次组件测试。验证矩阵和交付说明必须区分默认 fast gate 与 app-bundle UI smoke；只有运行 app-bundle 入口后，才能把 `.app` 启动、窗口定位和 `XCUIApplication()` locator 作为本轮证据。
 

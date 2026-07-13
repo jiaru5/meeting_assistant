@@ -486,3 +486,31 @@ ADR 记录决策背景、取舍和历史原因。当前可执行规则必须维�
 - 继续要求 Developer ID/notarization 作为 VS-MA-23 默认门槛：拒绝，因为与当前 MVP 范围和用户明确目标不一致。
 - 完全取消 bundle/signing 校验：拒绝，因为本机安装候选仍需要可审计的 Release app、digest、commit 绑定和本地 codesign 证据。
 - 直接进入商业化分发准备：拒绝，保留为 `VS-MA-24` 或后续 spec-change。
+
+## ADR-20260713-01: MVP.1 使用任务式个人会议工作流替代流水线控制面
+
+状态：Accepted
+
+背景：
+- Phase 1 MVP 已证明本机 local-direct app 可以完成录制、处理、transcript 回查、复制、导出和删除，但当前 designed shell 仍把六个内部流水线区域、全局状态和所有命令同时平铺，更接近工程控制面。
+- 用户确认下一阶段继续聚焦个人产品功能和交互体验；Developer ID、公证、App Store、自动更新、团队功能和自动纪要保持低优先级。
+- `ADR-20260704-01` 已拒绝只给调试 UI 换样式，但当时的 `CAP-MA-013` 验收主要证明 shell、状态和命令接线，尚未建立最近会议、会话重开、单一上下文主操作和任务级体验验证。
+
+决策：
+- 新增 MVP.1 `CAP-MA-014`、`AC-MA-014` 和 `PV-MA-014`，把当前产品目标定义为个人日常可用的任务式会议工作流。
+- Preflight、Record meeting、Session artifacts、Processing、Transcript 和 Export/Delete 六个语义区域继续存在，但按 Meetings、New recording、Meeting detail 和 Settings/diagnostics 的用户任务及会话状态编排，不再要求同时平铺。
+- 应用只保留一套主导航；每个阶段只突出一个上下文主操作；内部 command、artifact、error code 和路径渐进披露到 technical details。
+- 最近会议只使用既有 `MeetingSessionSummaryView` 读取投影和 workspace 内 `session.json`/artifact 数据，不新增持久实体、索引 schema、远程服务或数据库。
+- 处理、复制、导出和删除继续由用户主动触发；不引入自动处理、自动上传、自动纪要、云端模型、团队共享或新的 command/artifact/error 语义。
+- 当前 Apple ScreenCaptureKit adapter 只支持 `screen` 时，产品界面只把整屏录制显示为可用 target；window/area 支持必须先有真实 adapter 证据再开放。
+
+影响：
+- `01-product-scope.md`、`04-user-journeys-and-ui.md`、`09-acceptance-criteria.md` 和 `12-ui-ux-design.md` 维护 MVP.1 当前规则。
+- `docs/engineering/03-test-strategy.md`、`06-product-validation-matrix.md` 和 `07-development-plan.md` 增加任务级 Swift Testing、app-bundle XCUITest、可访问性和辅助截图证据。
+- native app 需要统一 current-session/route 协调，保证 recording、processing、transcript 和 action 永远绑定同一 session；删除成功和会话切换必须原子清理旧状态。
+- 本 ADR 扩展而不 supersede `ADR-20260704-01`；Phase 1 MVP 的既有完成和 local-direct release 证据保持历史有效。
+
+备选方案：
+- 只调整颜色、圆角、字体和动效：拒绝，因为不会解决重复导航、等权命令、跨会话状态和内部流水线心智模型。
+- 在现有长页面上继续叠加最近会议和录制配置：拒绝，因为会增加认知负担并继续允许不同区域指向不同 session。
+- 先增加搜索、媒体播放、自动纪要或团队能力：拒绝，因为会扩大功能宽度，无法验证既有核心旅程是否已经自然、可理解和可恢复。

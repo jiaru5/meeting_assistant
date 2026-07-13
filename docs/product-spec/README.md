@@ -19,7 +19,7 @@
 
 产品行为实现必须先对齐主责分卷、`09-acceptance-criteria.md` 和 `docs/engineering/06-product-validation-matrix.md`；`PV-MA-*` 为 `planned` 时不能声称对应产品行为已完成。
 
-Phase 1 MVP 的产品能力索引以 `01-product-scope.md` 中的 `CAP-MA-*` 能力矩阵为入口；每个能力必须能追溯到对应主责分卷、`AC-MA-*` 验收标准和 `PV-MA-*` 验证矩阵行。
+Phase 1 MVP 和 MVP.1 产品体验的能力索引以 `01-product-scope.md` 中的 `CAP-MA-*` 能力矩阵为入口；每个能力必须能追溯到对应主责分卷、`AC-MA-*` 验收标准和 `PV-MA-*` 验证矩阵行。
 
 ## 事实源归属
 

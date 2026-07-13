@@ -22,6 +22,8 @@ Phase 1 采用设计化 Swift/SwiftUI native app shell + local helper / processi
 | JRN-MA-004 | 回查和导出 transcript | 用户打开 transcript；按时间戳回查；复制或导出 transcript 到本地文件；可手动粘贴到 GPT | transcript 可复制或导出，原始媒体和 transcript 不被修改 | transcript 不存在、导出路径不可写、外部 GPT 工具不可用 |
 | JRN-MA-005 | 导入已有媒体作为回退或测试路径 | 用户选择本地媒体文件；系统登记为 `imported_media` 会话；处理音频并生成 transcript | 可不依赖现场录制验证处理流水线 | 文件格式不支持、缺少音频轨、转写失败 |
 | JRN-MA-006 | 删除本地会议会话 | 用户选择当前 workspace 内的会话；确认删除；系统删除会话目录内应用管理文件并返回摘要 | 会话目录内媒体、transcript、speaker labels、导出包和日志被删除；workspace 外导出文件不被自动删除 | 会话不存在、路径越界、文件权限不足、删除部分失败 |
+| JRN-MA-007 | 首次用户日常使用闭环 | 用户从 Meetings 空状态新建会议；填写可选标题并确认当前支持的录制目标和音轨意图；完成预检、录制、停止保存；从保存结果主动启动处理；完成后查看 transcript | 用户无需 README、CLI、Finder、session id 或内部流水线知识即可完成主路径；当前状态、下一步动作和降级结果始终可理解 | 预检阻断、录制或保存失败、没有可处理音频、处理失败或 transcript 读取失败；每种状态必须给出恢复动作或安全退出路径 |
+| JRN-MA-008 | 回访用户继续会议 | 用户从 Meetings 最近会议选择一个已有会话；应用根据 artifact/transcript projection 显示继续处理或查看 transcript；用户完成回查、复制、导出或明确确认删除 | 同一会话的媒体、处理、transcript 和 action 状态保持一致；用户无需输入 session id 或查找 workspace 文件 | 会话 metadata 损坏、artifact 缺失、transcript 加载失败或会话已删除；不得保留另一个旧会话的 transcript 或操作 |
 
 ## 旅程到能力映射
 
@@ -33,6 +35,8 @@ Phase 1 采用设计化 Swift/SwiftUI native app shell + local helper / processi
 | JRN-MA-004 | `CAP-MA-010`, `CAP-MA-011` | 回查路径必须显示时间戳文本和匿名 labels 或降级原因；导出或复制必须由用户主动触发 | `PV-MA-010`, `PV-MA-011` |
 | JRN-MA-005 | `CAP-MA-004`, `CAP-MA-006`, `CAP-MA-007` | 导入媒体只作为回退或测试路径，不改变原生录制主路径；导入后可进入标准处理流水线 | `PV-MA-004`, `PV-MA-006`, `PV-MA-007` |
 | JRN-MA-006 | `CAP-MA-012` | 删除路径必须要求用户明确确认，只删除当前 workspace 内目标会话目录中的应用管理文件，并明确 workspace 外导出文件不受影响 | `PV-MA-012` |
+| JRN-MA-007 | `CAP-MA-001`-`CAP-MA-003`, `CAP-MA-006`-`CAP-MA-011`, `CAP-MA-013`, `CAP-MA-014` | 首页、录制、保存、处理和 transcript 必须形成连续任务流；每个阶段只有一个上下文主操作，处理、复制和导出仍由用户主动触发 | `PV-MA-014`，底层能力继续由对应 `PV-MA-*` 验证 |
+| JRN-MA-008 | `CAP-MA-009`-`CAP-MA-014` | 最近会议能从 workspace 读取投影重开；recorded 会话可继续处理，transcribed 会话可回查，删除后刷新列表且清空旧会话状态 | `PV-MA-014`，读取和删除边界继续由 `PV-MA-009`、`PV-MA-010`、`PV-MA-012` 验证 |
 
 ## 组件交互契约
 
@@ -61,6 +65,32 @@ Phase 1 采用设计化 Swift/SwiftUI native app shell + local helper / processi
 3. 非 XCTest app runtime 的处理和 transcript action command client 默认走本地 process runner；Debug、XCTest 或 fixture-only fake 可以用于自动化测试，但必须被明确隔离，不能成为 Release 默认行为或产品验收的真实处理证据。
 4. 设计化 shell 不改变命令字段、artifact type、error code、删除边界、no-auto-upload 或 no-auto-download 规则。
 5. 新导航和视觉结构必须保留关键状态的可访问标题、可见文案和 XCUITest 可查询 locator。
+
+## MVP.1 任务式信息架构
+
+MVP.1 不新增录制、处理、导出或删除命令，而是把既有六个语义区域按用户任务编排。它扩展 `CAP-MA-013` 的 designed shell，但不改变已经完成的 Phase 1 MVP 口径。
+
+稳定产品入口：
+
+1. Meetings：首页和最近会议。空状态提供“新建录制”；非空状态允许选择一个会话，并根据该会话的 `MeetingSessionStatus`、artifact 和 transcript projection 进入继续处理或回查。
+2. New recording：填写可选会议标题，查看当前真实支持的录制目标，选择系统音频和麦克风录制意图，完成预检后开始录制。
+3. Meeting detail：承载录制中、保存结果、处理状态和 transcript 成果；同一时间只呈现当前会话及与其状态匹配的操作。
+4. Settings and diagnostics：承载 workspace、权限、依赖、runtime/model、原始 error code、artifact type 和路径等技术信息；这些信息不得在默认任务界面与主操作等权竞争。
+
+任务编排规则：
+
+1. 应用只保留一套稳定主导航；不得同时展示重复侧栏、顶部导航和全局命令栏。
+2. 主内容区一次只呈现当前任务，不得把 Preflight、Record、Artifacts、Processing、Transcript 和 Export/Delete 六个完整面板同时平铺在一个长页面。
+3. 每个阶段最多突出一个上下文主操作：新建录制、修复或重试预检、开始录制、停止录制、生成 transcript、重试处理、复制或导出。删除必须是次级 destructive 操作。
+4. `recording`、`stopping`、`processing` 等进行中状态必须阻止切换到会导致错误会话操作的入口；停止动作在录制中持续可见。
+5. 处理只允许作用于状态为 `recorded` 且具有可用或降级可处理音频的当前会话；不得只根据依赖 ready 就允许处理。
+6. 录制结束后展示人类可读的保存结果和 artifact 完整性，并由用户主动选择“生成 transcript”；不得默认自动处理。
+7. 处理成功或 transcript-only 降级后进入同一会话的 transcript；加载失败必须持久可见且可重试，不能静默吞掉。
+8. 删除成功后必须原子清理当前会话的录制、处理、transcript 和 action UI 状态，刷新最近会议，并返回 Meetings；不得继续对已删除 session 暴露操作。
+9. 最近会议使用 `02-domain-model.md` 已定义的 `MeetingSessionSummaryView` 读取投影；不新增持久索引字段，也不扫描 workspace 外目录。
+10. 原始 command、artifact type、error code、session id 和绝对路径只在可展开的技术详情或 diagnostics 中显示；默认文案使用会议、屏幕视频、会议音频、麦克风、transcript 等用户术语。
+11. 当前 Apple ScreenCaptureKit adapter 只支持 `screen` 时，New recording 只能把整屏录制呈现为可用选项；不得把 `window` 或 `area` 显示为可成功执行的入口。
+12. Import media 继续作为次级回退分支，不得与新建原生录制争夺首页主操作。
 
 ## 关键状态要求
 
