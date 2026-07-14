@@ -514,3 +514,33 @@ ADR 记录决策背景、取舍和历史原因。当前可执行规则必须维�
 - 只调整颜色、圆角、字体和动效：拒绝，因为不会解决重复导航、等权命令、跨会话状态和内部流水线心智模型。
 - 在现有长页面上继续叠加最近会议和录制配置：拒绝，因为会增加认知负担并继续允许不同区域指向不同 session。
 - 先增加搜索、媒体播放、自动纪要或团队能力：拒绝，因为会扩大功能宽度，无法验证既有核心旅程是否已经自然、可理解和可恢复。
+
+## ADR-20260713-02: 录制就绪与处理就绪解耦并补齐可恢复任务路径
+
+状态：Accepted
+
+背景：
+- MVP.1 任务式 shell 已把现有能力重组为 Meetings、New recording、Meeting detail 和 Settings/diagnostics，但实用性审查发现录制主操作仍被 FFmpeg、转写 runtime/model 和未启用的麦克风权限共同阻断。
+- 当前唯一的 Privacy 修复按钮固定打开 Screen Recording，即使实际缺失的是 Microphone；持久状态为 `processing` 的历史会话也只能开始新录制或删除，不能使用仍安全的原始音频恢复。
+- `AC-MA-006` 已要求 `mixed_audio` 缺失时由用户选择可用音频，UI 尚未提供该选择；长 transcript 的操作区和同步文件加载也不满足日常回查体验。
+- 用户批准继续聚焦个人产品功能和交互体验，并按推荐方案完成录制 readiness 与 processing readiness 的解耦；分发、团队和自动纪要边界不变。
+
+决策：
+- 原生整屏录制 readiness 只依赖支持的平台、可写 workspace、录屏权限和当前音轨意图；麦克风权限只在用户启用麦克风时阻断。FFmpeg、转写 runtime/model 和 speaker-labeling 状态只影响 processing readiness。
+- 未确认的 macOS 权限仍允许进入原生 start 请求，由 command/capture 层触发系统授权并在拒绝时 fail closed；已拒绝权限必须在 UI 持久显示，并打开对应的 Screen Recording 或 Microphone Privacy 面板。
+- 新 processing 仍从 `recorded` 会话开始；重新打开持久状态为 `processing` 且当前 App 内没有活动任务时，将其视为上次处理被中断。安全音频仍可用时允许用户重新选择输入并重试，不推断旧任务成功。
+- `mixed_audio` 继续是默认处理输入；缺失时只展示通过 workspace、路径、文件类型和 checksum 校验的 `normalized_audio`、`system_audio` 或 `microphone_audio`，并把用户选择的既有 artifact id 传给 `generate_transcript`。
+- 实现澄清：上述“缺失”只指未登记或明确不可用的输入，不包括已登记后的文件缺失、checksum 漂移或不安全路径；后者必须沿用 provider 的 fail-closed 异常语义。已生成 `normalized_audio` 后只开放同源重试，换源需未来显式 replace policy；已登记 transcript 的读取失败只提供重新加载、修复或安全退出，不伪装成可直接重新生成。
+- transcript 文件读取、解码和 checksum 校验移出 MainActor；结果安装前继续校验 current session。长 transcript 使用惰性行容器，Copy/Export 位于独立于正文滚动的稳定操作区。
+- 该决策不新增命令、artifact type、持久字段、远程服务、自动处理、自动上传或自动纪要；音频选择和历史恢复都复用现有 `source_artifact_id`、文件契约和失败语义。
+
+影响：
+- `03-permissions-and-identity.md`、`04-user-journeys-and-ui.md`、`09-acceptance-criteria.md`、`12-ui-ux-design.md` 和 `13-security-and-compliance.md` 维护当前产品规则。
+- native app 需要把录制/处理 readiness 分别投影到主操作，提供权限对应修复入口、音频源 picker、历史 processing 恢复、后台 transcript loader 和稳定 toolbar。
+- `PV-MA-001`、`PV-MA-002`、`PV-MA-006`、`PV-MA-007` 与 `PV-MA-014` 的回归需要覆盖 processing 依赖缺失仍可录制、麦克风关闭时不阻断、麦克风设置入口、fallback source id、历史恢复、长 transcript 和 stale-session 防护。
+
+备选方案：
+- 继续要求所有处理依赖在录制前 ready：拒绝，因为用户可能安全完成录制并稍后安装处理依赖，前置阻断扩大了失败面。
+- 麦克风权限始终阻断录制：拒绝，因为用户已经明确关闭麦克风意图时不应被无关权限阻断。
+- 历史 `processing` 会话永久 fail closed：拒绝，因为它保护了文件却不给安全重试路径，与处理失败回到可重试状态的既有规则冲突。
+- 自动选择任意 fallback 音轨并开始处理：拒绝，因为输入选择是用户可见质量决策，且 processing 必须保持主动触发。

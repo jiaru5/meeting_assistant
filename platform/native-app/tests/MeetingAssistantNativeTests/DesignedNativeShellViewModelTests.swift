@@ -87,6 +87,14 @@ struct DesignedNativeShellViewModelTests {
     }
 
     @Test
+    func historicalArtifactSummaryDoesNotClaimUnverifiedFilesAreReady() {
+        #expect(
+            recordingSavedArtifactSummary(artifacts: [], fallbackCount: 2)
+                == "2 meeting files are registered."
+        )
+    }
+
+    @Test
     func savedArtifactSummaryCountsOnlyRequestedUnavailableSourcesAsFailures() {
         let artifacts = [
             readyArtifact(id: "screen", type: "screen_video"),
@@ -169,6 +177,13 @@ struct DesignedNativeShellViewModelTests {
         #expect(historicalMeetingRecoveryStatus("transcribed") == nil)
         #expect(historicalMeetingRecoveryStatus("unexpected") == "Needs attention")
         #expect(meetingUserStatus("recorded", hasTranscript: false) == "Ready to transcribe")
+        #expect(
+            meetingUserStatus(
+                "recorded",
+                hasTranscript: false,
+                hasRegisteredTranscript: true
+            ) == "Transcript needs repair"
+        )
         #expect(meetingUserStatus("transcribed", hasTranscript: true) == "Transcript ready")
         #expect(meetingUserStatus("unexpected", hasTranscript: false) == "Needs attention")
         #expect(meetingUserStatus("unexpected", hasTranscript: true) == "Needs attention")

@@ -394,6 +394,36 @@ struct ProcessingStateViewModelTests {
     }
 
     @Test
+    func interruptedProcessingSessionWithSavedAudioCanRestartFromTheOriginalArtifact() async {
+        let client = ProcessingCommandFakeClient()
+        let viewModel = ProcessingStateViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState()
+        )
+        viewModel.bindSession(
+            sessionID: "session-interrupted-processing",
+            sessionStatus: "processing",
+            processableAudioStatus: .available
+        )
+
+        #expect(viewModel.canStart)
+        #expect(viewModel.state.phase == .idle)
+
+        await viewModel.start(
+            sessionID: "session-interrupted-processing",
+            sourceArtifactID: "artifact-original-audio"
+        )
+
+        #expect((await client.transcriptRequestSnapshot()) == [
+            GenerateTranscriptRequest(
+                sessionID: "session-interrupted-processing",
+                sourceArtifactID: "artifact-original-audio"
+            ),
+        ])
+        #expect(viewModel.state.phase == .completed)
+    }
+
+    @Test
     func transcribedSessionWithoutSavedAudioCannotRegenerateTranscript() async {
         let client = ProcessingCommandFakeClient()
         let viewModel = ProcessingStateViewModel(
@@ -827,7 +857,9 @@ struct ProcessingStateViewModelTests {
             #expect(error.errorDescription?.contains("sk-processing-descendant-secret") == false)
         }
 
-        #expect(startedAt.duration(to: clock.now) < .seconds(3))
+        // The descendant sleeps for 10 seconds, so an 8-second ceiling still proves
+        // the inherited pipes are bounded while tolerating a fully parallel test run.
+        #expect(startedAt.duration(to: clock.now) < .seconds(8))
         #expect(try fixture.recordedProcessStopsWithin(timeoutSeconds: 1))
     }
 

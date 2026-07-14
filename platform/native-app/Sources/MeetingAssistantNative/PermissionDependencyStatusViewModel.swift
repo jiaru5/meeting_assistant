@@ -32,6 +32,44 @@ public struct DependencyStatusItem: Equatable, Identifiable, Sendable {
     public let message: String
 }
 
+public enum NativePermissionRepairDestination: String, CaseIterable, Equatable, Identifiable, Sendable {
+    case screenRecording
+    case microphone
+
+    public var id: String {
+        permissionID
+    }
+
+    public init?(permissionID: String) {
+        switch permissionID {
+        case "permission.screen_recording":
+            self = .screenRecording
+        case "permission.microphone":
+            self = .microphone
+        default:
+            return nil
+        }
+    }
+
+    public var permissionID: String {
+        switch self {
+        case .screenRecording:
+            return "permission.screen_recording"
+        case .microphone:
+            return "permission.microphone"
+        }
+    }
+
+    public var buttonTitle: String {
+        switch self {
+        case .screenRecording:
+            return "Open Screen Recording Settings"
+        case .microphone:
+            return "Open Microphone Settings"
+        }
+    }
+}
+
 public struct LocalAppPermissionIdentity: Equatable, Sendable {
     public let bundlePath: String
     public let bundleIdentifier: String
@@ -75,7 +113,7 @@ public struct LocalAppPermissionIdentity: Equatable, Sendable {
         if let codeSignatureHash, !codeSignatureHash.isEmpty {
             identityDetails.append("current CDHash: \(codeSignatureHash)")
         }
-        return "Authorize this exact app in Screen Recording / Screen & System Audio Recording: \(bundlePath) (\(identityDetails.joined(separator: ", ")))."
+        return "Authorize this exact app for the requested macOS Privacy permission: \(bundlePath) (\(identityDetails.joined(separator: ", ")))."
     }
 
     public var staleIdentityRepairSummary: String {
@@ -149,6 +187,50 @@ public struct PermissionDependencyStatusState: Equatable, Sendable {
         permissions.contains { $0.state != .granted }
     }
 
+    public var permissionRepairDestinations: [NativePermissionRepairDestination] {
+        permissions.compactMap { permission in
+            guard permission.state != .granted else {
+                return nil
+            }
+            return NativePermissionRepairDestination(permissionID: permission.id)
+        }
+    }
+
+    public func canStartRecording(captureMicrophoneAudio: Bool) -> Bool {
+        guard phase == .ready || phase == .blocked else {
+            return false
+        }
+        return Self.captureChecksPass(
+            permissions: permissions,
+            dependencies: dependencies,
+            captureMicrophoneAudio: captureMicrophoneAudio
+        )
+    }
+
+    public func summary(captureMicrophoneAudio: Bool) -> String {
+        guard phase == .ready || phase == .blocked else {
+            return summary
+        }
+        let relevantPermissionIDs: Set<String> = captureMicrophoneAudio
+            ? [
+                NativePermissionRepairDestination.screenRecording.permissionID,
+                NativePermissionRepairDestination.microphone.permissionID,
+            ]
+            : [NativePermissionRepairDestination.screenRecording.permissionID]
+        let relevantPermissions = permissions.filter {
+            relevantPermissionIDs.contains($0.id)
+        }
+        return Self.summary(
+            canStartRecording: canStartRecording(
+                captureMicrophoneAudio: captureMicrophoneAudio
+            ),
+            canRunProcessing: canRunProcessing,
+            hasMissingRequiredDependencies: !missingRequiredCheckIDs.isEmpty,
+            hasDeniedPermissions: relevantPermissions.contains { $0.state == .denied },
+            hasUnconfirmedPermissions: relevantPermissions.contains { $0.state == .notConfirmed }
+        )
+    }
+
     public static let idle = PermissionDependencyStatusState(
         phase: .idle,
         summary: "Run checks before recording or processing.",
@@ -200,19 +282,27 @@ public struct PermissionDependencyStatusState: Equatable, Sendable {
         let dependencies = response.checks
             .filter { !isPermissionCheck($0.id) }
             .map(DependencyStatusItem.from)
-        let missingRequired = response.checks
+        let missingRequired = dependencies
             .filter { $0.required && !$0.isPassing }
             .map(\.id)
         let deniedPermissions = permissions.filter { $0.state == .denied }
         let unconfirmedPermissions = permissions.filter { $0.state == .notConfirmed }
-        let canRunProcessing = response.ok
-        let canStartRecording = canRunProcessing && deniedPermissions.isEmpty
+        let canRunProcessing = processingChecksPass(
+            responseOK: response.ok,
+            checks: response.checks
+        )
+        let canStartRecording = captureChecksPass(
+            permissions: permissions,
+            dependencies: dependencies,
+            captureMicrophoneAudio: true
+        )
         let phase: PermissionDependencyPhase = canStartRecording ? .ready : .blocked
 
         return PermissionDependencyStatusState(
             phase: phase,
             summary: summary(
-                responseOK: response.ok,
+                canStartRecording: canStartRecording,
+                canRunProcessing: canRunProcessing,
                 hasMissingRequiredDependencies: !missingRequired.isEmpty,
                 hasDeniedPermissions: !deniedPermissions.isEmpty,
                 hasUnconfirmedPermissions: !unconfirmedPermissions.isEmpty
@@ -276,12 +366,25 @@ public struct PermissionDependencyStatusState: Equatable, Sendable {
     }
 
     private static func summary(
-        responseOK: Bool,
+        canStartRecording: Bool,
+        canRunProcessing: Bool,
         hasMissingRequiredDependencies: Bool,
         hasDeniedPermissions: Bool,
         hasUnconfirmedPermissions: Bool
     ) -> String {
-        if !responseOK && !hasMissingRequiredDependencies && !hasDeniedPermissions {
+        if canStartRecording && !canRunProcessing {
+            if hasUnconfirmedPermissions {
+                return "Recording can be started to confirm macOS permissions; processing is blocked until required dependencies are available."
+            }
+            if hasMissingRequiredDependencies {
+                return "Recording is ready; processing is blocked until required dependencies are available."
+            }
+            return "Recording is ready; processing is blocked by dependency check failure."
+        }
+        if !canStartRecording && canRunProcessing {
+            return "Recording is blocked until the required macOS permissions and capture environment are ready."
+        }
+        if !canStartRecording && !canRunProcessing && !hasMissingRequiredDependencies && !hasDeniedPermissions {
             return "Recording and processing are blocked by dependency check failure."
         }
         switch (hasMissingRequiredDependencies, hasDeniedPermissions, hasUnconfirmedPermissions) {
@@ -298,6 +401,53 @@ public struct PermissionDependencyStatusState: Equatable, Sendable {
         case (true, false, false):
             return "Processing is blocked until required dependencies are available."
         }
+    }
+
+    private static func captureChecksPass(
+        permissions: [PermissionStatusItem],
+        dependencies: [DependencyStatusItem],
+        captureMicrophoneAudio: Bool
+    ) -> Bool {
+        let requiredCaptureDependencyIDs = [
+            "platform.os",
+            "platform.macos_version",
+            "platform.cpu_arch",
+            "workspace.writable",
+        ]
+        let captureDependenciesAreReady = requiredCaptureDependencyIDs.allSatisfy { id in
+            dependencies.first(where: { $0.id == id })?.isPassing == true
+        }
+        guard captureDependenciesAreReady else {
+            return false
+        }
+
+        let screenRecordingDenied = permissions.contains {
+            $0.id == NativePermissionRepairDestination.screenRecording.permissionID && $0.state == .denied
+        }
+        guard !screenRecordingDenied else {
+            return false
+        }
+
+        let microphoneDenied = permissions.contains {
+            $0.id == NativePermissionRepairDestination.microphone.permissionID && $0.state == .denied
+        }
+        return !captureMicrophoneAudio || !microphoneDenied
+    }
+
+    private static func processingChecksPass(
+        responseOK: Bool,
+        checks: [DependencyCheckItem]
+    ) -> Bool {
+        let hasFailedRequiredDependency = checks.contains {
+            !isPermissionCheck($0.id) && $0.required && !$0.isPassing
+        }
+        guard !hasFailedRequiredDependency else {
+            return false
+        }
+        let hasExplicitPermissionFailure = checks.contains {
+            isPermissionCheck($0.id) && !$0.isPassing
+        }
+        return responseOK || hasExplicitPermissionFailure
     }
 
     private static func isPermissionCheck(_ id: String) -> Bool {

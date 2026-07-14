@@ -407,6 +407,52 @@ class AudioProcessingTests(unittest.TestCase):
         self.assertEqual(second["source_artifact_id"], "artifact-system_audio")
         self.assertEqual(len(indexed["normalized_audio"]), 1)
 
+    def test_compressed_explicit_fallback_reuses_same_source_and_rejects_source_switch(self) -> None:
+        def compressed_audio_normalizer(source: Path, destination: Path) -> None:
+            self.assertEqual(source.name, "system_audio.m4a")
+            destination.write_bytes(wav_bytes(b"normalized-system-audio"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_audio_session(
+                workspace,
+                [
+                    ("system_audio", "system_audio.m4a", b"compressed-system-audio"),
+                    ("microphone_audio", "microphone_audio.m4a", b"compressed-microphone-audio"),
+                ],
+            )
+
+            first = run_audio_normalization(
+                "session-1",
+                workspace=workspace,
+                source_artifact_id="artifact-system_audio",
+                normalizer=compressed_audio_normalizer,
+            )
+            same_source_retry = run_audio_normalization(
+                "session-1",
+                workspace=workspace,
+                source_artifact_id="artifact-system_audio",
+            )
+            switched_source_retry = run_audio_normalization(
+                "session-1",
+                workspace=workspace,
+                source_artifact_id="artifact-microphone_audio",
+            )
+
+            indexed = artifacts_by_type(session_dir)
+            normalized_bytes = (session_dir / "artifacts" / "normalized_audio.wav").read_bytes()
+
+        self.assertTrue(first["ok"])
+        self.assertTrue(same_source_retry["ok"])
+        self.assertTrue(same_source_retry["reused"])
+        self.assertEqual(same_source_retry["source_artifact_id"], "artifact-system_audio")
+        self.assertEqual(same_source_retry["artifacts"][0]["id"], first["artifacts"][0]["id"])
+        self.assertTrue(first["artifacts"][0]["id"].startswith("artifact-normalized_audio-"))
+        self.assertFalse(switched_source_retry["ok"])
+        self.assertEqual(switched_source_retry["code"], "path_conflict")
+        self.assertEqual(len(indexed["normalized_audio"]), 1)
+        self.assertEqual(normalized_bytes, wav_bytes(b"normalized-system-audio"))
+
     def test_existing_normalized_rejects_different_explicit_fallback_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)

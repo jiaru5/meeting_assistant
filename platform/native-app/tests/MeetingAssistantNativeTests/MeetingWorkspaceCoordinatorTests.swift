@@ -9,6 +9,9 @@ struct MeetingWorkspaceCoordinatorTests {
     @Test
     func startsAtMeetingsAndRoutesToOneTaskAtATime() {
         let coordinator = makeCoordinator()
+        coordinator.recordingDraft.title = "Previous meeting"
+        coordinator.recordingDraft.captureSystemAudio = false
+        coordinator.recordingDraft.captureMicrophoneAudio = true
 
         #expect(coordinator.route == .meetings)
         #expect(coordinator.currentSession == nil)
@@ -18,6 +21,9 @@ struct MeetingWorkspaceCoordinatorTests {
 
         #expect(coordinator.route == .newRecording)
         #expect(coordinator.currentSession == nil)
+        #expect(coordinator.recordingDraft.title.isEmpty)
+        #expect(coordinator.recordingDraft.captureSystemAudio == false)
+        #expect(coordinator.recordingDraft.captureMicrophoneAudio)
     }
 
     @Test
@@ -53,6 +59,15 @@ struct MeetingWorkspaceCoordinatorTests {
                         checksum: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
                     ),
                     RecordingCommandArtifact(
+                        id: "artifact-system",
+                        sessionID: "session-current",
+                        artifactType: "system_audio",
+                        path: "artifacts/system_audio.wav",
+                        captureStatus: "degraded",
+                        degradationReason: "System audio was recovered from the partial save.",
+                        checksum: "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+                    ),
+                    RecordingCommandArtifact(
                         id: "artifact-audio",
                         sessionID: "session-current",
                         artifactType: "mixed_audio",
@@ -67,20 +82,25 @@ struct MeetingWorkspaceCoordinatorTests {
 
         #expect(coordinator.activity == .idle)
         #expect(coordinator.currentSession?.status == "recorded")
-        #expect(coordinator.currentSession?.artifactCount == 2)
+        #expect(coordinator.currentSession?.artifactCount == 3)
         #expect(coordinator.currentSession?.hasProcessableAudio == true)
+        #expect(coordinator.currentSession?.processableAudioSources == [
+            MeetingProcessableAudioSource(id: "artifact-audio", artifactType: "mixed_audio"),
+        ])
+        #expect(coordinator.selectedProcessingAudioSourceID == "artifact-audio")
         #expect(coordinator.currentSession?.durationLabel == "01:05")
         #expect(coordinator.recentSessions.first?.id == "session-current")
     }
 
     @Test
-    func openingAnotherMeetingReplacesCurrentIdentityAndClearsTransientErrors() async {
+    func openingAnotherMeetingReplacesCurrentIdentityAndClearsTransientErrors() async throws {
         let first = summary(id: "session-first", title: "First", hasTranscript: true)
         let second = summary(id: "session-second", title: "Second", hasTranscript: false)
         let coordinator = makeCoordinator(initialSessions: [first, second])
 
         await coordinator.open(first)
-        coordinator.transcriptDidFailToLoad(TestFailure())
+        let firstLoad = try #require(coordinator.transcriptWillLoad(for: first.id))
+        coordinator.transcriptDidFailToLoad(TestFailure(), token: firstLoad)
         #expect(coordinator.transcriptLoadError != nil)
 
         await coordinator.open(second)
@@ -89,6 +109,66 @@ struct MeetingWorkspaceCoordinatorTests {
         #expect(coordinator.currentMeetingTitle == "Second")
         #expect(coordinator.transcriptLoadError == nil)
         #expect(coordinator.route == .meetingDetail)
+    }
+
+    @Test
+    func processingAudioSelectionUsesProviderCompatiblePriorityAndCommandSource() async {
+        let first = summary(
+            id: "session-first",
+            title: "First",
+            hasTranscript: false,
+            processableAudioSources: [
+                MeetingProcessableAudioSource(id: "artifact-system", artifactType: "system_audio"),
+                MeetingProcessableAudioSource(id: "artifact-mixed", artifactType: "mixed_audio"),
+            ]
+        )
+        let second = summary(
+            id: "session-second",
+            title: "Second",
+            hasTranscript: false,
+            processableAudioSources: [
+                MeetingProcessableAudioSource(id: "artifact-system-2", artifactType: "system_audio"),
+                MeetingProcessableAudioSource(
+                    id: "artifact-normalized",
+                    artifactType: "normalized_audio"
+                ),
+            ]
+        )
+        let fallback = summary(
+            id: "session-fallback",
+            title: "Fallback",
+            hasTranscript: false,
+            processableAudioSources: [
+                MeetingProcessableAudioSource(id: "artifact-system-3", artifactType: "system_audio"),
+                MeetingProcessableAudioSource(id: "artifact-microphone", artifactType: "microphone_audio"),
+            ]
+        )
+        let coordinator = makeCoordinator(initialSessions: [first, second, fallback])
+
+        await coordinator.open(first)
+        #expect(coordinator.selectedProcessingAudioSourceID == "artifact-mixed")
+        #expect(coordinator.selectableProcessingAudioSources.map(\.id) == ["artifact-mixed"])
+        #expect(!coordinator.selectProcessingAudioSource(id: "artifact-system"))
+        #expect(coordinator.processingRequestSourceArtifactID == nil)
+
+        await coordinator.open(second)
+        #expect(coordinator.selectableProcessingAudioSources.map(\.id) == ["artifact-normalized"])
+        #expect(coordinator.selectedProcessingAudioSourceID == "artifact-normalized")
+        #expect(coordinator.processingRequestSourceArtifactID == "artifact-normalized")
+
+        await coordinator.open(fallback)
+        #expect(coordinator.selectableProcessingAudioSources.map(\.id) == [
+            "artifact-system-3",
+            "artifact-microphone",
+        ])
+        #expect(coordinator.selectedProcessingAudioSourceID == "artifact-system-3")
+        #expect(coordinator.processingRequestSourceArtifactID == "artifact-system-3")
+        #expect(coordinator.selectProcessingAudioSource(id: "artifact-microphone"))
+        #expect(coordinator.processingRequestSourceArtifactID == "artifact-microphone")
+
+        await coordinator.open(first)
+        await coordinator.open(fallback)
+        #expect(coordinator.selectedProcessingAudioSourceID == "artifact-microphone")
     }
 
     @Test
@@ -143,7 +223,14 @@ struct MeetingWorkspaceCoordinatorTests {
 
         #expect(selected?.id == sessionID)
         #expect(selected?.hasProcessableAudio == true)
+        #expect(selected?.processableAudioSources == [
+            MeetingProcessableAudioSource(
+                id: "artifact-selected-audio",
+                artifactType: "mixed_audio"
+            ),
+        ])
         #expect(coordinator.currentSession == selected)
+        #expect(coordinator.selectedProcessingAudioSourceID == "artifact-selected-audio")
         #expect(checksumProbe.paths == [artifactURL.path])
         #expect(checksumProbe.mainThreadObservations == [false])
     }
@@ -180,11 +267,12 @@ struct MeetingWorkspaceCoordinatorTests {
     }
 
     @Test
-    func transcriptFailurePersistsAcrossDiagnosticsWithoutExposingTechnicalPath() async {
+    func transcriptFailurePersistsAcrossDiagnosticsWithoutExposingTechnicalPath() async throws {
         let meeting = summary(id: "session-broken", title: "Broken", hasTranscript: true)
         let coordinator = makeCoordinator(initialSessions: [meeting])
         await coordinator.open(meeting)
-        coordinator.transcriptDidFailToLoad(PathFailure())
+        let loadToken = try #require(coordinator.transcriptWillLoad(for: meeting.id))
+        coordinator.transcriptDidFailToLoad(PathFailure(), token: loadToken)
 
         #expect(coordinator.transcriptLoadError?.contains("/Users/jerry") == false)
         #expect(coordinator.transcriptTechnicalError?.contains("/Users/jerry/Meetings/broken.json") == true)
@@ -197,7 +285,7 @@ struct MeetingWorkspaceCoordinatorTests {
     }
 
     @Test
-    func unavailableTranscriptExplainsRegenerationWhenSavedAudioExists() async {
+    func unavailableRegisteredTranscriptRequiresRepairWithoutUnsafeReplacement() async throws {
         let meeting = summary(
             id: "session-transcribed-recovery",
             title: "Recovery",
@@ -207,15 +295,17 @@ struct MeetingWorkspaceCoordinatorTests {
         let coordinator = makeCoordinator(initialSessions: [meeting])
         await coordinator.open(meeting)
 
-        coordinator.transcriptDidFailToLoad(TestFailure())
+        let loadToken = try #require(coordinator.transcriptWillLoad(for: meeting.id))
+        coordinator.transcriptDidFailToLoad(TestFailure(), token: loadToken)
 
         #expect(coordinator.transcriptLoadError?.contains("original recording is still safe") == true)
-        #expect(coordinator.transcriptLoadError?.contains("Regenerate the transcript from the saved meeting audio") == true)
+        #expect(coordinator.transcriptLoadError?.contains("will not replace a registered transcript") == true)
+        #expect(coordinator.transcriptLoadError?.contains("Reload it after repairing") == true)
         #expect(coordinator.transcriptLoadError != nil)
     }
 
     @Test
-    func unavailableTranscriptWithoutAudioExplainsFailClosedDeletePath() async {
+    func unavailableTranscriptWithoutAudioExplainsFailClosedDeletePath() async throws {
         let meeting = summary(
             id: "session-transcribed-no-audio",
             title: "No audio",
@@ -226,26 +316,106 @@ struct MeetingWorkspaceCoordinatorTests {
         let coordinator = makeCoordinator(initialSessions: [meeting])
         await coordinator.open(meeting)
 
-        coordinator.transcriptDidFailToLoad(TestFailure())
+        let loadToken = try #require(coordinator.transcriptWillLoad(for: meeting.id))
+        coordinator.transcriptDidFailToLoad(TestFailure(), token: loadToken)
 
-        #expect(coordinator.transcriptLoadError?.contains("no processable audio for regeneration") == true)
+        #expect(coordinator.transcriptLoadError?.contains("available files are still safe") == true)
         #expect(coordinator.transcriptLoadError?.contains("delete the meeting") == true)
         #expect(coordinator.transcriptLoadError != nil)
     }
 
     @Test
-    func transcriptCompletionOnlyUpdatesTheCurrentSession() async {
+    func transcriptCompletionOnlyUpdatesTheCurrentLoadGeneration() async throws {
         let first = summary(id: "session-first", title: "First", hasTranscript: false)
         let second = summary(id: "session-second", title: "Second", hasTranscript: false)
         let coordinator = makeCoordinator(initialSessions: [first, second])
+        await coordinator.open(first)
+        let firstLoad = try #require(coordinator.transcriptWillLoad(for: first.id))
         await coordinator.open(second)
 
-        coordinator.transcriptDidLoad(for: "session-first")
+        coordinator.transcriptDidLoad(firstLoad)
         #expect(coordinator.currentSession?.hasTranscript == false)
 
-        coordinator.transcriptDidLoad(for: "session-second")
+        let secondLoad = try #require(coordinator.transcriptWillLoad(for: second.id))
+        coordinator.transcriptDidLoad(secondLoad)
         #expect(coordinator.currentSession?.hasTranscript == true)
         #expect(coordinator.currentSession?.status == "transcribed")
+    }
+
+    @Test
+    func transcriptLoadingOnlyStartsForCurrentSessionAndClearsAtTerminalTransitions() async throws {
+        let meeting = summary(id: "session-current", title: "Current", hasTranscript: false)
+        let coordinator = makeCoordinator(initialSessions: [meeting])
+        await coordinator.open(meeting)
+
+        #expect(coordinator.transcriptWillLoad(for: "session-other") == nil)
+        #expect(!coordinator.transcriptIsLoading)
+
+        let successfulLoad = try #require(coordinator.transcriptWillLoad(for: meeting.id))
+        #expect(coordinator.transcriptIsLoading)
+        coordinator.transcriptDidLoad(successfulLoad)
+        #expect(!coordinator.transcriptIsLoading)
+
+        let failedLoad = try #require(coordinator.transcriptWillLoad(for: meeting.id))
+        #expect(coordinator.transcriptIsLoading)
+        coordinator.transcriptDidFailToLoad(TestFailure(), token: failedLoad)
+        #expect(!coordinator.transcriptIsLoading)
+
+        _ = coordinator.transcriptWillLoad(for: meeting.id)
+        coordinator.beginNewRecording()
+        #expect(!coordinator.transcriptIsLoading)
+    }
+
+    @Test
+    func staleTranscriptLoadTokensCannotOverwriteABASessionOrSameSessionReloads() async throws {
+        let first = summary(id: "session-first", title: "First", hasTranscript: false)
+        let second = summary(id: "session-second", title: "Second", hasTranscript: false)
+        let coordinator = makeCoordinator(initialSessions: [first, second])
+
+        await coordinator.open(first)
+        let oldFirstLoad = try #require(coordinator.transcriptWillLoad(for: first.id))
+        await coordinator.open(second)
+        let secondLoad = try #require(coordinator.transcriptWillLoad(for: second.id))
+        await coordinator.open(first)
+        let currentFirstLoad = try #require(coordinator.transcriptWillLoad(for: first.id))
+
+        coordinator.transcriptDidFailToLoad(TestFailure(), token: oldFirstLoad)
+        coordinator.transcriptDidLoad(secondLoad)
+        #expect(coordinator.currentSession?.id == first.id)
+        #expect(coordinator.currentSession?.hasTranscript == false)
+        #expect(coordinator.transcriptIsLoading)
+        #expect(coordinator.transcriptLoadError == nil)
+
+        coordinator.transcriptDidLoad(currentFirstLoad)
+        #expect(coordinator.currentSession?.hasTranscript == true)
+        #expect(!coordinator.transcriptIsLoading)
+
+        let supersededReload = try #require(coordinator.transcriptWillLoad(for: first.id))
+        let currentReload = try #require(coordinator.transcriptWillLoad(for: first.id))
+        coordinator.transcriptDidFailToLoad(TestFailure(), token: supersededReload)
+        #expect(coordinator.transcriptIsLoading)
+        #expect(coordinator.transcriptLoadError == nil)
+
+        coordinator.transcriptDidFailToLoad(TestFailure(), token: currentReload)
+        #expect(!coordinator.transcriptIsLoading)
+        #expect(coordinator.transcriptLoadError != nil)
+    }
+
+    @Test
+    func transcriptTerminalStateDoesNotPullUserAwayFromChosenRoute() async throws {
+        let meeting = summary(id: "session-route", title: "Route", hasTranscript: false)
+        let coordinator = makeCoordinator(initialSessions: [meeting])
+        await coordinator.open(meeting)
+
+        let successfulLoad = try #require(coordinator.transcriptWillLoad(for: meeting.id))
+        coordinator.navigate(to: .diagnostics)
+        coordinator.transcriptDidLoad(successfulLoad)
+        #expect(coordinator.route == .diagnostics)
+
+        let failedLoad = try #require(coordinator.transcriptWillLoad(for: meeting.id))
+        coordinator.transcriptDidFailToLoad(TestFailure(), token: failedLoad)
+        #expect(coordinator.route == .diagnostics)
+        #expect(coordinator.transcriptLoadError != nil)
     }
 
     @Test
@@ -327,6 +497,50 @@ struct MeetingWorkspaceCoordinatorTests {
         #expect(coordinator.activity == .idle)
         #expect(coordinator.workspaceError == nil)
         #expect(coordinator.notice == nil)
+    }
+
+    @Test
+    func deletionReconciliationPreservesRecordedSessionTranscriptRepairSignal() async throws {
+        let workspace = try makeDeletionWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let sessionID = "session-recorded-transcript-repair"
+        try writeDeletionWorkspaceSession(
+            workspace: workspace,
+            sessionID: sessionID,
+            title: "Recorded transcript repair",
+            status: "recorded",
+            artifacts: [[
+                "id": "artifact-missing-transcript",
+                "session_id": sessionID,
+                "artifact_type": "transcript_text",
+                "path": "artifacts/transcript.json",
+                "capture_status": "available",
+                "checksum": "sha256:registered-but-missing",
+            ]]
+        )
+        let coordinator = makeCoordinator(workspaceURL: workspace)
+        coordinator.refreshSessions()
+        let recent = try #require(coordinator.recentSessions.first)
+
+        let openedSession = await coordinator.open(recent)
+        let opened = try #require(openedSession)
+        #expect(opened.status == "recorded")
+        #expect(opened.hasRegisteredTranscript)
+        #expect(!opened.hasTranscript)
+
+        coordinator.deletionWillStart()
+        let reconciliation = await coordinator.reconcileDeletionAttempt(
+            sessionID: sessionID,
+            commandReportedDeletion: false
+        )
+
+        guard case .sessionPresent(let refreshed) = reconciliation else {
+            Issue.record("Expected the recorded session to survive the failed delete attempt.")
+            return
+        }
+        #expect(refreshed.hasRegisteredTranscript)
+        #expect(!refreshed.hasTranscript)
+        #expect(coordinator.currentSession?.hasRegisteredTranscript == true)
     }
 
     @Test
@@ -430,6 +644,9 @@ struct MeetingWorkspaceCoordinatorTests {
         )
 
         #expect(coordinator.currentSession?.hasProcessableAudio == false)
+        #expect(coordinator.currentSession?.artifactCount == 0)
+        #expect(coordinator.currentSession?.processableAudioSources.isEmpty == true)
+        #expect(coordinator.selectedProcessingAudioSourceID == nil)
     }
 
     private func makeCoordinator(
@@ -451,7 +668,8 @@ struct MeetingWorkspaceCoordinatorTests {
         title: String,
         status: String? = nil,
         hasTranscript: Bool,
-        hasProcessableAudio: Bool = true
+        hasProcessableAudio: Bool = true,
+        processableAudioSources: [MeetingProcessableAudioSource] = []
     ) -> MeetingSessionSummary {
         MeetingSessionSummary(
             id: id,
@@ -464,7 +682,8 @@ struct MeetingWorkspaceCoordinatorTests {
             artifactCount: hasTranscript ? 3 : 2,
             hasTranscript: hasTranscript,
             hasSpeakerLabels: hasTranscript,
-            hasProcessableAudio: hasProcessableAudio
+            hasProcessableAudio: hasProcessableAudio,
+            processableAudioSources: processableAudioSources
         )
     }
 

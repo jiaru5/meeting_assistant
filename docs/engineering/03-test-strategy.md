@@ -39,7 +39,11 @@ Playwright 只在后续引入 Web UI 时作为 Web mocked/full-stack E2E 工具�
 
 MVP.1 `PV-MA-014` 的自动化关闭条件不能继续使用“六个 section 和所有按钮同时存在”的旧控制面断言。Swift Testing 必须覆盖任务路由、current-session 不变量、处理 eligibility、最近会议 projection 和删除 reset；app-bundle XCUITest 必须覆盖首次用户主链、回访用户重开和至少一个 blocked/failed 恢复链。关键状态截图只用于视觉层级审查，不能替代任务断言。3-5 名代表性本地 Mac 用户的无指导任务测试作为补充人工体验证据，记录完成、求助、误点、犹豫和状态理解；agent、XCUITest 或截图不得冒充真人研究结论。
 
-`DesignedNativeShellAppBundleTests` 是 MVP.1 任务级 app-bundle suite，至少覆盖 ready/blocked preflight、recording、saved/degraded、processing 进行中、processing failed/retry、停止保存失败重试、transcript load failure/reload、历史重开和删除 reset。可用 `MA_NATIVE_APP_TASK_XCUITEST=1 ./platform/native-app/scripts/test-app-bundle.sh` 单独运行；默认组件 fast gate 继续只编译并运行 Swift/hosted 测试，不因缺少 UI automation 环境而失败。
+真人体验记录使用 `./scripts/mvp1-experience-study.py` 的 `init`、`validate` 和 `report` 入口；工具只验证 3–5 份匿名参与者记录、人工 attestation 字段、三类任务字段和 open P0/P1 状态，不能独立证明参与者真人身份，不设置未确认的易用性阈值，也不把结构有效误写为产品验收通过。
+
+`DesignedNativeShellAppBundleTests` 是 MVP.1 任务级 app-bundle suite，至少覆盖录制/处理 readiness 解耦、麦克风意图权限、ready/blocked preflight、recording、saved/degraded、provider-preflight 一致的音频完整性检查与音频源优先级、processing 进行中、同源 processing failed/retry、停止保存失败重试、历史 `processing` 恢复、已登记 transcript 的 repair-only load failure/reload、长 transcript 固定操作栏、历史重开和删除 reset。provider 已登记但校验失败的输入不得降级为虚假可用 fallback；已登记但缺失、漂移或不可解码的 transcript 不得重新显示 Generate。suite 为 Meetings 空/非空、New recording、Recording live、Saved、Processing、Transcript 和 Diagnostics 关键状态附加保留截图；截图只在 test body 实际执行后才构成证据。可用 `MA_NATIVE_APP_TASK_XCUITEST=1 ./platform/native-app/scripts/test-app-bundle.sh` 单独运行；默认组件 fast gate 继续只编译并运行 Swift/hosted 测试，不因缺少 UI automation 环境而失败。
+
+accessibility identifier 和 SwiftUI source-contract 测试只证明 locator 与结构没有回退，不能替代 VoiceOver 在真实 app、真实窗口和键盘焦点下的实机走查。
 
 native-app 的默认组件 `test` gate 优先服务本地快速反馈：Swift Testing 覆盖 view model、契约 decode、状态机和文件边界，XCTest-hosted SwiftUI smoke 覆盖关键 locator/source contract。真实 app-bundle XCUITest 仍是 native UI 关键状态证据，但执行入口拆为显式命令 `./platform/native-app/scripts/test-app-bundle.sh`，或通过 `MA_NATIVE_APP_RUN_XCUITEST=1 ./platform/native-app/scripts/test.sh` 纳入同一次组件测试。验证矩阵和交付说明必须区分默认 fast gate 与 app-bundle UI smoke；只有运行 app-bundle 入口后，才能把 `.app` 启动、窗口定位和 `XCUIApplication()` locator 作为本轮证据。
 

@@ -25,6 +25,8 @@ public enum MeetingTaskAccessibilityID {
     public static let recordingTimer = "ma.meetingDetail.recordingTimer"
     public static let audioSummary = "ma.meetingDetail.audioSummary"
     public static let savedSummary = "ma.meetingDetail.savedSummary"
+    public static let audioSourcePicker = "ma.meetingDetail.audioSourcePicker"
+    public static let transcriptToolbar = "ma.meetingDetail.transcriptToolbar"
     public static let transcriptLoadError = "ma.meetingDetail.transcriptLoadError"
     public static let reloadTranscript = "ma.meetingDetail.reloadTranscript"
     public static let recoveryStatus = "ma.meetingDetail.recoveryStatus"
@@ -79,8 +81,8 @@ func recordingSavedArtifactSummary(
 ) -> String {
     guard !artifacts.isEmpty else {
         return fallbackCount == 1
-            ? "1 meeting file is available."
-            : "\(fallbackCount) meeting files are available."
+            ? "1 meeting file is registered."
+            : "\(fallbackCount) meeting files are registered."
     }
 
     let requestedArtifacts = artifacts.filter { !recordingArtifactWasNotRequested($0) }
@@ -175,12 +177,19 @@ func historicalMeetingRecoveryStatus(_ status: String) -> String? {
     }
 }
 
-func meetingUserStatus(_ status: String, hasTranscript: Bool) -> String {
+func meetingUserStatus(
+    _ status: String,
+    hasTranscript: Bool,
+    hasRegisteredTranscript: Bool = false
+) -> String {
     if let recoveryStatus = historicalMeetingRecoveryStatus(status) {
         return recoveryStatus
     }
     if hasTranscript {
         return "Transcript ready"
+    }
+    if hasRegisteredTranscript {
+        return "Transcript needs repair"
     }
     switch status {
     case "transcribed":
@@ -203,7 +212,6 @@ public struct DesignedNativeShellView: View {
     private let startRecording: (MeetingRecordingDraft) -> Void
     private let stopRecording: () -> Void
     private let startProcessing: () -> Void
-    private let retryProcessing: () -> Void
     private let openMeeting: (MeetingSessionSummary) -> Void
     private let reloadTranscript: () -> Void
     private let confirmDelete: () -> Void
@@ -221,7 +229,6 @@ public struct DesignedNativeShellView: View {
         startRecording: @escaping (MeetingRecordingDraft) -> Void = { _ in },
         stopRecording: @escaping () -> Void = {},
         startProcessing: @escaping () -> Void = {},
-        retryProcessing: @escaping () -> Void = {},
         openMeeting: @escaping (MeetingSessionSummary) -> Void = { _ in },
         reloadTranscript: @escaping () -> Void = {},
         confirmDelete: @escaping () -> Void = {}
@@ -236,7 +243,6 @@ public struct DesignedNativeShellView: View {
         self.startRecording = startRecording
         self.stopRecording = stopRecording
         self.startProcessing = startProcessing
-        self.retryProcessing = retryProcessing
         self.openMeeting = openMeeting
         self.reloadTranscript = reloadTranscript
         self.confirmDelete = confirmDelete
@@ -250,24 +256,35 @@ public struct DesignedNativeShellView: View {
 
             Divider()
 
-            ScrollView {
-                routeContent
-                    .padding(.horizontal, 44)
-                    .padding(.vertical, 34)
-                    .frame(maxWidth: 960, alignment: .topLeading)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            VStack(spacing: 0) {
+                if showsTranscriptToolbar {
+                    transcriptToolbar
+                    Divider()
+                }
+
+                ScrollView {
+                    routeContent
+                        .padding(.horizontal, 44)
+                        .padding(.vertical, 34)
+                        .frame(maxWidth: 960, alignment: .topLeading)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
             }
             .background(Color(nsColor: .windowBackgroundColor))
         }
         .frame(minWidth: 980, minHeight: 680)
         .accessibilityIdentifier(DesignedNativeShellAccessibilityID.root)
         .onChange(of: permissionViewModel.state) { _, readiness in
-            recordingViewModel.updateReadiness(readiness)
+            synchronizeRecordingReadiness(readiness)
             processingViewModel.updateReadiness(readiness)
+        }
+        .onChange(of: coordinator.recordingDraft.captureMicrophoneAudio) { _, _ in
+            synchronizeRecordingReadiness(permissionViewModel.state)
         }
         .task {
             coordinator.refreshSessions()
             await autoRefreshPreflightIfNeeded()
+            synchronizeRecordingReadiness(permissionViewModel.state)
         }
     }
 
@@ -488,7 +505,13 @@ public struct DesignedNativeShellView: View {
                         .fill(statusColor(meeting.status, hasTranscript: meeting.hasTranscript).opacity(0.12))
                         .frame(width: 40, height: 40)
                     Image(systemName: meeting.hasTranscript ? "doc.text" : "waveform")
-                        .foregroundStyle(statusColor(meeting.status, hasTranscript: meeting.hasTranscript))
+                        .foregroundStyle(
+                            statusColor(
+                                meeting.status,
+                                hasTranscript: meeting.hasTranscript,
+                                hasRegisteredTranscript: meeting.hasRegisteredTranscript
+                            )
+                        )
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -502,14 +525,30 @@ public struct DesignedNativeShellView: View {
 
                 Spacer()
 
-                Text(meetingUserStatus(meeting.status, hasTranscript: meeting.hasTranscript))
+                Text(
+                    meetingUserStatus(
+                        meeting.status,
+                        hasTranscript: meeting.hasTranscript,
+                        hasRegisteredTranscript: meeting.hasRegisteredTranscript
+                    )
+                )
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(statusColor(meeting.status, hasTranscript: meeting.hasTranscript))
+                    .foregroundStyle(
+                        statusColor(
+                            meeting.status,
+                            hasTranscript: meeting.hasTranscript,
+                            hasRegisteredTranscript: meeting.hasRegisteredTranscript
+                        )
+                    )
                     .padding(.horizontal, 9)
                     .padding(.vertical, 5)
                     .background(
                         Capsule().fill(
-                            statusColor(meeting.status, hasTranscript: meeting.hasTranscript).opacity(0.1)
+                            statusColor(
+                                meeting.status,
+                                hasTranscript: meeting.hasTranscript,
+                                hasRegisteredTranscript: meeting.hasRegisteredTranscript
+                            ).opacity(0.1)
                         )
                     )
 
@@ -522,7 +561,9 @@ public struct DesignedNativeShellView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(displayTitle(meeting)), \(meetingUserStatus(meeting.status, hasTranscript: meeting.hasTranscript)), \(meetingMetadata(meeting))")
+        .accessibilityLabel(
+            "\(displayTitle(meeting)), \(meetingUserStatus(meeting.status, hasTranscript: meeting.hasTranscript, hasRegisteredTranscript: meeting.hasRegisteredTranscript)), \(meetingMetadata(meeting))"
+        )
         .accessibilityIdentifier(MeetingTaskAccessibilityID.meetingRow(meeting.id))
     }
 
@@ -631,7 +672,8 @@ public struct DesignedNativeShellView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
-            if permissionViewModel.state.phase != .ready {
+            if !captureIsReady,
+               permissionViewModel.state.phase != .checking {
                 Button("Check again") {
                     Task {
                         await permissionViewModel.refresh(workspaceURL: coordinator.workspaceURL)
@@ -673,15 +715,14 @@ public struct DesignedNativeShellView: View {
             processingView
         } else if processingViewModel.state.phase == .failed {
             processingFailureView
+        } else if coordinator.transcriptIsLoading {
+            transcriptLoadingView
+        } else if let transcriptLoadError = coordinator.transcriptLoadError {
+            transcriptLoadFailureView(transcriptLoadError)
         } else if let sessionStatus = coordinator.currentSession?.status,
                   historicalMeetingRecoveryStatus(sessionStatus) != nil {
             historicalMeetingRecoveryView(status: sessionStatus)
-        } else if let transcriptLoadError = coordinator.transcriptLoadError {
-            transcriptLoadFailureView(transcriptLoadError)
-        } else if transcriptViewModel.state.contentState != .missing,
-                  coordinator.currentSession?.hasTranscript == true
-                    || processingViewModel.state.phase == .completed
-                    || processingViewModel.state.phase == .degraded {
+        } else if meetingDetailShowsTranscriptResult {
             transcriptResultView
         } else {
             savedMeetingView
@@ -834,6 +875,7 @@ public struct DesignedNativeShellView: View {
                     Text("This runs locally and keeps the original recording unchanged. Speaker labels may fall back to transcript-only mode.")
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    processingAudioSourcePicker
                     Button("Generate transcript") {
                         startProcessing()
                     }
@@ -899,7 +941,7 @@ public struct DesignedNativeShellView: View {
                 title: "The transcript could not be created",
                 message: processingViewModel.state.errorMessage ?? "Processing stopped before a transcript was created.",
                 actionTitle: "Retry transcript",
-                action: retryProcessing,
+                action: startProcessing,
                 actionIdentifier: ProcessingAccessibilityID.retryButton
             )
             technicalDetailsDisclosure
@@ -922,11 +964,29 @@ public struct DesignedNativeShellView: View {
                 Text(historicalMeetingRecoveryMessage(status: status))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("Start a new recording") {
-                    coordinator.beginNewRecording()
+                if status == "processing", currentSessionHasProcessableAudio {
+                    if processingViewModel.state.phase == .blocked {
+                        Button("Open diagnostics") {
+                            coordinator.navigate(to: .diagnostics)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    } else {
+                        processingAudioSourcePicker
+                        Button("Retry transcript") {
+                            startProcessing()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!processingViewModel.canStart)
+                        .keyboardShortcut("p", modifiers: [.command, .option])
+                        .accessibilityIdentifier(ProcessingAccessibilityID.startButton)
+                    }
+                } else {
+                    Button("Start a new recording") {
+                        coordinator.beginNewRecording()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier(MeetingTaskAccessibilityID.startNewRecording)
                 }
-                .buttonStyle(.borderedProminent)
-                .accessibilityIdentifier(MeetingTaskAccessibilityID.startNewRecording)
             }
             .cardStyle()
             secondaryMeetingActions
@@ -945,6 +1005,9 @@ public struct DesignedNativeShellView: View {
             explanation = "Transcript creation did not reach a confirmed result."
         default:
             explanation = "This meeting ended before it reached a usable result."
+        }
+        if status == "processing", currentSessionHasProcessableAudio {
+            return "\(explanation) The original meeting audio is still safe. Confirm the audio source, then retry the transcript."
         }
         return "\(explanation) Existing meeting files were not changed. Start a new recording or delete this incomplete meeting."
     }
@@ -965,14 +1028,6 @@ public struct DesignedNativeShellView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier(MeetingTaskAccessibilityID.transcriptLoadError)
-                if currentSessionHasProcessableAudio {
-                    Button("Regenerate transcript", action: startProcessing)
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .disabled(!processingViewModel.canStart)
-                        .keyboardShortcut("p", modifiers: [.command, .option])
-                        .accessibilityIdentifier(ProcessingAccessibilityID.startButton)
-                }
                 HStack(spacing: 10) {
                     Button("Reload transcript", action: reloadTranscript)
                         .buttonStyle(.bordered)
@@ -985,34 +1040,40 @@ public struct DesignedNativeShellView: View {
         }
     }
 
-    private var transcriptResultView: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .top) {
-                pageHeader(
-                    eyebrow: processingViewModel.state.phase == .degraded ? "TRANSCRIPT READY — SPEAKER LABELS LIMITED" : "TRANSCRIPT READY",
-                    title: coordinator.currentMeetingTitle,
-                    subtitle: transcriptViewModel.state.summary,
-                    identifier: MeetingTaskAccessibilityID.detailHeading
-                )
-                Spacer(minLength: 20)
-                HStack(spacing: 8) {
-                    Button("Copy") {
-                        Task { await transcriptActionViewModel.copyTranscript() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!transcriptActionViewModel.state.canCopy)
-                    .keyboardShortcut("c", modifiers: [.command, .option])
-                    .accessibilityIdentifier(TranscriptActionAccessibilityID.copyButton)
-
-                    Button("Export…") {
-                        Task { await transcriptActionViewModel.exportTranscript() }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!transcriptActionViewModel.state.canExport)
-                    .keyboardShortcut("e", modifiers: [.command, .option])
-                    .accessibilityIdentifier(TranscriptActionAccessibilityID.exportButton)
+    private var transcriptLoadingView: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            pageHeader(
+                eyebrow: "OPENING TRANSCRIPT",
+                title: coordinator.currentMeetingTitle,
+                subtitle: "Meeting Assistant is checking the saved local transcript before showing it.",
+                identifier: MeetingTaskAccessibilityID.detailHeading
+            )
+            HStack(spacing: 14) {
+                ProgressView()
+                    .controlSize(.large)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Opening transcript…")
+                        .font(.headline)
+                    Text("The meeting remains on this Mac. You can review it as soon as the file and checksum checks finish.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .cardStyle()
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Opening transcript. The meeting remains on this Mac.")
+        }
+    }
+
+    private var transcriptResultView: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            pageHeader(
+                eyebrow: processingViewModel.state.phase == .degraded ? "TRANSCRIPT READY — SPEAKER LABELS LIMITED" : "TRANSCRIPT READY",
+                title: coordinator.currentMeetingTitle,
+                subtitle: transcriptViewModel.state.summary,
+                identifier: MeetingTaskAccessibilityID.detailHeading
+            )
 
             if let degradationReason = transcriptViewModel.state.degradationReason {
                 Label(
@@ -1030,7 +1091,7 @@ public struct DesignedNativeShellView: View {
                 .foregroundStyle(.secondary)
             }
 
-            VStack(spacing: 0) {
+            LazyVStack(spacing: 0) {
                 ForEach(Array(transcriptViewModel.state.segments.enumerated()), id: \.element.id) { index, segment in
                     transcriptRow(segment)
                     if index < transcriptViewModel.state.segments.count - 1 {
@@ -1049,6 +1110,92 @@ public struct DesignedNativeShellView: View {
             secondaryMeetingActions
             technicalDetailsDisclosure
         }
+    }
+
+    @ViewBuilder
+    private var processingAudioSourcePicker: some View {
+        let selectableSources = coordinator.selectableProcessingAudioSources
+        if !selectableSources.isEmpty {
+            Picker(
+                "Audio for transcript",
+                selection: Binding<String?>(
+                    get: { coordinator.selectedProcessingAudioSourceID },
+                    set: { sourceID in
+                        guard let sourceID else {
+                            return
+                        }
+                        _ = coordinator.selectProcessingAudioSource(id: sourceID)
+                    }
+                )
+            ) {
+                ForEach(selectableSources) { source in
+                    Text(processingAudioSourceDisplayName(source.artifactType))
+                        .tag(Optional(source.id))
+                }
+            }
+            .pickerStyle(.menu)
+            .accessibilityLabel("Audio for transcript")
+            .accessibilityHint("Choose which saved local audio file will be transcribed.")
+            .accessibilityIdentifier(MeetingTaskAccessibilityID.audioSourcePicker)
+        }
+    }
+
+    private func processingAudioSourceDisplayName(_ artifactType: String) -> String {
+        switch artifactType {
+        case "mixed_audio":
+            return "Meeting audio (recommended)"
+        case "normalized_audio":
+            return "Prepared meeting audio"
+        case "system_audio":
+            return "System audio"
+        case "microphone_audio":
+            return "Microphone"
+        default:
+            return "Meeting audio"
+        }
+    }
+
+    private var meetingDetailShowsTranscriptResult: Bool {
+        coordinator.route == .meetingDetail
+            && transcriptViewModel.state.contentState != .missing
+            && (coordinator.currentSession?.hasTranscript == true
+                || processingViewModel.state.phase == .completed
+                || processingViewModel.state.phase == .degraded)
+    }
+
+    private var showsTranscriptToolbar: Bool {
+        meetingDetailShowsTranscriptResult
+            && !processingViewModel.state.isBusy
+            && processingViewModel.state.phase != .failed
+            && coordinator.transcriptLoadError == nil
+    }
+
+    private var transcriptToolbar: some View {
+        HStack(spacing: 12) {
+            Label("Transcript actions", systemImage: "doc.text")
+                .font(.headline)
+            Spacer()
+            Button("Copy") {
+                Task { await transcriptActionViewModel.copyTranscript() }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!transcriptActionViewModel.state.canCopy)
+            .keyboardShortcut("c", modifiers: [.command, .option])
+            .accessibilityIdentifier(TranscriptActionAccessibilityID.copyButton)
+
+            Button("Export…") {
+                Task { await transcriptActionViewModel.exportTranscript() }
+            }
+            .buttonStyle(.bordered)
+            .disabled(!transcriptActionViewModel.state.canExport)
+            .keyboardShortcut("e", modifiers: [.command, .option])
+            .accessibilityIdentifier(TranscriptActionAccessibilityID.exportButton)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(MeetingTaskAccessibilityID.transcriptToolbar)
     }
 
     private func transcriptRow(_ segment: TranscriptReviewVisibleSegment) -> some View {
@@ -1212,7 +1359,10 @@ public struct DesignedNativeShellView: View {
             }
             .cardStyle()
 
-            PermissionDependencyStatusView(viewModel: permissionViewModel)
+            PermissionDependencyStatusView(
+                viewModel: permissionViewModel,
+                captureMicrophoneAudio: coordinator.recordingDraft.captureMicrophoneAudio
+            )
                 .frame(minHeight: 360)
                 .cardStyle(padding: 0)
 
@@ -1312,9 +1462,12 @@ public struct DesignedNativeShellView: View {
     }
 
     private var readinessTitle: String {
+        if captureIsReady {
+            return "Ready to record"
+        }
         switch permissionViewModel.state.phase {
         case .ready:
-            return "Ready to record"
+            return "Recording setup needs attention"
         case .checking:
             return "Checking your Mac…"
         case .blocked:
@@ -1327,13 +1480,19 @@ public struct DesignedNativeShellView: View {
     }
 
     private var readinessMessage: String {
+        if captureIsReady {
+            if permissionViewModel.state.canRunProcessing {
+                return "Your current screen and audio choices are ready."
+            }
+            return "Recording is ready. Local transcript tools still need attention, but you can safely record now and create the transcript later."
+        }
         switch permissionViewModel.state.phase {
         case .ready:
-            return "Screen and audio settings are ready."
+            return "A permission required by the current recording choices still needs attention."
         case .checking:
             return "Meeting Assistant is checking permissions and local transcript tools."
         case .blocked:
-            return "A required permission or local transcript tool is missing. Your settings are preserved; open Diagnostics for details."
+            return "A permission or capture requirement for the current recording choices is missing. Your settings are preserved; open Diagnostics for details."
         case .failed:
             return "The readiness check could not finish. Nothing was recorded; try the check again."
         case .idle:
@@ -1342,6 +1501,9 @@ public struct DesignedNativeShellView: View {
     }
 
     private var readinessIcon: String {
+        if captureIsReady {
+            return "checkmark.circle.fill"
+        }
         switch permissionViewModel.state.phase {
         case .ready:
             return "checkmark.circle.fill"
@@ -1355,6 +1517,9 @@ public struct DesignedNativeShellView: View {
     }
 
     private var readinessColor: Color {
+        if captureIsReady {
+            return .green
+        }
         switch permissionViewModel.state.phase {
         case .ready:
             return .green
@@ -1363,6 +1528,23 @@ public struct DesignedNativeShellView: View {
         case .blocked, .failed:
             return .orange
         }
+    }
+
+    private var captureIsReady: Bool {
+        permissionViewModel.state.canStartRecording(
+            captureMicrophoneAudio: coordinator.recordingDraft.captureMicrophoneAudio
+        )
+    }
+
+    @MainActor
+    private func synchronizeRecordingReadiness(
+        _ readiness: PermissionDependencyStatusState
+    ) {
+        recordingViewModel.updateReadiness(
+            canStartRecording: readiness.canStartRecording(
+                captureMicrophoneAudio: coordinator.recordingDraft.captureMicrophoneAudio
+            )
+        )
     }
 
     private var recordingAudioSummary: String {
@@ -1445,11 +1627,15 @@ public struct DesignedNativeShellView: View {
         return parts.joined(separator: " · ")
     }
 
-    private func statusColor(_ status: String, hasTranscript: Bool = false) -> Color {
+    private func statusColor(
+        _ status: String,
+        hasTranscript: Bool = false,
+        hasRegisteredTranscript: Bool = false
+    ) -> Color {
         if historicalMeetingRecoveryStatus(status) != nil {
             return .orange
         }
-        if status == "transcribed", !hasTranscript {
+        if !hasTranscript, hasRegisteredTranscript || status == "transcribed" {
             return .orange
         }
         return .accentColor

@@ -1442,7 +1442,13 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("autoRefreshPreflightOnAppear", app_source)
         self.assertIn("self.workspaceURL = recordingWorkspaceURL", app_source)
         self.assertIn(".onChange(of: permissionViewModel.state)", shell_source)
-        self.assertIn("recordingViewModel.updateReadiness(readiness)", shell_source)
+        self.assertIn("synchronizeRecordingReadiness(readiness)", shell_source)
+        self.assertIn("recordingViewModel.updateReadiness(", shell_source)
+        self.assertIn("readiness.canStartRecording(", shell_source)
+        self.assertIn(
+            "captureMicrophoneAudio: coordinator.recordingDraft.captureMicrophoneAudio",
+            shell_source,
+        )
         self.assertIn("processingViewModel.updateReadiness(readiness)", shell_source)
         self.assertIn('.keyboardShortcut("r", modifiers: [.command, .option])', shell_source)
         self.assertIn('.keyboardShortcut("s", modifiers: [.command, .option])', shell_source)

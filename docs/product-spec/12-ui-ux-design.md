@@ -70,27 +70,29 @@ MVP.1 的目标不是给既有控制面换皮，而是让用户围绕会议任�
 
 1. 只能有一套稳定主导航；默认入口是 Meetings，主导航同时提供 New recording 和 Settings/diagnostics。
 2. Meetings 的空状态必须有明确的新建录制动作；最近会议行至少显示用户可读标题或开始时间、会话状态、时长或产物摘要和 transcript 可用性，并可重新打开同一会话。
-3. New recording 必须使用原生表单控件承载可选标题、当前支持的录制目标、系统音频和麦克风意图。不可用的 target 不得伪装成可选成功路径。
+3. New recording 必须使用原生表单控件承载可选标题、当前支持的录制目标、系统音频和麦克风意图。不可用的 target 不得伪装成可选成功路径；录制 readiness 只按当前捕获意图计算，麦克风关闭时麦克风拒绝不阻断，processing 依赖缺失也不阻断录制。
 4. Recording live 必须使用独立的专注状态，持续显示录制指示、已录制时长、目标/音轨摘要和唯一突出的 Stop；其他会话动作不得与 Stop 等权。
-5. Saved 状态必须先解释成功、降级或缺失产物，再突出“生成 transcript”；不得自动触发 processing。
-6. Processing 使用同一会话 detail，展示整体进度、原始媒体安全边界和失败恢复；成功或 transcript-only 降级后进入 transcript 成果视图。
-7. Transcript 是主要成果页：时间戳、匿名 speaker label 和正文形成稳定层级；匿名身份免责声明是页面级提示，不在每段重复；Copy/Export 放在稳定 toolbar，Delete 放在次级 destructive menu 或区域。
+5. Saved 状态必须先解释成功、降级或缺失产物，再突出“生成 transcript”；不得自动触发 processing。存在 `mixed_audio` 时默认选择它；真正未登记 `mixed_audio` 时以用户语言呈现通过安全校验的 `normalized_audio`，或列出可用原始音频并要求用户确认处理输入。已登记但损坏的首选输入不得被当成“缺失”后静默回退。
+6. Processing 使用同一会话 detail，展示整体进度、原始媒体安全边界和失败恢复；成功或 transcript-only 降级后进入 transcript 成果视图。失败重试沿用已确认的同一输入；已有 `normalized_audio` 时不得继续展示会触发 `path_conflict` 的换源入口，除非未来契约增加显式 replace confirmation。
+7. Transcript 是主要成果页：时间戳、匿名 speaker label 和正文形成稳定层级；匿名身份免责声明是页面级提示，不在每段重复；Copy/Export 放在滚动长 transcript 时仍保持可见的稳定 toolbar，segments 使用惰性容器；Delete 放在次级 destructive menu 或区域。
 8. 原始 session id、artifact type、命令名、错误码、runtime/model 路径和绝对文件路径只能在显式展开的 Technical details 或 Settings/diagnostics 中出现。测试 locator 可以继续使用英文稳定标识，但不得成为默认用户文案。
 
 上下文状态与恢复：
 
 1. 任何时候都必须能用一个短句回答当前状态，并用一个明显动作回答下一步。
 2. blocked、failed、missing 和 degraded 状态必须同时表达：发生了什么、哪些数据仍安全、用户可以做什么。可恢复场景提供 Open Settings、Check again、Retry、Choose meeting 或 Start a new recording 中的适用动作。
-3. 录制开始失败允许修改设置后重试；停止保存失败必须保留当前 session 并允许再次停止或明确安全退出，不能把唯一恢复路径藏在 diagnostics。
-4. transcript 读取失败必须是持久错误状态，并提供重新加载或返回 Meetings；不能静默保持旧 transcript 或空白页。
-5. 删除确认只出现一套，明确显示用户可读会话标题、受影响的 workspace 内数据和 workspace 外导出保留；成功后不得继续显示旧 session 的处理、transcript 或 action 控件。
-6. 进行中状态、阻断状态和 destructive 状态使用原生语义色及 control role；普通信息不使用状态色制造噪音。
+3. Open Settings 必须匹配实际缺失权限：Screen Recording 和 Microphone 分别进入对应 macOS Privacy 面板；不能用同一个 Screen Recording 链接处理所有权限错误。
+4. 录制开始失败允许修改设置后重试；停止保存失败必须保留当前 session 并允许再次停止或明确安全退出，不能把唯一恢复路径藏在 diagnostics。
+5. 重新打开持久状态为 `processing` 的会话时，不得永久显示为不可恢复；当前 App 内没有活动任务且安全音频仍可用时，显示“上次处理被中断”并提供重新选择音频和重试。
+6. transcript 读取失败必须是持久错误状态，并提供重新加载或返回 Meetings；不能静默保持旧 transcript 或空白页。已登记 transcript 需要文件修复时，不得以“重新生成”替代尚未定义的 replace/repair 契约。文件读取、JSON 解码和 checksum 校验在后台执行，加载期间显示持久状态并拒绝旧会话结果覆盖当前会话。
+7. 删除确认只出现一套，明确显示用户可读会话标题、受影响的 workspace 内数据和 workspace 外导出保留；成功后不得继续显示旧 session 的处理、transcript 或 action 控件。
+8. 进行中状态、阻断状态和 destructive 状态使用原生语义色及 control role；普通信息不使用状态色制造噪音。
 
 任务级可测试性：
 
 1. 新入口使用 `ma.meetings.*`、`ma.newRecording.*`、`ma.meetingDetail.*` 和 `ma.diagnostics.*` 语义前缀；既有 command 按钮 identifier 可保留，避免破坏真实本机 smoke。
 2. XCUITest 必须证明一次只存在一个可点击主操作；不只断言所有控件都存在。
-3. 关键任务 fixture 至少覆盖空 workspace、ready、blocked、recording、saved/degraded、processing、processing failed/retry、transcript available、history reopen 和 delete reset。
+3. 关键任务 fixture 至少覆盖空 workspace、ready、capture-ready/processing-blocked、麦克风意图开关、blocked、recording、saved/degraded、fallback 音频选择、processing、processing failed/retry、historical processing recovery、transcript available、长 transcript、history reopen 和 delete reset。
 4. 可选截图证据覆盖 Meetings empty/recent、New recording、Recording live、Saved、Processing、Transcript 和 Diagnostics；截图只能辅助层级审查，不能替代任务和状态断言。
 
 ## 页面或本地工具状态要求

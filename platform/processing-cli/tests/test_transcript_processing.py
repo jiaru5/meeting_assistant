@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from meeting_assistant_cli.audio_processing import run_audio_normalization
 from meeting_assistant_cli.cli import main
 from meeting_assistant_cli.transcript_processing import run_generate_transcript
 from meeting_assistant_cli.workspace_contract import ContractError, create_session, load_session, register_artifact, session_directory
@@ -192,6 +193,55 @@ class TranscriptProcessingTests(unittest.TestCase):
 
         self.assertTrue(response["ok"])
         self.assertEqual(payload["source_artifact_id"], "artifact-normalized_audio")
+
+    def test_default_retry_reuses_normalized_audio_derived_from_compressed_mixed_audio(self) -> None:
+        observed_audio_paths: list[Path] = []
+
+        def compressed_audio_normalizer(source: Path, destination: Path) -> None:
+            self.assertEqual(source.suffix, ".m4a")
+            destination.write_bytes(wav_bytes(b"normalized-from-compressed"))
+
+        def successful_adapter(audio_path: Path, language: str | None, runtime: str | None) -> list[dict]:
+            observed_audio_paths.append(audio_path)
+            return [{"segment_id": "segment-1", "start_ms": 0, "end_ms": 1000, "text": "retry succeeded"}]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.m4a", b"compressed-audio")])
+
+            normalization = run_audio_normalization(
+                "session-1",
+                workspace=workspace,
+                normalizer=compressed_audio_normalizer,
+            )
+            normalized_artifact = normalization["artifacts"][0]
+            normalized_path = session_dir / "artifacts" / "normalized_audio.wav"
+
+            with mock.patch(
+                "meeting_assistant_cli.transcript_processing.run_audio_normalization",
+                side_effect=AssertionError("default retry must reuse the existing normalized_audio artifact"),
+            ) as retry_normalization:
+                retry = run_generate_transcript(
+                    "session-1",
+                    workspace=workspace,
+                    source_artifact_id=None,
+                    adapter=successful_adapter,
+                )
+
+            payload = transcript_payload(retry)
+            normalized_artifacts = [
+                artifact
+                for artifact in load_session(session_dir)["artifacts"]
+                if artifact["artifact_type"] == "normalized_audio"
+            ]
+
+        self.assertTrue(normalization["ok"])
+        self.assertTrue(retry["ok"])
+        self.assertNotEqual(retry.get("code"), "path_conflict")
+        self.assertEqual(payload["source_artifact_id"], normalized_artifact["id"])
+        self.assertEqual(observed_audio_paths, [normalized_path])
+        self.assertEqual(normalized_artifacts, [normalized_artifact])
+        retry_normalization.assert_not_called()
 
     def test_generate_transcript_can_use_explicit_fallback_audio_when_mixed_audio_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

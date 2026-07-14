@@ -178,7 +178,7 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         SwiftUIViewSourceContract.assertAppRootUsesDesignedNativeShell()
     }
 
-    func testUnavailableTranscribedMeetingIsHostedWithRegenerationBinding() async {
+    func testUnavailableTranscribedMeetingIsHostedWithRepairOnlyBinding() async {
         let meeting = MeetingSessionSummary(
             id: "session-hosted-transcript-recovery",
             title: "Transcript recovery",
@@ -200,7 +200,12 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
             initialSessions: [meeting]
         )
         await coordinator.open(meeting)
-        coordinator.transcriptDidFailToLoad(HostedTranscriptFailure())
+        if let loadToken = coordinator.transcriptWillLoad(for: meeting.id) {
+            coordinator.transcriptDidFailToLoad(
+                HostedTranscriptFailure(),
+                token: loadToken
+            )
+        }
         let permissionViewModel = PermissionDependencyStatusViewModel(
             runner: UnusedDependencyCheckRunner(),
             initialState: readyReadinessState()
@@ -242,7 +247,7 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
         host.assertHosted()
         XCTAssertEqual(coordinator.route, .meetingDetail)
         XCTAssertTrue(processingViewModel.canStart)
-        XCTAssertTrue(coordinator.transcriptLoadError?.contains("Regenerate the transcript") == true)
+        XCTAssertTrue(coordinator.transcriptLoadError?.contains("will not replace a registered transcript") == true)
         SwiftUIViewSourceContract.assertDesignedNativeShellUsesAccessibleStates()
         SwiftUIViewSourceContract.assertAppRootUsesDesignedNativeShell()
     }
@@ -1122,14 +1127,17 @@ private enum SwiftUIViewSourceContract {
             source,
             contains: [
                 "Text(\"Meeting Assistant Readiness\")",
-                "Button(\"Open Privacy Settings\")",
+                "Button(\"Open Screen Recording Settings\")",
+                "Button(\"Open Microphone Settings\")",
                 "appIdentity.permissionRepairSummary",
                 "appIdentity.staleIdentityRepairSummary",
                 "openPrivacySettings()",
+                "openMicrophoneSettings()",
                 ".accessibilityIdentifier(PermissionDependencyAccessibilityID.heading)",
                 ".accessibilityIdentifier(PermissionDependencyAccessibilityID.summary)",
                 ".accessibilityIdentifier(PermissionDependencyAccessibilityID.checkButton)",
                 ".accessibilityIdentifier(PermissionDependencyAccessibilityID.openPrivacySettingsButton)",
+                ".accessibilityIdentifier(PermissionDependencyAccessibilityID.openMicrophoneSettingsButton)",
                 ".accessibilityIdentifier(PermissionDependencyAccessibilityID.appIdentity)",
                 "identifier: PermissionDependencyAccessibilityID.permissionsSection",
                 "identifier: PermissionDependencyAccessibilityID.dependenciesSection",
@@ -1281,6 +1289,11 @@ private enum SwiftUIViewSourceContract {
                 ".accessibilityIdentifier(MeetingTaskAccessibilityID.target)",
                 ".accessibilityIdentifier(MeetingTaskAccessibilityID.systemAudioToggle)",
                 ".accessibilityIdentifier(MeetingTaskAccessibilityID.microphoneToggle)",
+                ".accessibilityIdentifier(MeetingTaskAccessibilityID.audioSourcePicker)",
+                ".accessibilityIdentifier(MeetingTaskAccessibilityID.transcriptToolbar)",
+                "LazyVStack(spacing: 0)",
+                "Picker(",
+                "Button(\"Retry transcript\")",
                 "switch coordinator.route",
                 "case .meetings:",
                 "case .newRecording:",
@@ -1290,12 +1303,12 @@ private enum SwiftUIViewSourceContract {
                 "title: \"New recording\"",
                 "title: \"Set up your recording\"",
                 "title: \"Settings & diagnostics\"",
-                "PermissionDependencyStatusView(viewModel: permissionViewModel)",
+                "PermissionDependencyStatusView(",
+                "captureMicrophoneAudio: coordinator.recordingDraft.captureMicrophoneAudio",
                 ".accessibilityIdentifier(TranscriptReviewAccessibilityID.segmentRow(segment.id))",
                 ".accessibilityIdentifier(TranscriptActionAccessibilityID.copyButton)",
                 ".accessibilityIdentifier(TranscriptActionAccessibilityID.exportButton)",
                 ".accessibilityIdentifier(TranscriptActionAccessibilityID.deleteButton)",
-                "Button(\"Regenerate transcript\", action: startProcessing)",
                 "Button(\"Reload transcript\", action: reloadTranscript)",
                 "return \"Transcript unavailable\"",
                 "historicalMeetingRecoveryStatus(sessionStatus) != nil",
@@ -1312,8 +1325,10 @@ private enum SwiftUIViewSourceContract {
                 "secondaryMeetingActions",
                 "technicalDetailsDisclosure",
                 ".onChange(of: permissionViewModel.state)",
-                "recordingViewModel.updateReadiness(readiness)",
+                "synchronizeRecordingReadiness(readiness)",
                 "processingViewModel.updateReadiness(readiness)",
+                ".onChange(of: coordinator.recordingDraft.captureMicrophoneAudio)",
+                "readiness.canStartRecording(",
                 ".keyboardShortcut(\"r\", modifiers: [.command, .option])",
                 ".keyboardShortcut(\"s\", modifiers: [.command, .option])",
                 ".keyboardShortcut(\"p\", modifiers: [.command, .option])",
@@ -1340,6 +1355,7 @@ private enum SwiftUIViewSourceContract {
                 "if hasTranscript || status == \"transcribed\"",
                 "return \"Saved meeting\"",
                 "return \"Saved\"",
+                "Button(\"Regenerate transcript\", action: startProcessing)",
             ],
             file: file,
             line: line
@@ -1369,8 +1385,8 @@ private enum SwiftUIViewSourceContract {
                 "recordingDraft: MeetingRecordingDraft(",
                 "let readinessState = configuration.initialReadinessState()",
                 "let autoRefreshPreflightOnAppear = configuration.autoRefreshPreflightOnAppear()",
-                "self.captureSystemAudio = configuration.captureSystemAudio",
-                "self.captureMicrophoneAudio = configuration.captureMicrophoneAudio",
+                "captureSystemAudio: configuration.captureSystemAudio",
+                "captureMicrophoneAudio: configuration.captureMicrophoneAudio",
                 "let dependencyCheckRunner = configuration.makeDependencyCheckRunner()",
                 "runner: dependencyCheckRunner",
                 "MeetingAssistantNativeLaunchCoordinator.shared.install()",
@@ -1418,6 +1434,17 @@ private enum SwiftUIViewSourceContract {
                 "processingViewModel.bindSession(",
                 "sessionStatus: \"recorded\"",
                 "sessionStatus: session.status",
+                "workspaceCoordinator.processingRequestSourceArtifactID",
+                "!currentSession.hasRegisteredTranscript",
+                "workspaceCoordinator.transcriptLoadError == nil",
+                "sourceArtifactID: sourceArtifactID",
+                "Task.detached(priority: .userInitiated)",
+                "workspaceCoordinator.transcriptWillLoad(for:",
+                "workspaceCoordinator.isCurrentTranscriptLoad(loadToken)",
+                "workspaceCoordinator.transcriptDidLoad(loadToken)",
+                ".onChange(of: workspaceCoordinator.recordingDraft)",
+                "captureSystemAudio: workspaceCoordinator.recordingDraft.captureSystemAudio",
+                "captureMicrophoneAudio: workspaceCoordinator.recordingDraft.captureMicrophoneAudio",
                 "let reconciliation = await workspaceCoordinator.reconcileDeletionAttempt(",
                 "switch reconciliation",
                 "case .sessionPresent(let session):",
@@ -1508,8 +1535,8 @@ private enum SwiftUIViewSourceContract {
                 "private func isNativeAppXCTestEnvironment(_ environment: [String: String]) -> Bool {\n    #if DEBUG\n    return environment[\"MA_NATIVE_APP_XCTEST\"] == \"1\"",
                 "#else\n        return \"blocked\"\n        #endif",
                 "#else\n    return false\n    #endif",
-                "let input = try transcriptInput(for: sessionID, allowGeneratedTestFixture: false)",
-                "return try TranscriptReviewWorkspaceLoader.load(",
+                "let input = try await transcriptInput(",
+                "try TranscriptReviewWorkspaceLoader.load(",
             ],
             file: file,
             line: line
@@ -1672,6 +1699,10 @@ private func readyReadinessState() -> PermissionDependencyStatusState {
             ok: true,
             requestID: "local-ui-ready",
             checks: [
+                dependencyCheck("platform.os", status: "supported", required: true, ok: true),
+                dependencyCheck("platform.macos_version", status: "supported", required: true, ok: true),
+                dependencyCheck("platform.cpu_arch", status: "supported", required: true, ok: true),
+                dependencyCheck("workspace.writable", status: "writable", required: true, ok: true),
                 dependencyCheck("permission.screen_recording", status: "granted", required: false, ok: true),
                 dependencyCheck("permission.microphone", status: "granted", required: false, ok: true),
                 dependencyCheck("media_tool.ffmpeg", status: "available", required: true, ok: true),

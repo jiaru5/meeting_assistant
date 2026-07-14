@@ -34,7 +34,7 @@
 
 | 权限 ID | 操作 | 主体 | 条件 | 允许结果 | 拒绝结果 |
 |---|---|---|---|---|---|
-| PERM-MA-001 | `meeting_session.create` | `local_os_user` | 应用具有必要的 macOS 录屏、麦克风和文件写入权限 | 创建会话并启动录制或导入 | 返回本地权限错误和修复提示 |
+| PERM-MA-001 | `meeting_session.create` | `local_os_user` | 原生录制具有录屏和 workspace 文件写入权限；只有用户启用麦克风录制意图时才要求麦克风权限；导入媒体继续以用户显式选择的文件权限为边界 | 创建会话并启动录制或导入 | 返回与当前操作对应的本地权限错误和修复提示 |
 | PERM-MA-002 | `meeting_session.read` | `local_os_user` | 会话位于当前 workspace 且文件可读 | 读取会话元数据和产物 | 返回不可访问或文件缺失错误 |
 | PERM-MA-003 | `recording_artifact.write` | `local_process` | 目标路径位于当前会话目录 | 写入视频、音频、transcript 或 speaker labels | 拒绝写入并记录失败原因 |
 | PERM-MA-004 | `transcript.export` | `local_os_user` | 用户显式选择复制或导出 | 输出 transcript 文本、Markdown 或 JSON | 返回导出失败，不自动重试到外部服务 |
@@ -45,7 +45,7 @@
 | 权限 | 用途 | MVP 要求 |
 |---|---|---|
 | 录屏权限 | 录制会议窗口、屏幕共享或屏幕区域 | 原生录制路径必须检测权限并给出可执行提示 |
-| 麦克风权限 | 录制现场讨论或本机麦克风输入 | 必须检测权限并在缺失时阻断麦克风录制 |
+| 麦克风权限 | 录制现场讨论或本机麦克风输入 | 必须检测权限；只有当前录制启用麦克风意图时才阻断开始录制，关闭麦克风意图后不得继续作为录制阻断项 |
 | 文件访问权限 | 写入本地 workspace、读取导入媒体、导出 transcript | 必须限制在用户选择或配置的路径 |
 
 ## 审计
@@ -65,3 +65,5 @@ Phase 1 不做远程审计系统，但必须保留本地处理日志以便排错
 1. 必须区分未授权、权限被拒绝、文件不可读、依赖缺失和处理失败。
 2. 权限错误必须给出用户可执行的本地修复提示。
 3. 不得把隐藏按钮或禁用控件视为安全控制；本地命令执行层仍需检查路径和权限。
+4. 录制 readiness 与 transcript processing readiness 必须分开计算：FFmpeg、转写 runtime/model 或 speaker-labeling 状态只阻断对应处理，不得阻断一场本来可以安全保存的录制。
+5. 修复入口必须打开与缺失权限对应的 macOS Privacy 面板；麦克风拒绝不能只提供 Screen Recording 设置入口。

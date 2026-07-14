@@ -1,6 +1,32 @@
 import CryptoKit
 import Foundation
 
+public struct MeetingProcessableAudioSource: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let artifactType: String
+
+    public init(id: String, artifactType: String) {
+        self.id = id
+        self.artifactType = artifactType
+    }
+
+    static func providerCompatibleSources(
+        from candidates: [MeetingProcessableAudioSource]
+    ) -> [MeetingProcessableAudioSource] {
+        if let mixedAudio = candidates.first(where: { $0.artifactType == "mixed_audio" }) {
+            return [mixedAudio]
+        }
+
+        if let normalizedAudio = candidates.first(where: { $0.artifactType == "normalized_audio" }) {
+            return [normalizedAudio]
+        }
+
+        return ["system_audio", "microphone_audio"].compactMap { artifactType in
+            candidates.first(where: { $0.artifactType == artifactType })
+        }
+    }
+}
+
 public struct MeetingSessionSummary: Identifiable, Equatable, Sendable {
     public let id: String
     public let title: String?
@@ -11,8 +37,10 @@ public struct MeetingSessionSummary: Identifiable, Equatable, Sendable {
     public let durationLabel: String?
     public let artifactCount: Int
     public let hasTranscript: Bool
+    public let hasRegisteredTranscript: Bool
     public let hasSpeakerLabels: Bool
     public let hasProcessableAudio: Bool
+    public let processableAudioSources: [MeetingProcessableAudioSource]
 
     public init(
         id: String,
@@ -25,7 +53,9 @@ public struct MeetingSessionSummary: Identifiable, Equatable, Sendable {
         artifactCount: Int,
         hasTranscript: Bool,
         hasSpeakerLabels: Bool,
-        hasProcessableAudio: Bool
+        hasProcessableAudio: Bool,
+        processableAudioSources: [MeetingProcessableAudioSource] = [],
+        hasRegisteredTranscript: Bool? = nil
     ) {
         self.id = id
         self.title = title
@@ -36,8 +66,10 @@ public struct MeetingSessionSummary: Identifiable, Equatable, Sendable {
         self.durationLabel = durationLabel
         self.artifactCount = artifactCount
         self.hasTranscript = hasTranscript
+        self.hasRegisteredTranscript = hasRegisteredTranscript ?? hasTranscript
         self.hasSpeakerLabels = hasSpeakerLabels
         self.hasProcessableAudio = hasProcessableAudio
+        self.processableAudioSources = processableAudioSources
     }
 }
 
@@ -168,10 +200,10 @@ public struct MeetingSessionWorkspaceRepository: Sendable {
         return MeetingSessionWorkspaceSnapshot(sessions: sessions, issues: issues)
     }
 
-    /// Strictly validates one user-selected meeting, including registered
-    /// artifact checksums. Recent-list loading intentionally defers this
-    /// payload work so a large meeting archive cannot make app startup hash
-    /// every historical media file.
+    /// Strictly validates one user-selected meeting, including every checksum
+    /// the processing provider verifies before accepting a transcript request.
+    /// Recent-list loading intentionally defers payload hashing so a large
+    /// meeting archive cannot make app startup hash every historical media file.
     public func loadSelectedSession(
         workspaceURL: URL,
         sessionID: String
@@ -391,6 +423,86 @@ public struct MeetingSessionWorkspaceRepository: Sendable {
             "microphone_audio",
             "normalized_audio",
         ]
+        let processingIntegrityTypes: Set<String> = [
+            "screen_video",
+            "system_audio",
+            "microphone_audio",
+            "mixed_audio",
+            "normalized_audio",
+        ]
+        let pathSafeReadableArtifacts = readableArtifacts.filter { artifact in
+            artifactIsUsableFile(
+                artifact,
+                sessionRoot: sessionRoot,
+                contentValidation: .projection
+            )
+        }
+        let processingIntegrityArtifacts = metadata.artifacts.filter { artifact in
+            processingIntegrityTypes.contains(artifact.artifactType)
+                && artifact.checksum?.isEmpty == false
+        }
+        let processingValidatedArtifacts = processingIntegrityArtifacts.filter { artifact in
+            artifactIsUsableFile(
+                artifact,
+                sessionRoot: sessionRoot,
+                contentValidation: contentValidation
+            )
+        }
+        let processingIntegrityPasses =
+            processingValidatedArtifacts.count == processingIntegrityArtifacts.count
+        let processingValidatedIDs = Set(processingValidatedArtifacts.map(\.id))
+        let processableAudioCandidates: [MeetingProcessableAudioSource] = readableArtifacts
+            .compactMap { artifact in
+                guard processableAudioTypes.contains(artifact.artifactType) else {
+                    return nil
+                }
+                return MeetingProcessableAudioSource(
+                    id: artifact.id,
+                    artifactType: artifact.artifactType
+                )
+            }
+        let providerCompatibleAudioSources = MeetingProcessableAudioSource.providerCompatibleSources(
+            from: processableAudioCandidates
+        )
+        let processableAudioSources = processingIntegrityPasses
+            ? providerCompatibleAudioSources.filter { processingValidatedIDs.contains($0.id) }
+            : []
+        let transcriptCandidates = pathSafeReadableArtifacts.filter {
+            $0.artifactType == "transcript_text"
+        }
+        let transcriptArtifacts = transcriptCandidates.filter { artifact in
+            artifactIsUsableFile(
+                artifact,
+                sessionRoot: sessionRoot,
+                contentValidation: contentValidation
+            )
+        }
+        let speakerLabelCandidates = pathSafeReadableArtifacts.filter {
+            $0.artifactType == "speaker_labels"
+        }
+        let speakerLabelArtifacts = speakerLabelCandidates.filter { artifact in
+            artifactIsUsableFile(
+                artifact,
+                sessionRoot: sessionRoot,
+                contentValidation: contentValidation
+            )
+        }
+        let contentValidatedIDs = Set(
+            processingValidatedArtifacts.map(\.id)
+                + transcriptArtifacts.map(\.id)
+                + speakerLabelArtifacts.map(\.id)
+        )
+        let contentCheckedIDs = Set(
+            processingIntegrityArtifacts.map(\.id)
+                + transcriptCandidates.map(\.id)
+                + speakerLabelCandidates.map(\.id)
+        )
+        let artifactCount = pathSafeReadableArtifacts.filter { artifact in
+            if contentCheckedIDs.contains(artifact.id) {
+                return contentValidatedIDs.contains(artifact.id)
+            }
+            return true
+        }.count
         return MeetingSessionSummary(
             id: metadata.id,
             title: metadata.title,
@@ -402,30 +514,13 @@ public struct MeetingSessionWorkspaceRepository: Sendable {
                 startedAt: metadata.startedAt,
                 endedAt: metadata.endedAt
             ),
-            artifactCount: metadata.artifacts.count,
-            hasTranscript: readableArtifacts.contains { artifact in
-                artifact.artifactType == "transcript_text"
-                    && artifactIsUsableFile(
-                        artifact,
-                        sessionRoot: sessionRoot,
-                        contentValidation: contentValidation
-                    )
-            },
-            hasSpeakerLabels: readableArtifacts.contains { artifact in
-                artifact.artifactType == "speaker_labels"
-                    && artifactIsUsableFile(
-                        artifact,
-                        sessionRoot: sessionRoot,
-                        contentValidation: contentValidation
-                    )
-            },
-            hasProcessableAudio: readableArtifacts.contains { artifact in
-                processableAudioTypes.contains(artifact.artifactType)
-                    && artifactIsUsableFile(
-                        artifact,
-                        sessionRoot: sessionRoot,
-                        contentValidation: contentValidation
-                    )
+            artifactCount: artifactCount,
+            hasTranscript: !transcriptArtifacts.isEmpty,
+            hasSpeakerLabels: !speakerLabelArtifacts.isEmpty,
+            hasProcessableAudio: !processableAudioSources.isEmpty,
+            processableAudioSources: processableAudioSources,
+            hasRegisteredTranscript: metadata.artifacts.contains {
+                $0.artifactType == "transcript_text"
             }
         )
     }

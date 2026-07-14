@@ -4,6 +4,12 @@ import XCTest
 
 @MainActor
 final class DesignedNativeShellAppBundleTests: XCTestCase {
+    private enum RegisteredTranscriptFailure: String, CaseIterable {
+        case missing
+        case checksumDrift = "checksum-drift"
+        case corruptJSON = "corrupt-json"
+    }
+
     private enum ID {
         static let meetingsHeading = "ma.meetings.heading"
         static let meetingsEmpty = "ma.meetings.empty"
@@ -28,6 +34,8 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         static let recordingTimer = "ma.meetingDetail.recordingTimer"
         static let audioSummary = "ma.meetingDetail.audioSummary"
         static let savedSummary = "ma.meetingDetail.savedSummary"
+        static let audioSourcePicker = "ma.meetingDetail.audioSourcePicker"
+        static let transcriptToolbar = "ma.meetingDetail.transcriptToolbar"
         static let transcriptLoadError = "ma.meetingDetail.transcriptLoadError"
         static let reloadTranscript = "ma.meetingDetail.reloadTranscript"
         static let recoveryStatus = "ma.meetingDetail.recoveryStatus"
@@ -36,6 +44,8 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
 
         static let diagnosticsHeading = "ma.diagnostics.heading"
         static let diagnosticsWorkspacePath = "ma.diagnostics.workspacePath"
+        static let openScreenRecordingSettings = "ma.permissionDependency.openPrivacySettingsButton"
+        static let openMicrophoneSettings = "ma.permissionDependency.openMicrophoneSettingsButton"
 
         // These command identifiers are shared with the component controls. The
         // surrounding page identifiers above prove which MVP.1 task owns them.
@@ -96,12 +106,14 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertExists(ID.meetingsEmpty, in: app)
         assertText("Record your first meeting", in: app)
         assertOnlyPrimaryTaskActions([ID.newRecordingButton], in: app)
+        attachScreenshot("01-meetings-empty", of: app)
 
         tapButton(ID.newRecordingButton, in: app)
         assertElement(ID.newRecordingHeading, in: app, contains: "Set up your recording")
         assertElement(ID.screenTarget, in: app, contains: "Entire screen")
         assertExists(ID.readiness, in: app)
         assertText("Ready to record", in: app)
+        attachScreenshot("02-new-recording-ready", of: app)
 
         replaceText(in: ID.titleField, with: "MVP.1 planning review", in: app)
         setToggle(ID.systemAudio, to: true, in: app)
@@ -116,16 +128,19 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertExists(ID.recordingTimer, in: app)
         assertElement(ID.audioSummary, in: app, contains: "System audio")
         assertOnlyPrimaryTaskActions([ID.stopRecording], in: app)
+        attachScreenshot("03-recording-live", of: app)
 
         tapButton(ID.stopRecording, in: app)
         assertElement(ID.detailHeading, in: app, contains: "MVP.1 planning review")
         assertElement(ID.savedSummary, in: app, contains: "2 meeting files are ready")
         assertOnlyPrimaryTaskActions([ID.generateTranscript], in: app)
+        attachScreenshot("04-recording-saved", of: app)
 
         tapButton(ID.generateTranscript, in: app)
         assertElement(ID.detailHeading, in: app, contains: "MVP.1 planning review")
         assertText("The meeting transcript is ready for review.", in: app)
         assertOnlyPrimaryTaskActions([ID.copyTranscript, ID.exportTranscript], in: app)
+        attachScreenshot("06-transcript-ready", of: app)
 
         tapButton(ID.copyTranscript, in: app)
         assertElement(ID.actionSuccess, in: app, contains: "Transcript copied")
@@ -142,6 +157,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertElement(ID.meetingsHeading, in: app, contains: "Meetings")
         assertExists(ID.recentMeetings, in: app)
         assertOnlyPrimaryTaskActions([ID.newRecordingButton], in: app)
+        attachScreenshot("00-meetings-recent", of: app)
 
         tapButton(ID.meetingRow(sessionID), in: app)
         assertElement(ID.detailHeading, in: app, contains: "Transcript Review Fixture")
@@ -164,6 +180,37 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertDoesNotExist(ID.exportTranscript, in: app)
     }
 
+    func testLongTranscriptKeepsCopyAndExportVisibleWhileContentScrolls() {
+        let app = launchApp(fixture: "transcript-long")
+        let sessionID = "session-app-ui-long-transcript"
+
+        tapButton(ID.meetingRow(sessionID), in: app)
+        assertElement(ID.detailHeading, in: app, contains: "Long Transcript Fixture")
+        assertExists(ID.transcriptToolbar, in: app)
+
+        let contentScrollView = app.scrollViews.allElementsBoundByIndex.first {
+            $0.exists && $0.frame.width > 300
+        }
+        XCTAssertNotNil(contentScrollView, "Expected a transcript content scroll view.")
+        for _ in 0..<5 {
+            contentScrollView?.swipeUp()
+        }
+
+        let toolbar = app.descendants(matching: .any)
+            .matching(identifier: ID.transcriptToolbar)
+            .firstMatch
+        let copy = app.descendants(matching: .button)
+            .matching(identifier: ID.copyTranscript)
+            .firstMatch
+        let export = app.descendants(matching: .button)
+            .matching(identifier: ID.exportTranscript)
+            .firstMatch
+        XCTAssertTrue(toolbar.exists && toolbar.isHittable)
+        XCTAssertTrue(copy.exists && copy.isHittable)
+        XCTAssertTrue(export.exists && export.isHittable)
+        assertOnlyPrimaryTaskActions([ID.copyTranscript, ID.exportTranscript], in: app)
+    }
+
     func testStartFailureRemainsVisibleAcrossNavigationAndOffersRecovery() {
         let app = launchApp(fixture: "start-failure")
 
@@ -183,6 +230,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertElement(ID.diagnosticsHeading, in: app, contains: "Keep Meeting Assistant ready")
         assertExists(ID.diagnosticsWorkspacePath, in: app)
         assertOnlyPrimaryTaskActions([], in: app)
+        attachScreenshot("07-diagnostics", of: app)
 
         tapButton(ID.newRecordingNavigation, in: app)
         assertElement(ID.newRecordingHeading, in: app, contains: "Set up your recording")
@@ -203,7 +251,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
 
         assertElement(ID.newRecordingHeading, in: app, contains: "Set up your recording")
         assertElement(ID.readiness, in: app, contains: "Setup needs attention")
-        assertText("A required permission or local transcript tool is missing", in: app)
+        assertText("A permission or capture requirement", in: app)
         assertOnlyPrimaryTaskActions(
             [ID.checkAgain],
             disabled: [ID.startRecording],
@@ -217,6 +265,52 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
             disabled: [ID.startRecording],
             in: app
         )
+
+        tapButton(ID.diagnosticsNavigation, in: app)
+        assertExists(ID.openScreenRecordingSettings, in: app)
+        assertDoesNotExist(ID.openMicrophoneSettings, in: app)
+    }
+
+    func testMissingTranscriptToolsDoNotBlockASafeRecording() {
+        let app = launchApp(fixture: "capture-ready-processing-blocked")
+
+        tapButton(ID.newRecordingButton, in: app)
+
+        assertElement(ID.readiness, in: app, contains: "Ready to record")
+        assertElement(ID.readiness, in: app, contains: "create the transcript later")
+        assertOnlyPrimaryTaskActions([ID.startRecording], in: app)
+        tapButton(ID.startRecording, in: app)
+        assertElement(ID.detailStatus, in: app, contains: "Recording")
+        assertOnlyPrimaryTaskActions([ID.stopRecording], in: app)
+    }
+
+    func testMicrophonePermissionOnlyBlocksWhenMicrophoneIsRequested() {
+        let app = launchApp(fixture: "microphone-denied")
+
+        tapButton(ID.newRecordingButton, in: app)
+        assertToggle(ID.microphone, isOn: true, in: app)
+        assertElement(ID.readiness, in: app, contains: "Setup needs attention")
+        assertOnlyPrimaryTaskActions(
+            [ID.checkAgain],
+            disabled: [ID.startRecording],
+            in: app
+        )
+
+        setToggle(ID.microphone, to: false, in: app)
+        assertElement(ID.readiness, in: app, contains: "Ready to record")
+        assertOnlyPrimaryTaskActions([ID.startRecording], in: app)
+
+        setToggle(ID.microphone, to: true, in: app)
+        assertElement(ID.readiness, in: app, contains: "Setup needs attention")
+        assertOnlyPrimaryTaskActions(
+            [ID.checkAgain],
+            disabled: [ID.startRecording],
+            in: app
+        )
+
+        tapButton(ID.diagnosticsNavigation, in: app)
+        assertExists(ID.openMicrophoneSettings, in: app)
+        assertDoesNotExist(ID.openScreenRecordingSettings, in: app)
     }
 
     func testSavedDegradedMeetingExplainsSafeFilesBeforeProcessing() {
@@ -253,7 +347,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
             sessionID: sessionID,
             status: "processing"
         )
-        let app = launchApp(workspaceURL: workspaceURL)
+        let app = launchApp(fixture: "ready", workspaceURL: workspaceURL)
 
         let row = element(ID.meetingRow(sessionID), in: app)
         XCTAssertTrue(row.label.contains("Transcript interrupted"))
@@ -261,12 +355,63 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         tapButton(ID.meetingRow(sessionID), in: app)
 
         assertElement(ID.recoveryStatus, in: app, contains: "Meeting needs attention")
-        assertText("Existing meeting files were not changed", in: app)
-        assertOnlyPrimaryTaskActions([ID.startNewRecording], in: app)
-        assertDoesNotExist(ID.generateTranscript, in: app)
+        assertText("The original meeting audio is still safe", in: app)
+        assertText("Confirm the audio source", in: app)
+        assertExists(ID.audioSourcePicker, in: app)
+        assertOnlyPrimaryTaskActions([ID.generateTranscript], in: app)
+        XCTAssertTrue(button(ID.generateTranscript, in: app).label.contains("Retry transcript"))
+        assertDoesNotExist(ID.startNewRecording, in: app)
         assertDoesNotExist(ID.retryProcessing, in: app)
         assertExists(ID.deleteMeeting, in: app)
         assertExists(ID.technicalDetails, in: app)
+
+        tapButton(ID.generateTranscript, in: app)
+        assertText("The meeting transcript is ready for review", in: app)
+        assertOnlyPrimaryTaskActions([ID.copyTranscript, ID.exportTranscript], in: app)
+    }
+
+    func testFallbackAudioPickerSendsTheSelectedMicrophoneArtifactID() throws {
+        let sessionID = "session-app-ui-fallback-audio"
+        let workspaceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MeetingAssistantNative-FallbackAudio-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: workspaceURL) }
+        try materializeFallbackAudioWorkspace(
+            workspaceURL: workspaceURL,
+            sessionID: sessionID
+        )
+        let processingFixture = try AppProcessingProcessFixture(
+            mode: "success",
+            workspaceURL: workspaceURL
+        )
+        defer { processingFixture.cleanup() }
+        let app = launchApp(
+            fixture: "ready",
+            workspaceURL: workspaceURL,
+            processingFixture: processingFixture
+        )
+
+        tapButton(ID.meetingRow(sessionID), in: app)
+        let picker = element(ID.audioSourcePicker, in: app)
+        XCTAssertTrue(picker.isHittable)
+        XCTAssertTrue(picker.value as? String == "System audio")
+        picker.click()
+        let microphone = app.menuItems["Microphone"].firstMatch
+        XCTAssertTrue(microphone.waitForExistence(timeout: 5))
+        microphone.click()
+        XCTAssertEqual(picker.value as? String, "Microphone")
+
+        tapButton(ID.generateTranscript, in: app)
+        assertText("The meeting transcript is ready for review", in: app)
+        XCTAssertEqual(
+            try processingFixture.invocationLines().first,
+            [
+                ["generate", "transcript"].joined(separator: "_"),
+                "--session-id",
+                sessionID,
+                "--source-artifact-id",
+                "artifact-fallback-microphone",
+            ].joined(separator: " ")
+        )
     }
 
     func testProcessingRunningLocksNavigationAndExposesNoCompetingTaskAction() {
@@ -280,6 +425,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertElement(ID.processingStatus, in: app, contains: "Transcribing meeting audio")
         assertText("The original recording is safe while local processing runs", in: app)
         assertOnlyPrimaryTaskActions([], in: app)
+        attachScreenshot("05-processing", of: app)
         XCTAssertFalse(
             button(ID.meetingsNavigation, in: app).isEnabled,
             "Expected task navigation to stay locked while processing is running."
@@ -295,6 +441,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
 
         assertText("The transcript could not be created", in: app)
         assertText("The original recording is unchanged and safe to retry", in: app)
+        assertDoesNotExist(ID.audioSourcePicker, in: app)
         assertOnlyPrimaryTaskActions([ID.retryProcessing], in: app)
         XCTAssertTrue(button(ID.retryProcessing, in: app).label.contains("Retry transcript"))
 
@@ -324,7 +471,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertOnlyPrimaryTaskActions([ID.stopRecording], in: app)
     }
 
-    func testTranscribedMeetingWithMissingTranscriptRegeneratesFromSavedAudio() {
+    func testTranscribedMeetingWithMissingTranscriptRequiresRepairWithoutReplacement() {
         let app = launchApp(fixture: "transcript-missing-recoverable")
         let sessionID = "session-app-ui-transcript-missing-recoverable"
 
@@ -332,16 +479,10 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         tapButton(ID.meetingRow(sessionID), in: app)
 
         assertElement(ID.transcriptLoadError, in: app, contains: "original recording is still safe")
-        assertElement(ID.transcriptLoadError, in: app, contains: "Regenerate the transcript from the saved meeting audio")
-        assertOnlyPrimaryTaskActions([ID.generateTranscript], in: app)
-        XCTAssertTrue(button(ID.generateTranscript, in: app).label.contains("Regenerate transcript"))
+        assertElement(ID.transcriptLoadError, in: app, contains: "will not replace a registered transcript")
+        assertOnlyPrimaryTaskActions([], in: app)
+        assertDoesNotExist(ID.generateTranscript, in: app)
         assertExists(ID.reloadTranscript, in: app)
-
-        tapButton(ID.generateTranscript, in: app)
-
-        assertDoesNotExist(ID.transcriptLoadError, in: app)
-        assertText("The meeting transcript is ready for review", in: app)
-        assertOnlyPrimaryTaskActions([ID.copyTranscript, ID.exportTranscript], in: app)
     }
 
     func testTranscribedMeetingWithoutAudioFailsClosedAndCanBeDeleted() {
@@ -350,7 +491,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
 
         tapButton(ID.meetingRow(sessionID), in: app)
 
-        assertElement(ID.transcriptLoadError, in: app, contains: "no processable audio for regeneration")
+        assertElement(ID.transcriptLoadError, in: app, contains: "available files are still safe")
         assertOnlyPrimaryTaskActions([], in: app)
         assertDoesNotExist(ID.generateTranscript, in: app)
         assertExists(ID.reloadTranscript, in: app)
@@ -385,14 +526,16 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertElement(ID.detailHeading, in: app, contains: "Unreadable transcript fixture")
         assertElement(ID.transcriptLoadError, in: app, contains: "The original recording is still safe")
         assertText("The transcript could not be opened", in: app)
-        assertOnlyPrimaryTaskActions([ID.generateTranscript], in: app)
+        assertOnlyPrimaryTaskActions([], in: app)
+        assertDoesNotExist(ID.generateTranscript, in: app)
         assertExists(ID.reloadTranscript, in: app)
         assertDoesNotExist(ID.copyTranscript, in: app)
         assertDoesNotExist(ID.exportTranscript, in: app)
 
         tapButton(ID.reloadTranscript, in: app)
         assertElement(ID.transcriptLoadError, in: app, contains: "The original recording is still safe")
-        assertOnlyPrimaryTaskActions([ID.generateTranscript], in: app)
+        assertOnlyPrimaryTaskActions([], in: app)
+        assertDoesNotExist(ID.generateTranscript, in: app)
         assertExists(ID.reloadTranscript, in: app)
         assertDoesNotExist(ID.copyTranscript, in: app)
         assertDoesNotExist(ID.exportTranscript, in: app)
@@ -420,6 +563,54 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         XCTAssertEqual(artifacts?.first?["artifact_type"] as? String, "transcript_text")
         XCTAssertEqual(artifacts?.first?["path"] as? String, "artifacts/transcript.json")
         XCTAssertTrue((artifacts?.first?["checksum"] as? String)?.hasPrefix("sha256:") == true)
+    }
+
+    func testRecordedWorkspaceMeetingWithRegisteredBrokenTranscriptNeverOffersGenerate() throws {
+        for failure in RegisteredTranscriptFailure.allCases {
+            let workspaceURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "MeetingAssistantNative-RegisteredTranscript-\(failure.rawValue)-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: workspaceURL) }
+            let sessionID = "session-app-ui-recorded-transcript-\(failure.rawValue)"
+            try materializeRecordedTranscriptRepairWorkspace(
+                workspaceURL: workspaceURL,
+                sessionID: sessionID,
+                failure: failure
+            )
+            let app = launchApp(
+                fixture: "transcript-action-delete-failure",
+                workspaceURL: workspaceURL
+            )
+
+            let row = element(ID.meetingRow(sessionID), in: app)
+            XCTAssertTrue(row.label.contains("Transcript needs repair"))
+            XCTAssertFalse(row.label.contains("Ready to transcribe"))
+            tapButton(ID.meetingRow(sessionID), in: app)
+
+            assertElement(ID.detailHeading, in: app, contains: "Recorded transcript repair")
+            assertElement(ID.transcriptLoadError, in: app, contains: "will not replace a registered transcript")
+            assertOnlyPrimaryTaskActions([], in: app)
+            assertDoesNotExist(ID.generateTranscript, in: app)
+            assertExists(ID.reloadTranscript, in: app)
+            assertExists(ID.deleteMeeting, in: app)
+
+            app.typeKey("p", modifierFlags: [.command, .option])
+            assertElement(ID.transcriptLoadError, in: app, contains: "will not replace a registered transcript")
+            assertOnlyPrimaryTaskActions([], in: app)
+            assertDoesNotExist(ID.generateTranscript, in: app)
+
+            tapButton(ID.deleteMeeting, in: app)
+            assertExists(ID.deletePrompt, in: app)
+            tapButton(ID.confirmDelete, in: app)
+
+            assertElement(ID.transcriptLoadError, in: app, contains: "will not replace a registered transcript")
+            assertOnlyPrimaryTaskActions([], in: app)
+            assertDoesNotExist(ID.generateTranscript, in: app)
+            assertExists(ID.reloadTranscript, in: app)
+            assertExists(ID.deleteMeeting, in: app)
+        }
     }
 
     private func materializeReloadTranscriptWorkspace(
@@ -481,6 +672,97 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         )
     }
 
+    private func materializeRecordedTranscriptRepairWorkspace(
+        workspaceURL: URL,
+        sessionID: String,
+        failure: RegisteredTranscriptFailure
+    ) throws {
+        let sessionRoot = workspaceURL
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+        let artifactsRoot = sessionRoot.appendingPathComponent("artifacts", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: artifactsRoot,
+            withIntermediateDirectories: true
+        )
+
+        let audioData = Data("registered transcript repair audio".utf8)
+        try audioData.write(
+            to: artifactsRoot.appendingPathComponent("mixed_audio.wav"),
+            options: .atomic
+        )
+        let audioChecksum = sha256(audioData)
+
+        let expectedTranscriptData = Data("expected registered transcript".utf8)
+        let transcriptData: Data?
+        let transcriptChecksum: String
+        switch failure {
+        case .missing:
+            transcriptData = nil
+            transcriptChecksum = sha256(expectedTranscriptData)
+        case .checksumDrift:
+            transcriptData = Data("changed registered transcript".utf8)
+            transcriptChecksum = sha256(expectedTranscriptData)
+        case .corruptJSON:
+            let corruptData = Data("{not-valid-json".utf8)
+            transcriptData = corruptData
+            transcriptChecksum = sha256(corruptData)
+        }
+        if let transcriptData {
+            try transcriptData.write(
+                to: artifactsRoot.appendingPathComponent("transcript.json"),
+                options: .atomic
+            )
+        }
+
+        let sessionData = try JSONSerialization.data(
+            withJSONObject: [
+                "id": sessionID,
+                "source_type": "native_recording",
+                "status": "recorded",
+                "title": "Recorded transcript repair",
+                "started_at": "2026-07-13T10:00:00Z",
+                "ended_at": "2026-07-13T10:30:00Z",
+                "created_at": "2026-07-13T10:00:00Z",
+                "updated_at": "2026-07-13T10:31:00Z",
+                "workspace_dir": sessionRoot.path,
+                "artifacts": [
+                    [
+                        "id": "artifact-repair-audio",
+                        "session_id": sessionID,
+                        "artifact_type": "mixed_audio",
+                        "path": "artifacts/mixed_audio.wav",
+                        "format": "wav",
+                        "capture_status": "available",
+                        "checksum": audioChecksum,
+                        "created_at": "2026-07-13T10:30:00Z",
+                    ],
+                    [
+                        "id": "artifact-repair-transcript",
+                        "session_id": sessionID,
+                        "artifact_type": "transcript_text",
+                        "path": "artifacts/transcript.json",
+                        "format": "json",
+                        "capture_status": "available",
+                        "checksum": transcriptChecksum,
+                        "created_at": "2026-07-13T10:31:00Z",
+                    ],
+                ],
+            ],
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        try sessionData.write(
+            to: sessionRoot.appendingPathComponent("session.json", isDirectory: false),
+            options: .atomic
+        )
+    }
+
+    private func sha256(_ data: Data) -> String {
+        "sha256:" + SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
     private func materializeHistoricalMeetingWorkspace(
         workspaceURL: URL,
         sessionID: String,
@@ -489,10 +771,17 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         let sessionRoot = workspaceURL
             .appendingPathComponent("sessions", isDirectory: true)
             .appendingPathComponent(sessionID, isDirectory: true)
+        let artifactsRoot = sessionRoot.appendingPathComponent("artifacts", isDirectory: true)
         try FileManager.default.createDirectory(
-            at: sessionRoot,
+            at: artifactsRoot,
             withIntermediateDirectories: true
         )
+        let audioData = Data("interrupted processing audio fixture".utf8)
+        let audioURL = artifactsRoot.appendingPathComponent("meeting-audio.wav", isDirectory: false)
+        try audioData.write(to: audioURL, options: .atomic)
+        let audioChecksum = "sha256:" + SHA256.hash(data: audioData)
+            .map { String(format: "%02x", $0) }
+            .joined()
         let sessionData = try JSONSerialization.data(
             withJSONObject: [
                 "id": sessionID,
@@ -500,7 +789,72 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
                 "status": status,
                 "started_at": "2026-07-13T10:00:00Z",
                 "updated_at": "2026-07-13T10:05:00Z",
-                "artifacts": [],
+                "artifacts": [
+                    [
+                        "id": "artifact-interrupted-audio",
+                        "session_id": sessionID,
+                        "artifact_type": "mixed_audio",
+                        "path": "artifacts/meeting-audio.wav",
+                        "capture_status": "available",
+                        "checksum": audioChecksum,
+                    ],
+                ],
+            ],
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        try sessionData.write(
+            to: sessionRoot.appendingPathComponent("session.json", isDirectory: false),
+            options: .atomic
+        )
+    }
+
+    private func materializeFallbackAudioWorkspace(
+        workspaceURL: URL,
+        sessionID: String
+    ) throws {
+        let sessionRoot = workspaceURL
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+        let artifactsRoot = sessionRoot.appendingPathComponent("artifacts", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: artifactsRoot,
+            withIntermediateDirectories: true
+        )
+        let systemData = Data("fallback system audio".utf8)
+        let microphoneData = Data("fallback microphone audio".utf8)
+        try systemData.write(
+            to: artifactsRoot.appendingPathComponent("system-audio.wav", isDirectory: false),
+            options: .atomic
+        )
+        try microphoneData.write(
+            to: artifactsRoot.appendingPathComponent("microphone-audio.wav", isDirectory: false),
+            options: .atomic
+        )
+        let sessionData = try JSONSerialization.data(
+            withJSONObject: [
+                "id": sessionID,
+                "title": "Fallback audio choice",
+                "status": "recorded",
+                "started_at": "2026-07-13T10:00:00Z",
+                "updated_at": "2026-07-13T10:05:00Z",
+                "artifacts": [
+                    [
+                        "id": "artifact-fallback-system",
+                        "session_id": sessionID,
+                        "artifact_type": "system_audio",
+                        "path": "artifacts/system-audio.wav",
+                        "capture_status": "available",
+                        "checksum": sha256(systemData),
+                    ],
+                    [
+                        "id": "artifact-fallback-microphone",
+                        "session_id": sessionID,
+                        "artifact_type": "microphone_audio",
+                        "path": "artifacts/microphone-audio.wav",
+                        "capture_status": "available",
+                        "checksum": sha256(microphoneData),
+                    ],
+                ],
             ],
             options: [.prettyPrinted, .sortedKeys]
         )
@@ -512,7 +866,8 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
 
     private func launchApp(
         fixture: String? = nil,
-        workspaceURL: URL? = nil
+        workspaceURL: URL? = nil,
+        processingFixture: AppProcessingProcessFixture? = nil
     ) -> XCUIApplication {
         dismissSpotlightIfPresent()
         launchedApp?.terminate()
@@ -533,6 +888,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         if let workspaceURL {
             app.launchEnvironment["MA_NATIVE_RECORDING_WORKSPACE"] = workspaceURL.path
         }
+        processingFixture?.applyLaunchEnvironment(to: app)
         app.terminate()
         _ = app.wait(for: .notRunning, timeout: 5)
         app.launch()
@@ -551,6 +907,13 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
             return
         }
         spotlight.typeKey(.escape, modifierFlags: [])
+    }
+
+    private func attachScreenshot(_ name: String, of app: XCUIApplication) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func builtInScreen() -> NSScreen? {

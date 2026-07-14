@@ -109,7 +109,9 @@ public struct ProcessingSessionBinding: Equatable, Sendable {
     }
 
     public var hasSavedMediaState: Bool {
-        sessionStatus == "recorded" || sessionStatus == "transcribed"
+        sessionStatus == "recorded"
+            || sessionStatus == "processing"
+            || sessionStatus == "transcribed"
     }
 
     public var isEligible: Bool {

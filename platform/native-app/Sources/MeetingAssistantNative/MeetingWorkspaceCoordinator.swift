@@ -43,6 +43,11 @@ public enum MeetingDeletionWorkspaceReconciliation: Equatable, Sendable {
     case workspaceUnreadable
 }
 
+public struct MeetingTranscriptLoadToken: Equatable, Sendable {
+    public let sessionID: String
+    fileprivate let revision: Int
+}
+
 public struct MeetingRecordingDraft: Equatable, Sendable {
     public var title: String
     public var captureSystemAudio: Bool
@@ -81,6 +86,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
     @Published public private(set) var route: MeetingWorkspaceRoute
     @Published public private(set) var recentSessions: [MeetingSessionSummary]
     @Published public private(set) var currentSession: MeetingSessionSummary?
+    @Published public private(set) var selectedProcessingAudioSourceID: String?
     @Published public var recordingDraft: MeetingRecordingDraft
     @Published public private(set) var activity: MeetingWorkspaceActivity = .idle
     @Published public private(set) var workspaceIssues: [MeetingSessionWorkspaceIssue] = []
@@ -88,6 +94,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
     @Published public private(set) var workspaceTechnicalError: String?
     @Published public private(set) var transcriptLoadError: String?
     @Published public private(set) var transcriptTechnicalError: String?
+    @Published public private(set) var transcriptIsLoading = false
     @Published public private(set) var notice: String?
     @Published public private(set) var recordingStartedAt: Date?
 
@@ -96,6 +103,9 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
     private var seededSessions: [MeetingSessionSummary]
     private let injectedSessionIDs: Set<String>
     private var selectionRevision = 0
+    private var transcriptLoadRevision = 0
+    private var activeTranscriptLoadToken: MeetingTranscriptLoadToken?
+    private var explicitProcessingAudioSourceIDsBySession: [String: String] = [:]
 
     public init(
         workspaceURL: URL,
@@ -109,12 +119,32 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         self.seededSessions = initialSessions
         self.injectedSessionIDs = Set(initialSessions.map(\.id))
         self.recentSessions = initialSessions
+        self.selectedProcessingAudioSourceID = nil
         self.route = initialRoute
         self.recordingDraft = recordingDraft
     }
 
     public var navigationIsLocked: Bool {
         activity.locksNavigation
+    }
+
+    public var selectableProcessingAudioSources: [MeetingProcessableAudioSource] {
+        guard let currentSession else {
+            return []
+        }
+        return MeetingProcessableAudioSource.providerCompatibleSources(
+            from: currentSession.processableAudioSources
+        )
+    }
+
+    public var processingRequestSourceArtifactID: String? {
+        guard let selectedProcessingAudioSourceID,
+              let selectedSource = selectableProcessingAudioSources.first(where: {
+                  $0.id == selectedProcessingAudioSourceID
+              }) else {
+            return nil
+        }
+        return selectedSource.artifactType == "mixed_audio" ? nil : selectedSource.id
     }
 
     public var currentMeetingTitle: String {
@@ -157,6 +187,9 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         }
         selectionRevision += 1
         currentSession = nil
+        selectedProcessingAudioSourceID = nil
+        recordingDraft.title = ""
+        invalidateTranscriptLoad()
         transcriptLoadError = nil
         transcriptTechnicalError = nil
         notice = nil
@@ -173,6 +206,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
             return nil
         }
         selectionRevision += 1
+        invalidateTranscriptLoad()
         let requestedRevision = selectionRevision
         let repository = repository
         let workspaceURL = workspaceURL
@@ -203,6 +237,8 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
             selectedSession = session
         case .missing:
             currentSession = nil
+            selectedProcessingAudioSourceID = nil
+            explicitProcessingAudioSourceIDsBySession.removeValue(forKey: session.id)
             transcriptLoadError = nil
             transcriptTechnicalError = nil
             notice = nil
@@ -212,6 +248,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
             return nil
         case .failed(let technicalError):
             currentSession = nil
+            selectedProcessingAudioSourceID = nil
             transcriptLoadError = nil
             transcriptTechnicalError = nil
             notice = nil
@@ -222,6 +259,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         }
 
         currentSession = selectedSession
+        synchronizeProcessingAudioSelection(for: selectedSession)
         recentSessions = replacingSession(selectedSession, in: recentSessions)
         workspaceError = nil
         workspaceTechnicalError = nil
@@ -234,6 +272,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
 
     public func recordingWillStart() {
         selectionRevision += 1
+        invalidateTranscriptLoad()
         activity = .startingRecording
         transcriptLoadError = nil
         notice = nil
@@ -241,6 +280,9 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
 
     public func recordingDidStart(sessionID: String, now: Date = Date()) {
         let timestamp = ISO8601DateFormatter().string(from: now)
+        explicitProcessingAudioSourceIDsBySession.removeValue(forKey: sessionID)
+        selectedProcessingAudioSourceID = nil
+        transcriptIsLoading = false
         currentSession = MeetingSessionSummary(
             id: sessionID,
             title: recordingDraft.normalizedTitle,
@@ -269,16 +311,31 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
             return
         }
         let existing = currentSession
-        let processableTypes = Set(["mixed_audio", "system_audio", "microphone_audio"])
-        let availableArtifacts = recordingState.artifacts.filter {
-            $0.captureStatus == "available"
+        let processableTypes = Set([
+            "mixed_audio",
+            "system_audio",
+            "microphone_audio",
+            "normalized_audio",
+        ])
+        let safeSavedArtifacts = recordingState.artifacts.filter { artifact in
+            artifact.sessionID == sessionID
+                && (artifact.captureStatus == "available" || artifact.captureStatus == "degraded")
+                && artifact.path?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                && artifact.checksum?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         }
-        let hasProcessableAudio = recordingState.artifacts.contains {
-            processableTypes.contains($0.artifactType)
-                && ($0.captureStatus == "available" || $0.captureStatus == "degraded")
-                && $0.path?.isEmpty == false
-                && $0.checksum?.isEmpty == false
-        }
+        let processableAudioCandidates: [MeetingProcessableAudioSource] = safeSavedArtifacts
+            .compactMap { artifact in
+                guard processableTypes.contains(artifact.artifactType) else {
+                    return nil
+                }
+                return MeetingProcessableAudioSource(
+                    id: artifact.id,
+                    artifactType: artifact.artifactType
+                )
+            }
+        let processableAudioSources = MeetingProcessableAudioSource.providerCompatibleSources(
+            from: processableAudioCandidates
+        )
         let timestamp = ISO8601DateFormatter().string(from: now)
         let saved = MeetingSessionSummary(
             id: sessionID,
@@ -288,23 +345,26 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
             endedAt: timestamp,
             updatedAt: timestamp,
             durationLabel: elapsedLabel(from: recordingStartedAt, to: now),
-            artifactCount: availableArtifacts.count,
+            artifactCount: safeSavedArtifacts.count,
             hasTranscript: false,
             hasSpeakerLabels: false,
-            hasProcessableAudio: hasProcessableAudio
+            hasProcessableAudio: !processableAudioSources.isEmpty,
+            processableAudioSources: processableAudioSources
         )
         currentSession = saved
+        synchronizeProcessingAudioSelection(for: saved)
         seededSessions = mergedSessions([saved], seededSessions)
         recentSessions = mergedSessions([saved], recentSessions)
         recordingStartedAt = nil
         activity = .idle
-        route = .meetingDetail
     }
 
     public func recordingDidFail(hasActiveSession: Bool) {
         if !hasActiveSession {
             activity = .idle
             currentSession = nil
+            selectedProcessingAudioSourceID = nil
+            transcriptIsLoading = false
             route = .newRecording
         } else {
             activity = .saveNeedsAttention
@@ -313,6 +373,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
     }
 
     public func processingWillStart() {
+        invalidateTranscriptLoad()
         activity = .processing
         transcriptLoadError = nil
         transcriptTechnicalError = nil
@@ -333,6 +394,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
             return
         }
         activity = .deleting
+        invalidateTranscriptLoad()
         notice = nil
     }
 
@@ -350,6 +412,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         commandReportedDeletion: Bool
     ) async -> MeetingDeletionWorkspaceReconciliation {
         notice = nil
+        invalidateTranscriptLoad()
         transcriptLoadError = nil
         transcriptTechnicalError = nil
 
@@ -390,6 +453,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
                 recentSessions = mergedSessions(snapshot.sessions, seededSessions)
                     .filter { $0.id != sessionID }
                 currentSession = nil
+                selectedProcessingAudioSourceID = nil
                 recordingStartedAt = nil
                 activity = .idle
                 route = .meetings
@@ -405,6 +469,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
                     in: mergedSessions(snapshot.sessions, seededSessions)
                 )
                 currentSession = refreshed
+                synchronizeProcessingAudioSelection(for: refreshed)
                 activity = .idle
                 route = .meetingDetail
 
@@ -420,6 +485,8 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
             recentSessions = mergedSessions(snapshot.sessions, seededSessions)
                 .filter { $0.id != sessionID }
             currentSession = nil
+            selectedProcessingAudioSourceID = nil
+            explicitProcessingAudioSourceIDsBySession.removeValue(forKey: sessionID)
             recordingStartedAt = nil
             activity = .idle
             route = .meetings
@@ -442,6 +509,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
             seededSessions.removeAll { $0.id == sessionID }
             recentSessions.removeAll { $0.id == sessionID }
             currentSession = nil
+            selectedProcessingAudioSourceID = nil
             recordingStartedAt = nil
             workspaceIssues = []
             transcriptLoadError = nil
@@ -455,10 +523,12 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         }
     }
 
-    public func transcriptDidLoad(for sessionID: String) {
-        guard currentSession?.id == sessionID else {
+    public func transcriptDidLoad(_ token: MeetingTranscriptLoadToken) {
+        guard isCurrentTranscriptLoad(token) else {
             return
         }
+        activeTranscriptLoadToken = nil
+        transcriptIsLoading = false
         transcriptLoadError = nil
         transcriptTechnicalError = nil
         if let currentSession {
@@ -473,24 +543,33 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
                 artifactCount: currentSession.artifactCount,
                 hasTranscript: true,
                 hasSpeakerLabels: currentSession.hasSpeakerLabels,
-                hasProcessableAudio: currentSession.hasProcessableAudio
+                hasProcessableAudio: currentSession.hasProcessableAudio,
+                processableAudioSources: currentSession.processableAudioSources,
+                hasRegisteredTranscript: true
             )
             self.currentSession = updated
+            synchronizeProcessingAudioSelection(for: updated)
             seededSessions = mergedSessions([updated], seededSessions)
             recentSessions = mergedSessions([updated], recentSessions)
         }
-        route = .meetingDetail
     }
 
-    public func transcriptDidFailToLoad(_ error: Error) {
+    public func transcriptDidFailToLoad(
+        _ error: Error,
+        token: MeetingTranscriptLoadToken
+    ) {
+        guard isCurrentTranscriptLoad(token) else {
+            return
+        }
+        activeTranscriptLoadToken = nil
+        transcriptIsLoading = false
         if currentSession?.hasProcessableAudio == true {
-            transcriptLoadError = "The transcript could not be opened. The original recording is still safe. Regenerate the transcript from the saved meeting audio, or reload it after repairing the meeting files."
+            transcriptLoadError = "The transcript could not be opened. The original recording is still safe. Reload it after repairing the meeting files, or return to Meetings. Meeting Assistant will not replace a registered transcript automatically."
         } else {
-            transcriptLoadError = "The transcript could not be opened. The original recording and any available files are still safe, but this meeting has no processable audio for regeneration. You can reload after repairing the meeting files or delete the meeting."
+            transcriptLoadError = "The transcript could not be opened. The original recording and any available files are still safe. Reload it after repairing the meeting files, return to Meetings, or delete the meeting if it is no longer needed."
         }
         transcriptTechnicalError = error.localizedDescription
         activity = .idle
-        route = .meetingDetail
     }
 
     public func clearTranscriptError() {
@@ -498,12 +577,36 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         transcriptTechnicalError = nil
     }
 
+    @discardableResult
+    public func transcriptWillLoad(for sessionID: String) -> MeetingTranscriptLoadToken? {
+        guard currentSession?.id == sessionID else {
+            return nil
+        }
+        transcriptLoadRevision += 1
+        let token = MeetingTranscriptLoadToken(
+            sessionID: sessionID,
+            revision: transcriptLoadRevision
+        )
+        activeTranscriptLoadToken = token
+        transcriptIsLoading = true
+        transcriptLoadError = nil
+        transcriptTechnicalError = nil
+        return token
+    }
+
+    public func isCurrentTranscriptLoad(_ token: MeetingTranscriptLoadToken) -> Bool {
+        activeTranscriptLoadToken == token && currentSession?.id == token.sessionID
+    }
+
     public func deletionDidFinish(sessionID: String) {
         selectionRevision += 1
         seededSessions.removeAll { $0.id == sessionID }
         recentSessions.removeAll { $0.id == sessionID }
         currentSession = nil
+        selectedProcessingAudioSourceID = nil
+        explicitProcessingAudioSourceIDsBySession.removeValue(forKey: sessionID)
         recordingStartedAt = nil
+        invalidateTranscriptLoad()
         transcriptLoadError = nil
         transcriptTechnicalError = nil
         activity = .idle
@@ -515,13 +618,26 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
     public func clearCurrentSession(returnToMeetings: Bool = true) {
         selectionRevision += 1
         currentSession = nil
+        selectedProcessingAudioSourceID = nil
         recordingStartedAt = nil
+        invalidateTranscriptLoad()
         transcriptLoadError = nil
         transcriptTechnicalError = nil
         activity = .idle
         if returnToMeetings {
             route = .meetings
         }
+    }
+
+    @discardableResult
+    public func selectProcessingAudioSource(id: String) -> Bool {
+        guard let currentSession,
+              selectableProcessingAudioSources.contains(where: { $0.id == id }) else {
+            return false
+        }
+        explicitProcessingAudioSourceIDsBySession[currentSession.id] = id
+        selectedProcessingAudioSourceID = id
+        return true
     }
 
     private func mergedSessions(
@@ -539,6 +655,29 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         sessions.map { session in
             session.id == replacement.id ? replacement : session
         }
+    }
+
+    private func synchronizeProcessingAudioSelection(for session: MeetingSessionSummary) {
+        let selectableSources = MeetingProcessableAudioSource.providerCompatibleSources(
+            from: session.processableAudioSources
+        )
+        if let explicitID = explicitProcessingAudioSourceIDsBySession[session.id] {
+            if selectableSources.contains(where: { $0.id == explicitID }) {
+                selectedProcessingAudioSourceID = explicitID
+                return
+            }
+            explicitProcessingAudioSourceIDsBySession.removeValue(forKey: session.id)
+        }
+
+        selectedProcessingAudioSourceID = selectableSources.first(where: {
+            $0.artifactType == "mixed_audio"
+        })?.id ?? selectableSources.first?.id
+    }
+
+    private func invalidateTranscriptLoad() {
+        transcriptLoadRevision += 1
+        activeTranscriptLoadToken = nil
+        transcriptIsLoading = false
     }
 
     private func elapsedLabel(from start: Date?, to end: Date) -> String? {

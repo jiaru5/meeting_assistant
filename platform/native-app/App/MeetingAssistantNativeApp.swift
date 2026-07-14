@@ -156,8 +156,6 @@ private struct NativeControlPlaneRootView: View {
     private let workspaceURL: URL
     private let usesTestFixture: Bool
     private let autoRefreshPreflightOnAppear: Bool
-    private let captureSystemAudio: Bool
-    private let captureMicrophoneAudio: Bool
     private let smokeStateReporter: NativeLocalAppSmokeStateReporter?
 
     init(
@@ -192,8 +190,6 @@ private struct NativeControlPlaneRootView: View {
         self.launchTranscriptInput = configuration.transcriptInput
         self.usesTestFixture = usesTestFixture
         self.autoRefreshPreflightOnAppear = autoRefreshPreflightOnAppear
-        self.captureSystemAudio = configuration.captureSystemAudio
-        self.captureMicrophoneAudio = configuration.captureMicrophoneAudio
         self.smokeStateReporter = smokeStateReporter
         _workspaceCoordinator = StateObject(
             wrappedValue: MeetingWorkspaceCoordinator(
@@ -255,7 +251,6 @@ private struct NativeControlPlaneRootView: View {
             startRecording: beginRecording,
             stopRecording: { _ = requestStopRecording() },
             startProcessing: { _ = requestStartProcessing() },
-            retryProcessing: { _ = requestRetryProcessing() },
             openMeeting: openMeeting,
             reloadTranscript: reloadCurrentTranscript,
             confirmDelete: confirmCurrentMeetingDeletion
@@ -402,12 +397,26 @@ private struct NativeControlPlaneRootView: View {
             return
         }
 
-        do {
-            let input = try transcriptInput(for: sessionID, allowGeneratedTestFixture: true)
-            installTranscript(input, sessionID: sessionID)
-        } catch {
-            clearTranscriptForCurrentSession()
-            workspaceCoordinator.transcriptDidFailToLoad(error)
+        guard let loadToken = workspaceCoordinator.transcriptWillLoad(for: sessionID) else {
+            return
+        }
+        Task {
+            do {
+                let input = try await transcriptInput(
+                    for: sessionID,
+                    allowGeneratedTestFixture: true
+                )
+                guard workspaceCoordinator.isCurrentTranscriptLoad(loadToken) else {
+                    return
+                }
+                installTranscript(input, loadToken: loadToken)
+            } catch {
+                guard workspaceCoordinator.isCurrentTranscriptLoad(loadToken) else {
+                    return
+                }
+                clearTranscriptForCurrentSession()
+                workspaceCoordinator.transcriptDidFailToLoad(error, token: loadToken)
+            }
         }
     }
 
@@ -457,31 +466,21 @@ private struct NativeControlPlaneRootView: View {
     private func requestStartProcessing() -> Bool {
         guard workspaceCoordinator.route == .meetingDetail,
               workspaceCoordinator.activity == .idle,
-              let sessionID = workspaceCoordinator.currentSession?.id,
-              processingViewModel.boundSessionID == sessionID,
+              let currentSession = workspaceCoordinator.currentSession,
+              !currentSession.hasRegisteredTranscript,
+              workspaceCoordinator.transcriptLoadError == nil,
+              processingViewModel.boundSessionID == currentSession.id,
               processingViewModel.canStart else {
             return false
         }
+        let sessionID = currentSession.id
         workspaceCoordinator.processingWillStart()
+        let sourceArtifactID = workspaceCoordinator.processingRequestSourceArtifactID
         Task {
-            await processingViewModel.start()
-        }
-        return true
-    }
-
-    @MainActor
-    @discardableResult
-    private func requestRetryProcessing() -> Bool {
-        guard workspaceCoordinator.route == .meetingDetail,
-              workspaceCoordinator.activity == .idle,
-              let sessionID = workspaceCoordinator.currentSession?.id,
-              processingViewModel.boundSessionID == sessionID,
-              processingViewModel.canRetry else {
-            return false
-        }
-        workspaceCoordinator.processingWillStart()
-        Task {
-            await processingViewModel.retry()
+            await processingViewModel.start(
+                sessionID: sessionID,
+                sourceArtifactID: sourceArtifactID
+            )
         }
         return true
     }
@@ -509,22 +508,34 @@ private struct NativeControlPlaneRootView: View {
                 transcript: nil
             )
             guard selectedSession.hasTranscript else {
-                if selectedSession.status == "transcribed" {
-                    workspaceCoordinator.transcriptDidFailToLoad(
-                        NativeTranscriptPresentationError.missingTranscript
-                    )
+                if selectedSession.hasRegisteredTranscript {
+                    if let loadToken = workspaceCoordinator.transcriptWillLoad(for: selectedSession.id) {
+                        workspaceCoordinator.transcriptDidFailToLoad(
+                            NativeTranscriptPresentationError.missingTranscript,
+                            token: loadToken
+                        )
+                    }
                 }
                 return
             }
+            guard let loadToken = workspaceCoordinator.transcriptWillLoad(for: selectedSession.id) else {
+                return
+            }
             do {
-                let input = try transcriptInput(
+                let input = try await transcriptInput(
                     for: selectedSession.id,
                     allowGeneratedTestFixture: false
                 )
-                installTranscript(input, sessionID: selectedSession.id)
+                guard workspaceCoordinator.isCurrentTranscriptLoad(loadToken) else {
+                    return
+                }
+                installTranscript(input, loadToken: loadToken)
             } catch {
+                guard workspaceCoordinator.isCurrentTranscriptLoad(loadToken) else {
+                    return
+                }
                 clearTranscriptForCurrentSession()
-                workspaceCoordinator.transcriptDidFailToLoad(error)
+                workspaceCoordinator.transcriptDidFailToLoad(error, token: loadToken)
             }
         }
     }
@@ -535,12 +546,26 @@ private struct NativeControlPlaneRootView: View {
             return
         }
         workspaceCoordinator.clearTranscriptError()
-        do {
-            let input = try transcriptInput(for: sessionID, allowGeneratedTestFixture: false)
-            installTranscript(input, sessionID: sessionID)
-        } catch {
-            clearTranscriptForCurrentSession()
-            workspaceCoordinator.transcriptDidFailToLoad(error)
+        guard let loadToken = workspaceCoordinator.transcriptWillLoad(for: sessionID) else {
+            return
+        }
+        Task {
+            do {
+                let input = try await transcriptInput(
+                    for: sessionID,
+                    allowGeneratedTestFixture: false
+                )
+                guard workspaceCoordinator.isCurrentTranscriptLoad(loadToken) else {
+                    return
+                }
+                installTranscript(input, loadToken: loadToken)
+            } catch {
+                guard workspaceCoordinator.isCurrentTranscriptLoad(loadToken) else {
+                    return
+                }
+                clearTranscriptForCurrentSession()
+                workspaceCoordinator.transcriptDidFailToLoad(error, token: loadToken)
+            }
         }
     }
 
@@ -581,26 +606,40 @@ private struct NativeControlPlaneRootView: View {
                 )
 
                 if session.hasTranscript {
-                    do {
-                        let input = try transcriptInput(
-                            for: session.id,
-                            allowGeneratedTestFixture: false
-                        )
-                        installTranscript(
-                            input,
-                            sessionID: session.id,
-                            preservingActionFailure: preservesDeleteFailure
-                        )
-                    } catch {
-                        clearTranscriptForCurrentSession(
-                            preservingActionFailure: preservesDeleteFailure
-                        )
-                        workspaceCoordinator.transcriptDidFailToLoad(error)
+                    if let loadToken = workspaceCoordinator.transcriptWillLoad(for: session.id) {
+                        do {
+                            let input = try await transcriptInput(
+                                for: session.id,
+                                allowGeneratedTestFixture: false
+                            )
+                            guard workspaceCoordinator.isCurrentTranscriptLoad(loadToken) else {
+                                return
+                            }
+                            installTranscript(
+                                input,
+                                loadToken: loadToken,
+                                preservingActionFailure: preservesDeleteFailure
+                            )
+                        } catch {
+                            guard workspaceCoordinator.isCurrentTranscriptLoad(loadToken) else {
+                                return
+                            }
+                            clearTranscriptForCurrentSession(
+                                preservingActionFailure: preservesDeleteFailure
+                            )
+                            workspaceCoordinator.transcriptDidFailToLoad(
+                                error,
+                                token: loadToken
+                            )
+                        }
                     }
-                } else if session.status == "transcribed" {
-                    workspaceCoordinator.transcriptDidFailToLoad(
-                        NativeTranscriptPresentationError.missingTranscript
-                    )
+                } else if session.hasRegisteredTranscript {
+                    if let loadToken = workspaceCoordinator.transcriptWillLoad(for: session.id) {
+                        workspaceCoordinator.transcriptDidFailToLoad(
+                            NativeTranscriptPresentationError.missingTranscript,
+                            token: loadToken
+                        )
+                    }
                 }
 
                 if commandReportedDeletion {
@@ -615,18 +654,20 @@ private struct NativeControlPlaneRootView: View {
     @MainActor
     private func installTranscript(
         _ input: TranscriptReviewInput,
-        sessionID: String,
+        loadToken: MeetingTranscriptLoadToken,
         preservingActionFailure: Bool = false
     ) {
-        guard workspaceCoordinator.currentSession?.id == sessionID else {
+        guard workspaceCoordinator.isCurrentTranscriptLoad(loadToken) else {
             return
         }
+        let sessionID = loadToken.sessionID
         guard let transcript = input.transcript else {
             clearTranscriptForCurrentSession(
                 preservingActionFailure: preservingActionFailure
             )
             workspaceCoordinator.transcriptDidFailToLoad(
-                NativeTranscriptPresentationError.missingTranscript
+                NativeTranscriptPresentationError.missingTranscript,
+                token: loadToken
             )
             return
         }
@@ -635,7 +676,8 @@ private struct NativeControlPlaneRootView: View {
                 preservingActionFailure: preservingActionFailure
             )
             workspaceCoordinator.transcriptDidFailToLoad(
-                NativeTranscriptPresentationError.sessionMismatch
+                NativeTranscriptPresentationError.sessionMismatch,
+                token: loadToken
             )
             return
         }
@@ -647,7 +689,7 @@ private struct NativeControlPlaneRootView: View {
             preservingFailureFeedback: preservingActionFailure
         )
         loadedTranscriptSessionID = sessionID
-        workspaceCoordinator.transcriptDidLoad(for: sessionID)
+        workspaceCoordinator.transcriptDidLoad(loadToken)
     }
 
     @MainActor
@@ -672,18 +714,22 @@ private struct NativeControlPlaneRootView: View {
         }
     }
 
+    @MainActor
     private func transcriptInput(
         for sessionID: String,
         allowGeneratedTestFixture: Bool
-    ) throws -> TranscriptReviewInput {
+    ) async throws -> TranscriptReviewInput {
         if launchTranscriptInput.transcript?.sessionID == sessionID {
             return launchTranscriptInput
         }
+        let workspaceURL = workspaceURL
         do {
-            return try TranscriptReviewWorkspaceLoader.load(
-                workspaceURL: workspaceURL,
-                sessionID: sessionID
-            )
+            return try await Task.detached(priority: .userInitiated) {
+                try TranscriptReviewWorkspaceLoader.load(
+                    workspaceURL: workspaceURL,
+                    sessionID: sessionID
+                )
+            }.value
         } catch {
             guard usesTestFixture, allowGeneratedTestFixture else {
                 throw error
@@ -792,9 +838,7 @@ private struct NativeControlPlaneRootView: View {
                 workspaceCoordinator: workspaceCoordinator,
                 permissionViewModel: permissionViewModel,
                 recordingViewModel: recordingViewModel,
-                processingViewModel: processingViewModel,
-                captureSystemAudio: captureSystemAudio,
-                captureMicrophoneAudio: captureMicrophoneAudio
+                processingViewModel: processingViewModel
             )
         } else {
             EmptyView()
@@ -918,8 +962,6 @@ private struct NativeLocalAppSmokeStateReportView: View {
     @ObservedObject var permissionViewModel: PermissionDependencyStatusViewModel
     @ObservedObject var recordingViewModel: RecordingControlViewModel
     @ObservedObject var processingViewModel: ProcessingStateViewModel
-    let captureSystemAudio: Bool
-    let captureMicrophoneAudio: Bool
 
     var body: some View {
         Color.clear
@@ -939,6 +981,9 @@ private struct NativeLocalAppSmokeStateReportView: View {
             .onChange(of: workspaceCoordinator.route) { _, _ in
                 write(reason: "route-changed")
             }
+            .onChange(of: workspaceCoordinator.recordingDraft) { _, _ in
+                write(reason: "recording-draft-changed")
+            }
     }
 
     @MainActor
@@ -949,8 +994,8 @@ private struct NativeLocalAppSmokeStateReportView: View {
             permissionViewModel: permissionViewModel,
             recordingViewModel: recordingViewModel,
             processingViewModel: processingViewModel,
-            captureSystemAudio: captureSystemAudio,
-            captureMicrophoneAudio: captureMicrophoneAudio
+            captureSystemAudio: workspaceCoordinator.recordingDraft.captureSystemAudio,
+            captureMicrophoneAudio: workspaceCoordinator.recordingDraft.captureMicrophoneAudio
         )
     }
 }
@@ -1047,8 +1092,12 @@ private struct NativeLocalAppSmokeStateReporter {
             ],
             "preflight": [
                 "phase": permissionState.phase.rawValue,
-                "summary": permissionState.summary,
-                "can_start_recording": permissionState.canStartRecording,
+                "summary": permissionState.summary(
+                    captureMicrophoneAudio: captureMicrophoneAudio
+                ),
+                "can_start_recording": permissionState.canStartRecording(
+                    captureMicrophoneAudio: captureMicrophoneAudio
+                ),
                 "can_run_processing": permissionState.canRunProcessing,
                 "missing_required_check_ids": permissionState.missingRequiredCheckIDs,
                 "warnings": permissionState.warnings,
@@ -1585,6 +1634,34 @@ private struct NativeControlPlaneFixtureConfiguration {
                 exportDestinationPath: "/tmp/ready-fixture-transcript.md",
                 workspaceDir: nil
             )
+        case "capture-ready-processing-blocked":
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .captureReadyProcessingBlockedFixture,
+                recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
+                processingClientMode: processingClientMode,
+                sessionID: "session-app-ui-capture-ready",
+                transcriptInput: .missingFixture,
+                exportScript: .success(content: "Capture-ready fixture transcript content."),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/capture-ready-transcript.md",
+                workspaceDir: nil
+            )
+        case "microphone-denied":
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .microphoneDeniedFixture,
+                recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
+                processingClientMode: processingClientMode,
+                sessionID: "session-app-ui-microphone-denied",
+                transcriptInput: .missingFixture,
+                exportScript: .success(content: "Microphone-denied fixture transcript content."),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/microphone-denied-transcript.md",
+                workspaceDir: nil
+            )
         case "start-failure":
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .readyFixture,
@@ -1673,6 +1750,20 @@ private struct NativeControlPlaneFixtureConfiguration {
                 exportScript: .success(content: "Transcript Review Fixture copy content."),
                 deleteScript: .success(retainedExternalExports: ["/tmp/transcript-review.md"]),
                 exportDestinationPath: "/tmp/transcript-review.md",
+                workspaceDir: nil
+            )
+        case "transcript-long":
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .readyFixture,
+                recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
+                processingClientMode: processingClientMode,
+                sessionID: "session-app-ui-long-transcript",
+                transcriptInput: .longReviewFixture,
+                exportScript: .success(content: "Long transcript fixture copy content."),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/transcript-long.md",
                 workspaceDir: nil
             )
         case "transcript-empty":
@@ -1924,7 +2015,8 @@ private struct NativeControlPlaneFixtureConfiguration {
                     artifactCount: 2,
                     hasTranscript: false,
                     hasSpeakerLabels: false,
-                    hasProcessableAudio: true
+                    hasProcessableAudio: true,
+                    hasRegisteredTranscript: true
                 )
             )
         case "transcript-missing-no-audio":
@@ -1952,7 +2044,8 @@ private struct NativeControlPlaneFixtureConfiguration {
                     artifactCount: 1,
                     hasTranscript: false,
                     hasSpeakerLabels: false,
-                    hasProcessableAudio: false
+                    hasProcessableAudio: false,
+                    hasRegisteredTranscript: true
                 )
             )
         case "transcript-load-failure":
@@ -2405,6 +2498,26 @@ private extension TranscriptReviewInput {
         ),
         speakerLabelsDegradationReason: "speaker labeling runtime unavailable; transcript-only review remains available"
     )
+
+    static let longReviewFixture = TranscriptReviewInput(
+        sessionTitle: "Long Transcript Fixture",
+        transcript: TranscriptReviewTranscript(
+            id: "transcript-app-long-fixture",
+            sessionID: "session-app-ui-long-transcript",
+            sourceArtifactID: "artifact-normalized-audio",
+            status: "succeeded",
+            segments: (0..<500).map { index in
+                TranscriptReviewSegment(
+                    segmentID: "seg-long-\(index)",
+                    startMS: index * 4_000,
+                    endMS: (index + 1) * 4_000,
+                    text: "Long transcript segment \(index + 1) remains readable while the action toolbar stays available.",
+                    speakerLabel: index.isMultiple(of: 2) ? "SPEAKER_01" : "SPEAKER_02"
+                )
+            }
+        ),
+        speakerLabelsDegradationReason: "speaker labels are omitted in the long transcript rendering fixture"
+    )
 }
 
 private extension DependencyCheckResponse {
@@ -2443,6 +2556,34 @@ private extension DependencyCheckResponse {
         requestID: "local-app-ready",
         checks: [
             DependencyCheckItem(
+                id: "platform.os",
+                status: "supported",
+                required: true,
+                ok: true,
+                message: "macOS is supported."
+            ),
+            DependencyCheckItem(
+                id: "platform.macos_version",
+                status: "supported",
+                required: true,
+                ok: true,
+                message: "The macOS version is supported."
+            ),
+            DependencyCheckItem(
+                id: "platform.cpu_arch",
+                status: "supported",
+                required: true,
+                ok: true,
+                message: "The CPU architecture is supported."
+            ),
+            DependencyCheckItem(
+                id: "workspace.writable",
+                status: "writable",
+                required: true,
+                ok: true,
+                message: "The workspace is writable."
+            ),
+            DependencyCheckItem(
                 id: "permission.screen_recording",
                 status: "granted",
                 required: false,
@@ -2471,5 +2612,43 @@ private extension DependencyCheckResponse {
                 message: "No automatic dependency download was attempted."
             ),
         ]
+    )
+
+    static let captureReadyProcessingBlockedFixture = DependencyCheckResponse(
+        ok: false,
+        requestID: "local-app-capture-ready-processing-blocked",
+        code: "dependency_missing",
+        message: "Local transcript tools need attention.",
+        checks: readyFixture.checks.map { check in
+            guard check.id == "media_tool.ffmpeg" else {
+                return check
+            }
+            return DependencyCheckItem(
+                id: check.id,
+                status: "missing",
+                required: true,
+                ok: false,
+                message: "FFmpeg executable was not found."
+            )
+        }
+    )
+
+    static let microphoneDeniedFixture = DependencyCheckResponse(
+        ok: false,
+        requestID: "local-app-microphone-denied",
+        code: "permission_denied",
+        message: "Microphone permission is denied.",
+        checks: readyFixture.checks.map { check in
+            guard check.id == "permission.microphone" else {
+                return check
+            }
+            return DependencyCheckItem(
+                id: check.id,
+                status: "denied",
+                required: true,
+                ok: false,
+                message: "Microphone permission is denied."
+            )
+        }
     )
 }

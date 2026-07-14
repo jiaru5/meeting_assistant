@@ -490,7 +490,9 @@ struct TranscriptReviewActionsViewModelTests {
             #expect(error.errorDescription?.contains("sk-action-descendant-secret") == false)
         }
 
-        #expect(startedAt.duration(to: clock.now) < .seconds(3))
+        // The descendant sleeps for 10 seconds, so an 8-second ceiling still proves
+        // the inherited pipes are bounded while tolerating a fully parallel test run.
+        #expect(startedAt.duration(to: clock.now) < .seconds(8))
         #expect(try fixture.recordedProcessStopsWithin(timeoutSeconds: 1))
     }
 

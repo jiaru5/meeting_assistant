@@ -7,9 +7,9 @@ VS-MA-12 boundary:
 1. This component may implement the permission/dependency status surface for VS-MA-12.
 2. It consumes the `check_dependencies` command contract through stable JSON only.
 3. It may expose SwiftUI status labels and accessibility identifiers for permissions and dependencies.
-4. It may expose an injected `Open Privacy Settings` action that opens the macOS Privacy & Security Screen Recording pane through `NSWorkspace.shared.open` from `PermissionDependencyStatusView.swift` only.
+4. It may expose injected `Open Screen Recording Settings` and `Open Microphone Settings` actions that open only the corresponding macOS Privacy & Security panes through `NSWorkspace.shared.open` from `PermissionDependencyStatusView.swift`.
 5. It may display the current app bundle path, bundle identifier, best-effort code signature hash, designated requirement and signing authority through `ma.permissionDependency.appIdentity` so users can authorize the exact app identity shown by macOS TCC instead of a stale same-name entry.
-6. The privacy settings action and app identity hint must not grant permissions, edit TCC, call `tccutil`, mutate authorization databases, run shell/system commands, use AppleScript or change system settings without the user acting in System Settings.
+6. The privacy settings actions and app identity hint must not grant permissions, edit TCC, call `tccutil`, mutate authorization databases, run shell/system commands, use AppleScript or change system settings without the user acting in System Settings.
 
 VS-MA-13 fake recording boundary:
 
@@ -129,6 +129,7 @@ VS-MA-26 through VS-MA-30 task-based meeting workflow boundary:
 7. Default product copy must use meeting, screen recording, meeting audio, microphone and transcript language. Raw session id, artifact type, command name, error code and paths may appear only in an explicit Technical details disclosure or Settings & diagnostics.
 8. The task shell must expose stable `ma.meetings.*`, `ma.newRecording.*`, `ma.meetingDetail.*` and `ma.diagnostics.*` accessibility identifiers while retaining existing command-control identifiers on the task where each command is actually available.
 9. This workflow does not add commands, artifact types, persistence fields, network behavior, automatic processing, automatic uploads/downloads, team behavior, automatic summaries, Developer ID, notarization, App Store distribution or automatic updates.
+10. Historical transcript loading may run off the main actor, but every completion must carry a coordinator-issued `MeetingTranscriptLoadToken`; stale completions must be ignored and must not change the user's current route. The selected `mixed_audio` source must use the provider's default-source request (`source_artifact_id` omitted), while an explicit fallback choice must pass its artifact id. Selected-session processing eligibility must checksum every artifact the provider preflights, and a registered-but-invalid preferred input must fail closed instead of exposing a fallback. Once `normalized_audio` exists, retry remains on the same source because MVP.1 has no replace policy; a registered transcript load failure may offer reload/repair/delete but must not expose fake regeneration.
 
 VS-MA-20 opt-in native app-bundle MVP full-stack smoke boundary:
 

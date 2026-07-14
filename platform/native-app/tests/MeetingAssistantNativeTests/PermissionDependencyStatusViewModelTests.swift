@@ -49,11 +49,11 @@ struct PermissionDependencyStatusViewModelTests {
     }
 
     @Test
-    func requiredDependencyFailureBlocksProcessingState() {
+    func processingDependencyFailureDoesNotBlockCaptureState() {
         let state = PermissionDependencyStatusState.from(
             dependencyResponse(
                 ok: false,
-                checks: grantedPermissionChecks + [
+                checks: captureReadyChecks + [
                     check("media_tool.ffmpeg", status: "missing", required: true, ok: false),
                     check("speaker_labeling.runtime", status: "missing", required: false, ok: true),
                 ],
@@ -61,34 +61,35 @@ struct PermissionDependencyStatusViewModelTests {
             )
         )
 
-        #expect(state.phase == .blocked)
+        #expect(state.phase == .ready)
         #expect(state.canRunProcessing == false)
-        #expect(state.canStartRecording == false)
+        #expect(state.canStartRecording == true)
+        #expect(state.canStartRecording(captureMicrophoneAudio: true))
         #expect(state.missingRequiredCheckIDs == ["media_tool.ffmpeg"])
-        #expect(state.summary == "Processing is blocked until required dependencies are available.")
+        #expect(state.summary == "Recording is ready; processing is blocked until required dependencies are available.")
     }
 
     @Test
-    func structuredCommandFailureWithoutSpecificMissingCheckStillBlocks() {
+    func structuredProcessingFailureWithoutCaptureCheckStillAllowsCapture() {
         let state = PermissionDependencyStatusState.from(
             dependencyResponse(
                 ok: false,
-                checks: grantedPermissionChecks + [
+                checks: captureReadyChecks + [
                     check("transcription.hardware", status: "unknown", required: true, ok: nil),
                 ],
                 code: "dependency_missing"
             )
         )
 
-        #expect(state.phase == .blocked)
+        #expect(state.phase == .ready)
         #expect(state.canRunProcessing == false)
-        #expect(state.canStartRecording == false)
+        #expect(state.canStartRecording == true)
         #expect(state.missingRequiredCheckIDs == ["transcription.hardware"])
-        #expect(state.summary == "Processing is blocked until required dependencies are available.")
+        #expect(state.summary == "Recording is ready; processing is blocked until required dependencies are available.")
     }
 
     @Test
-    func commandFailureWithoutCheckDetailsUsesBlockedSummary() {
+    func commandFailureWithoutCaptureChecksFailsClosedForBothReadinesses() {
         let state = PermissionDependencyStatusState.from(
             dependencyResponse(
                 ok: false,
@@ -108,7 +109,7 @@ struct PermissionDependencyStatusViewModelTests {
         let state = PermissionDependencyStatusState.from(
             dependencyResponse(
                 ok: true,
-                checks: [
+                checks: passingCaptureDependencyChecks + [
                     check(
                         "permission.screen_recording",
                         status: "denied",
@@ -125,8 +126,110 @@ struct PermissionDependencyStatusViewModelTests {
         #expect(state.phase == .blocked)
         #expect(state.canRunProcessing == true)
         #expect(state.canStartRecording == false)
+        #expect(state.canStartRecording(captureMicrophoneAudio: false) == false)
+        #expect(state.canStartRecording(captureMicrophoneAudio: true) == false)
         #expect(state.permissions.first?.state == .denied)
-        #expect(state.summary == "Recording is blocked until macOS permissions are granted.")
+        #expect(
+            state.summary ==
+                "Recording is blocked until the required macOS permissions and capture environment are ready."
+        )
+    }
+
+    @Test
+    func deniedRequiredCapturePermissionDoesNotBlockReadyProcessingDependencies() {
+        let state = PermissionDependencyStatusState.from(
+            dependencyResponse(
+                ok: false,
+                checks: passingCaptureDependencyChecks + [
+                    check("permission.screen_recording", status: "denied", required: true, ok: false),
+                    check("permission.microphone", status: "granted", required: true, ok: true),
+                    check("media_tool.ffmpeg", status: "available", required: true, ok: true),
+                    check("transcription.runtime", status: "available", required: true, ok: true),
+                    check("transcription.model", status: "available", required: true, ok: true),
+                ],
+                code: "dependency_missing"
+            )
+        )
+
+        #expect(state.phase == .blocked)
+        #expect(state.canStartRecording == false)
+        #expect(state.canRunProcessing)
+        #expect(state.missingRequiredCheckIDs.isEmpty)
+    }
+
+    @Test
+    func deniedMicrophoneOnlyBlocksCaptureWhenMicrophoneIntentIsEnabled() {
+        let state = PermissionDependencyStatusState.from(
+            dependencyResponse(
+                ok: true,
+                checks: passingCaptureDependencyChecks + [
+                    check("permission.screen_recording", status: "granted", required: false, ok: true),
+                    check("permission.microphone", status: "denied", required: false, ok: false),
+                ]
+            )
+        )
+
+        #expect(state.phase == .blocked)
+        #expect(state.canStartRecording == false)
+        #expect(state.canStartRecording(captureMicrophoneAudio: true) == false)
+        #expect(state.canStartRecording(captureMicrophoneAudio: false))
+        #expect(state.canRunProcessing)
+        #expect(
+            state.summary(captureMicrophoneAudio: true) ==
+                "Recording is blocked until the required macOS permissions and capture environment are ready."
+        )
+        #expect(
+            state.summary(captureMicrophoneAudio: false) ==
+                "Permissions and required dependencies are ready."
+        )
+    }
+
+    @Test
+    func failedPlatformOrWorkspaceCheckBlocksCaptureButProcessingStateRemainsIndependent() {
+        for checkID in [
+            "platform.os",
+            "platform.macos_version",
+            "platform.cpu_arch",
+            "workspace.writable",
+        ] {
+            let state = PermissionDependencyStatusState.from(
+                dependencyResponse(
+                    ok: false,
+                    checks: grantedPermissionChecks
+                        + passingCaptureDependencyChecks.filter { $0.id != checkID }
+                        + [check(checkID, status: "unsupported", required: true, ok: false)],
+                    code: "dependency_missing"
+                )
+            )
+
+            #expect(state.phase == .blocked)
+            #expect(state.canStartRecording == false)
+            #expect(state.canStartRecording(captureMicrophoneAudio: false) == false)
+            #expect(state.canRunProcessing == false)
+        }
+    }
+
+    @Test
+    func missingPlatformOrWorkspaceCheckFailsCaptureReadinessClosed() {
+        for missingCheckID in [
+            "platform.os",
+            "platform.macos_version",
+            "platform.cpu_arch",
+            "workspace.writable",
+        ] {
+            let state = PermissionDependencyStatusState.from(
+                dependencyResponse(
+                    ok: true,
+                    checks: grantedPermissionChecks
+                        + passingCaptureDependencyChecks.filter { $0.id != missingCheckID }
+                )
+            )
+
+            #expect(state.phase == .blocked)
+            #expect(state.canStartRecording == false)
+            #expect(state.canStartRecording(captureMicrophoneAudio: false) == false)
+            #expect(state.canRunProcessing)
+        }
     }
 
     @Test
@@ -134,7 +237,7 @@ struct PermissionDependencyStatusViewModelTests {
         let state = PermissionDependencyStatusState.from(
             dependencyResponse(
                 ok: true,
-                checks: [
+                checks: passingCaptureDependencyChecks + [
                     check("permission.screen_recording", status: "unknown", required: false, ok: true),
                     check("permission.microphone", status: "granted", required: false, ok: true),
                     check("media_tool.ffmpeg", status: "available", required: true, ok: true),
@@ -157,9 +260,7 @@ struct PermissionDependencyStatusViewModelTests {
         let state = PermissionDependencyStatusState.from(
             dependencyResponse(
                 ok: true,
-                checks: grantedPermissionChecks + [
-                    check("platform.os", status: "supported", required: true, ok: true),
-                    check("platform.cpu_arch", status: "supported", required: true, ok: true),
+                checks: captureReadyChecks + [
                     check("developer_tools.swift", status: "available", required: true, ok: true),
                     check("media_tool.ffmpeg", status: "available", required: true, ok: true),
                     check("transcription.runtime", status: "available", required: true, ok: true),
@@ -181,9 +282,63 @@ struct PermissionDependencyStatusViewModelTests {
         #expect(PermissionDependencyAccessibilityID.heading == "ma.permissionDependency.heading")
         #expect(PermissionDependencyAccessibilityID.summary == "ma.permissionDependency.summary")
         #expect(PermissionDependencyAccessibilityID.checkButton == "ma.permissionDependency.checkButton")
+        #expect(
+            PermissionDependencyAccessibilityID.openMicrophoneSettingsButton ==
+                "ma.permissionDependency.openMicrophoneSettingsButton"
+        )
         #expect(PermissionDependencyAccessibilityID.appIdentity == "ma.permissionDependency.appIdentity")
         #expect(PermissionDependencyAccessibilityID.permissionsSection == "ma.permissionDependency.permissions")
         #expect(PermissionDependencyAccessibilityID.dependenciesSection == "ma.permissionDependency.dependencies")
+    }
+
+    @Test
+    func mapsPermissionRepairDestinationsToSpecificButtonCopyAndSystemSettingsURI() {
+        let systemSettingsScheme = "x-apple." + "systempreferences:com.apple.preference.security?"
+        let screenRecording = NativePermissionRepairDestination(
+            permissionID: "permission.screen_recording"
+        )
+        let microphone = NativePermissionRepairDestination(
+            permissionID: "permission.microphone"
+        )
+
+        #expect(screenRecording == .screenRecording)
+        #expect(screenRecording?.buttonTitle == "Open Screen Recording Settings")
+        #expect(
+            screenRecording?.systemSettingsURI ==
+                systemSettingsScheme + "Privacy_ScreenCapture"
+        )
+        #expect(microphone == .microphone)
+        #expect(microphone?.buttonTitle == "Open Microphone Settings")
+        #expect(
+            microphone?.systemSettingsURI ==
+                systemSettingsScheme + "Privacy_Microphone"
+        )
+        #expect(NativePermissionRepairDestination(permissionID: "permission.camera") == nil)
+    }
+
+    @Test
+    func exposesRepairDestinationOnlyForEachUnconfirmedOrDeniedPermission() {
+        let screenDenied = PermissionDependencyStatusState.from(
+            dependencyResponse(
+                ok: true,
+                checks: [
+                    check("permission.screen_recording", status: "denied", required: false, ok: false),
+                    check("permission.microphone", status: "granted", required: false, ok: true),
+                ]
+            )
+        )
+        let microphoneUnconfirmed = PermissionDependencyStatusState.from(
+            dependencyResponse(
+                ok: true,
+                checks: [
+                    check("permission.screen_recording", status: "granted", required: false, ok: true),
+                    check("permission.microphone", status: "unknown", required: false, ok: true),
+                ]
+            )
+        )
+
+        #expect(screenDenied.permissionRepairDestinations == [.screenRecording])
+        #expect(microphoneUnconfirmed.permissionRepairDestinations == [.microphone])
     }
 
     @Test
@@ -218,6 +373,7 @@ struct PermissionDependencyStatusViewModelTests {
 
         #expect(viewModel.state.phase == .failed)
         #expect(viewModel.state.canStartRecording == false)
+        #expect(viewModel.state.canStartRecording(captureMicrophoneAudio: false) == false)
     }
 
     @Test
@@ -257,6 +413,15 @@ private let grantedPermissionChecks = [
     check("permission.screen_recording", status: "granted", required: false, ok: true),
     check("permission.microphone", status: "granted", required: false, ok: true),
 ]
+
+private let passingCaptureDependencyChecks = [
+    check("platform.os", status: "supported", required: true, ok: true),
+    check("platform.macos_version", status: "supported", required: true, ok: true),
+    check("platform.cpu_arch", status: "supported", required: true, ok: true),
+    check("workspace.writable", status: "writable", required: true, ok: true),
+]
+
+private let captureReadyChecks = grantedPermissionChecks + passingCaptureDependencyChecks
 
 private func dependencyResponse(
     ok: Bool,

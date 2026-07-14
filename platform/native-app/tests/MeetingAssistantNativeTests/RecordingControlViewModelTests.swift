@@ -310,6 +310,10 @@ private func readyReadinessState() -> PermissionDependencyStatusState {
             ok: true,
             requestID: "local-ready",
             checks: [
+                dependencyCheck("platform.os", status: "supported", required: true, ok: true),
+                dependencyCheck("platform.macos_version", status: "supported", required: true, ok: true),
+                dependencyCheck("platform.cpu_arch", status: "supported", required: true, ok: true),
+                dependencyCheck("workspace.writable", status: "writable", required: true, ok: true),
                 dependencyCheck("permission.screen_recording", status: "granted", required: false, ok: true),
                 dependencyCheck("permission.microphone", status: "granted", required: false, ok: true),
                 dependencyCheck("media_tool.ffmpeg", status: "available", required: true, ok: true),

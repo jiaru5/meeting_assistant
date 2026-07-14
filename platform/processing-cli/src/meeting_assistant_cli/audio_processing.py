@@ -224,18 +224,19 @@ def _ensure_existing_normalized_matches_source(session_dir: Path, existing: dict
     source_artifact_id = str(source.artifact.get("id"))
     expected_artifact_id = _normalized_artifact_id(source_artifact_id)
     available_audio_ids = _available_audio_artifact_ids(session_dir, list(load_session(session_dir).get("artifacts", [])))
-    source_identity_mismatch = (
-        existing.get("id") != expected_artifact_id
-        and source.artifact.get("artifact_type") != "mixed_audio"
-        and len(available_audio_ids) > 1
+    if existing.get("id") == expected_artifact_id:
+        return
+    legacy_copy_matches_source = normalized_checksum == source_checksum and (
+        source.artifact.get("artifact_type") == "mixed_audio" or len(available_audio_ids) == 1
     )
-    if normalized_checksum != source_checksum or source_identity_mismatch:
-        raise ContractError(
-            "path_conflict",
-            "normalized_audio already exists for a different audio source; changing the source artifact requires an explicit replace policy.",
-            source_artifact_id=source_artifact_id,
-            existing_artifact_id=existing.get("id"),
-        )
+    if legacy_copy_matches_source:
+        return
+    raise ContractError(
+        "path_conflict",
+        "normalized_audio already exists for a different audio source; changing the source artifact requires an explicit replace policy.",
+        source_artifact_id=source_artifact_id,
+        existing_artifact_id=existing.get("id"),
+    )
 
 
 def _ensure_wav_pcm(path: Path) -> None:

@@ -73,7 +73,7 @@ MVP.1 不新增录制、处理、导出或删除命令，而是把既有六个�
 稳定产品入口：
 
 1. Meetings：首页和最近会议。空状态提供“新建录制”；非空状态允许选择一个会话，并根据该会话的 `MeetingSessionStatus`、artifact 和 transcript projection 进入继续处理或回查。
-2. New recording：填写可选会议标题，查看当前真实支持的录制目标，选择系统音频和麦克风录制意图，完成预检后开始录制。
+2. New recording：填写可选会议标题，查看当前真实支持的录制目标，选择系统音频和麦克风录制意图，完成与当前捕获意图对应的预检后开始录制；转写 runtime/model 或媒体处理依赖缺失只阻断后续 processing，不阻断可安全保存的录制。
 3. Meeting detail：承载录制中、保存结果、处理状态和 transcript 成果；同一时间只呈现当前会话及与其状态匹配的操作。
 4. Settings and diagnostics：承载 workspace、权限、依赖、runtime/model、原始 error code、artifact type 和路径等技术信息；这些信息不得在默认任务界面与主操作等权竞争。
 
@@ -83,14 +83,16 @@ MVP.1 不新增录制、处理、导出或删除命令，而是把既有六个�
 2. 主内容区一次只呈现当前任务，不得把 Preflight、Record、Artifacts、Processing、Transcript 和 Export/Delete 六个完整面板同时平铺在一个长页面。
 3. 每个阶段最多突出一个上下文主操作：新建录制、修复或重试预检、开始录制、停止录制、生成 transcript、重试处理、复制或导出。删除必须是次级 destructive 操作。
 4. `recording`、`stopping`、`processing` 等进行中状态必须阻止切换到会导致错误会话操作的入口；停止动作在录制中持续可见。
-5. 处理只允许作用于状态为 `recorded` 且具有可用或降级可处理音频的当前会话；不得只根据依赖 ready 就允许处理。
+5. 新处理只允许作用于状态为 `recorded` 且具有可用或降级可处理音频的当前会话；重新打开持久状态为 `processing`、但当前 App 内已无运行任务的会话时，必须把它呈现为“上次处理被中断”，在原始音频仍通过安全校验时允许用户重新选择音频并重试，不得假定旧任务仍运行或处理已经成功。
 6. 录制结束后展示人类可读的保存结果和 artifact 完整性，并由用户主动选择“生成 transcript”；不得默认自动处理。
-7. 处理成功或 transcript-only 降级后进入同一会话的 transcript；加载失败必须持久可见且可重试，不能静默吞掉。
+7. 处理成功或 transcript-only 降级后进入同一会话的 transcript；加载失败必须持久可见并提供重新加载或安全退出，不能静默吞掉。已登记但缺失、checksum 漂移或无法解码的 transcript 在没有显式 replace/repair 契约时不得把“重新生成”呈现为可成功恢复路径。
 8. 删除成功后必须原子清理当前会话的录制、处理、transcript 和 action UI 状态，刷新最近会议，并返回 Meetings；不得继续对已删除 session 暴露操作。
 9. 最近会议使用 `02-domain-model.md` 已定义的 `MeetingSessionSummaryView` 读取投影；不新增持久索引字段，也不扫描 workspace 外目录。
 10. 原始 command、artifact type、error code、session id 和绝对路径只在可展开的技术详情或 diagnostics 中显示；默认文案使用会议、屏幕视频、会议音频、麦克风、transcript 等用户术语。
 11. 当前 Apple ScreenCaptureKit adapter 只支持 `screen` 时，New recording 只能把整屏录制呈现为可用选项；不得把 `window` 或 `area` 显示为可成功执行的入口。
 12. Import media 继续作为次级回退分支，不得与新建原生录制争夺首页主操作。
+13. 录屏和 workspace 写入是整屏录制的阻断项；麦克风权限只在用户启用麦克风意图时阻断。修复动作必须指向缺失权限对应的 macOS 设置页。
+14. Saved 或中断恢复状态优先选择 `mixed_audio`；真正未登记 `mixed_audio` 时，必须从已经通过会话边界和文件完整性校验的输入中选择 `normalized_audio`，或列出 `system_audio`、`microphone_audio` 由用户确认。若已登记的首选输入或 provider 会预检的其他原始媒体缺失、checksum 漂移或路径不安全，必须把 processing 判为异常而不是静默回退。已经生成 `normalized_audio` 后的同源重试继续复用该输入；切换到另一原始音轨需要尚未定义的显式 replace policy，不是 MVP.1 可用入口。
 
 ## 关键状态要求
 

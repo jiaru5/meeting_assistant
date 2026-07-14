@@ -3129,7 +3129,7 @@ private final class AppTranscriptActionProcessFixture {
     }
 }
 
-private final class AppProcessingProcessFixture {
+final class AppProcessingProcessFixture {
     let mode: String
     let rootURL: URL
     let workspaceURL: URL

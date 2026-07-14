@@ -96,13 +96,22 @@ struct MeetingSessionWorkspaceRepositoryTests {
         #expect(snapshot.sessions.map(\.id) == ["session-newer", "session-older"])
         #expect(snapshot.sessions[0].title == nil)
         #expect(snapshot.sessions[0].durationLabel == "02:05")
-        #expect(snapshot.sessions[0].artifactCount == 2)
+        #expect(snapshot.sessions[0].artifactCount == 1)
         #expect(snapshot.sessions[0].hasProcessableAudio)
+        #expect(snapshot.sessions[0].processableAudioSources == [
+            MeetingProcessableAudioSource(
+                id: "artifact-microphone",
+                artifactType: "microphone_audio"
+            ),
+        ])
         #expect(!snapshot.sessions[0].hasTranscript)
         #expect(!snapshot.sessions[0].hasSpeakerLabels)
         #expect(snapshot.sessions[1].durationLabel == "1:02:03")
-        #expect(snapshot.sessions[1].artifactCount == 4)
+        #expect(snapshot.sessions[1].artifactCount == 3)
         #expect(snapshot.sessions[1].hasProcessableAudio)
+        #expect(snapshot.sessions[1].processableAudioSources == [
+            MeetingProcessableAudioSource(id: "artifact-mixed", artifactType: "mixed_audio"),
+        ])
         #expect(snapshot.sessions[1].hasTranscript)
         #expect(snapshot.sessions[1].hasSpeakerLabels)
     }
@@ -195,8 +204,19 @@ struct MeetingSessionWorkspaceRepositoryTests {
 
         let snapshot = try MeetingSessionWorkspaceRepository().load(workspaceURL: workspace)
 
-        #expect(snapshot.sessions.first { $0.id == "session-normalized" }?.hasProcessableAudio == true)
-        #expect(snapshot.sessions.first { $0.id == "session-placeholder" }?.hasProcessableAudio == false)
+        let normalized = try #require(snapshot.sessions.first { $0.id == "session-normalized" })
+        #expect(normalized.hasProcessableAudio)
+        #expect(normalized.artifactCount == 1)
+        #expect(normalized.processableAudioSources == [
+            MeetingProcessableAudioSource(
+                id: "artifact-normalized",
+                artifactType: "normalized_audio"
+            ),
+        ])
+        let placeholder = try #require(snapshot.sessions.first { $0.id == "session-placeholder" })
+        #expect(!placeholder.hasProcessableAudio)
+        #expect(placeholder.artifactCount == 0)
+        #expect(placeholder.processableAudioSources.isEmpty)
     }
 
     @Test
@@ -227,6 +247,13 @@ struct MeetingSessionWorkspaceRepositoryTests {
                     path: "artifacts/speaker_labels.json",
                     status: "available"
                 ),
+                repositoryArtifact(
+                    id: "artifact-audio-drift",
+                    sessionID: "session-transcript-drift",
+                    type: "mixed_audio",
+                    path: "artifacts/mixed_audio.wav",
+                    status: "available"
+                ),
             ]
         )
         let sessionRoot = workspace.appendingPathComponent(
@@ -236,6 +263,9 @@ struct MeetingSessionWorkspaceRepositoryTests {
         try Data("changed transcript".utf8).write(
             to: sessionRoot.appendingPathComponent("artifacts/transcript.json")
         )
+        try Data("changed audio".utf8).write(
+            to: sessionRoot.appendingPathComponent("artifacts/mixed_audio.wav")
+        )
         try FileManager.default.removeItem(
             at: sessionRoot.appendingPathComponent("artifacts/speaker_labels.json")
         )
@@ -244,8 +274,15 @@ struct MeetingSessionWorkspaceRepositoryTests {
         let snapshot = try repository.load(workspaceURL: workspace)
 
         #expect(snapshot.sessions.count == 1)
+        #expect(snapshot.sessions[0].artifactCount == 2)
         #expect(snapshot.sessions[0].hasTranscript == true)
         #expect(snapshot.sessions[0].hasSpeakerLabels == false)
+        #expect(snapshot.sessions[0].processableAudioSources == [
+            MeetingProcessableAudioSource(
+                id: "artifact-audio-drift",
+                artifactType: "mixed_audio"
+            ),
+        ])
 
         let selected = try repository.loadSelectedSession(
             workspaceURL: workspace,
@@ -254,6 +291,9 @@ struct MeetingSessionWorkspaceRepositoryTests {
 
         #expect(selected?.hasTranscript == false)
         #expect(selected?.hasSpeakerLabels == false)
+        #expect(selected?.hasProcessableAudio == false)
+        #expect(selected?.artifactCount == 0)
+        #expect(selected?.processableAudioSources.isEmpty == true)
     }
 
     @Test
@@ -270,6 +310,20 @@ struct MeetingSessionWorkspaceRepositoryTests {
             updatedAt: "2026-07-12T10:30:00Z",
             artifacts: [
                 repositoryArtifact(
+                    id: "artifact-large-video",
+                    sessionID: "session-layered-validation",
+                    type: "screen_video",
+                    path: "artifacts/screen.mov",
+                    status: "available"
+                ),
+                repositoryArtifact(
+                    id: "artifact-system-audio",
+                    sessionID: "session-layered-validation",
+                    type: "system_audio",
+                    path: "artifacts/system_audio.wav",
+                    status: "available"
+                ),
+                repositoryArtifact(
                     id: "artifact-large-audio",
                     sessionID: "session-layered-validation",
                     type: "mixed_audio",
@@ -283,6 +337,13 @@ struct MeetingSessionWorkspaceRepositoryTests {
                     path: "artifacts/transcript.json",
                     status: "available"
                 ),
+                repositoryArtifact(
+                    id: "artifact-speakers",
+                    sessionID: "session-layered-validation",
+                    type: "speaker_labels",
+                    path: "artifacts/speaker_labels.json",
+                    status: "available"
+                ),
             ]
         )
         let probe = RepositoryChecksumProbe()
@@ -294,6 +355,12 @@ struct MeetingSessionWorkspaceRepositoryTests {
 
         #expect(projection.sessions.count == 1)
         #expect(projection.sessions[0].hasProcessableAudio)
+        #expect(projection.sessions[0].processableAudioSources == [
+            MeetingProcessableAudioSource(
+                id: "artifact-large-audio",
+                artifactType: "mixed_audio"
+            ),
+        ])
         #expect(projection.sessions[0].hasTranscript)
         #expect(probe.paths.isEmpty)
 
@@ -303,11 +370,199 @@ struct MeetingSessionWorkspaceRepositoryTests {
         )
 
         #expect(selected?.hasProcessableAudio == true)
+        #expect(selected?.processableAudioSources == [
+            MeetingProcessableAudioSource(
+                id: "artifact-large-audio",
+                artifactType: "mixed_audio"
+            ),
+        ])
         #expect(selected?.hasTranscript == true)
+        #expect(selected?.hasSpeakerLabels == true)
+        #expect(selected?.artifactCount == 5)
         #expect(Set(probe.paths.map { URL(fileURLWithPath: $0).lastPathComponent }) == Set([
+            "screen.mov",
+            "system_audio.wav",
             "mixed_audio.wav",
             "transcript.json",
+            "speaker_labels.json",
         ]))
+    }
+
+    @Test
+    func registeredPreferredAudioThatIsMissingBlocksUnsafeFallbackSources() throws {
+        let workspace = try makeRepositoryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+
+        for preferredType in ["mixed_audio", "normalized_audio"] {
+            let sessionID = "session-broken-\(preferredType)"
+            try writeRepositorySession(
+                workspace: workspace,
+                sessionID: sessionID,
+                title: "Broken preferred audio",
+                status: "recorded",
+                startedAt: "2026-07-12T10:00:00Z",
+                endedAt: "2026-07-12T10:30:00Z",
+                updatedAt: "2026-07-12T10:30:00Z",
+                artifacts: [
+                    repositoryArtifact(
+                        id: "artifact-preferred-\(preferredType)",
+                        sessionID: sessionID,
+                        type: preferredType,
+                        path: "artifacts/\(preferredType).wav",
+                        status: "available"
+                    ),
+                    repositoryArtifact(
+                        id: "artifact-system-\(preferredType)",
+                        sessionID: sessionID,
+                        type: "system_audio",
+                        path: "artifacts/system_audio.wav",
+                        status: "available"
+                    ),
+                ]
+            )
+            try FileManager.default.removeItem(
+                at: workspace.appendingPathComponent(
+                    "sessions/\(sessionID)/artifacts/\(preferredType).wav"
+                )
+            )
+        }
+
+        let repository = MeetingSessionWorkspaceRepository()
+        let projection = try repository.load(workspaceURL: workspace)
+        #expect(projection.sessions.count == 2)
+        #expect(projection.sessions.allSatisfy { !$0.hasProcessableAudio })
+        #expect(projection.sessions.allSatisfy { $0.processableAudioSources.isEmpty })
+
+        for session in projection.sessions {
+            let selected = try repository.loadSelectedSession(
+                workspaceURL: workspace,
+                sessionID: session.id
+            )
+            #expect(selected?.hasProcessableAudio == false)
+            #expect(selected?.processableAudioSources.isEmpty == true)
+        }
+    }
+
+    @Test
+    func selectedSessionBlocksProcessingWhenAnyProviderVerifiedOriginalChecksumDrifts() throws {
+        let workspace = try makeRepositoryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let sessionID = "session-screen-drift"
+        try writeRepositorySession(
+            workspace: workspace,
+            sessionID: sessionID,
+            title: "Screen drift",
+            status: "recorded",
+            startedAt: "2026-07-12T10:00:00Z",
+            endedAt: "2026-07-12T10:30:00Z",
+            updatedAt: "2026-07-12T10:30:00Z",
+            artifacts: [
+                repositoryArtifact(
+                    id: "artifact-screen",
+                    sessionID: sessionID,
+                    type: "screen_video",
+                    path: "artifacts/screen.mov",
+                    status: "available"
+                ),
+                repositoryArtifact(
+                    id: "artifact-mixed",
+                    sessionID: sessionID,
+                    type: "mixed_audio",
+                    path: "artifacts/mixed_audio.wav",
+                    status: "available"
+                ),
+            ]
+        )
+        try Data("changed screen video".utf8).write(
+            to: workspace.appendingPathComponent(
+                "sessions/\(sessionID)/artifacts/screen.mov"
+            )
+        )
+
+        let repository = MeetingSessionWorkspaceRepository()
+        let projection = try repository.load(workspaceURL: workspace)
+        #expect(projection.sessions[0].hasProcessableAudio)
+
+        let selected = try repository.loadSelectedSession(
+            workspaceURL: workspace,
+            sessionID: sessionID
+        )
+        #expect(selected?.hasProcessableAudio == false)
+        #expect(selected?.processableAudioSources.isEmpty == true)
+        #expect(selected?.artifactCount == 1)
+    }
+
+    @Test
+    func recordedSessionsKeepRegisteredTranscriptSignalWhenPayloadNeedsRepair() throws {
+        for failure in RegisteredTranscriptFixtureFailure.allCases {
+            let workspace = try makeRepositoryWorkspace()
+            defer { try? FileManager.default.removeItem(at: workspace) }
+            let sessionID = "session-recorded-transcript-\(failure.rawValue)"
+            try writeRepositorySession(
+                workspace: workspace,
+                sessionID: sessionID,
+                title: "Recorded transcript repair",
+                status: "recorded",
+                startedAt: "2026-07-12T10:00:00Z",
+                endedAt: "2026-07-12T10:30:00Z",
+                updatedAt: "2026-07-12T10:31:00Z",
+                artifacts: [
+                    repositoryArtifact(
+                        id: "artifact-audio",
+                        sessionID: sessionID,
+                        type: "mixed_audio",
+                        path: "artifacts/mixed_audio.wav",
+                        status: "available"
+                    ),
+                    repositoryArtifact(
+                        id: "artifact-transcript",
+                        sessionID: sessionID,
+                        type: "transcript_text",
+                        path: "artifacts/transcript.json",
+                        status: "available"
+                    ),
+                ]
+            )
+            let transcriptURL = workspace.appendingPathComponent(
+                "sessions/\(sessionID)/artifacts/transcript.json"
+            )
+            switch failure {
+            case .missing:
+                try FileManager.default.removeItem(at: transcriptURL)
+            case .checksumDrift:
+                try Data("changed transcript payload".utf8).write(to: transcriptURL)
+            case .corruptJSON:
+                // The repository fixture payload is deliberately non-JSON while
+                // retaining its matching checksum, so the read-model loader owns
+                // the final schema-validation failure.
+                break
+            }
+
+            let repository = MeetingSessionWorkspaceRepository()
+            let loadedSession = try repository.loadSelectedSession(
+                workspaceURL: workspace,
+                sessionID: sessionID
+            )
+            let selected = try #require(loadedSession)
+
+            #expect(selected.status == "recorded")
+            #expect(selected.hasRegisteredTranscript)
+            #expect(selected.hasProcessableAudio)
+            if failure == .corruptJSON {
+                #expect(selected.hasTranscript)
+                do {
+                    _ = try TranscriptReviewWorkspaceLoader.load(
+                        workspaceURL: workspace,
+                        sessionID: sessionID
+                    )
+                    Issue.record("Expected corrupt registered transcript JSON to require repair.")
+                } catch {
+                    #expect(!error.localizedDescription.isEmpty)
+                }
+            } else {
+                #expect(!selected.hasTranscript)
+            }
+        }
     }
 
     @Test
@@ -366,6 +621,8 @@ struct MeetingSessionWorkspaceRepositoryTests {
         #expect(projection.issues.isEmpty)
         #expect(projection.sessions.count == 2)
         #expect(projection.sessions.allSatisfy { !$0.hasProcessableAudio })
+        #expect(projection.sessions.allSatisfy { $0.artifactCount == 0 })
+        #expect(projection.sessions.allSatisfy { $0.processableAudioSources.isEmpty })
         #expect(probe.paths.isEmpty)
     }
 
@@ -646,6 +903,12 @@ struct MeetingSessionWorkspaceRepositoryTests {
             #expect(path.hasSuffix("/sessions"))
         }
     }
+}
+
+private enum RegisteredTranscriptFixtureFailure: String, CaseIterable {
+    case missing
+    case checksumDrift = "checksum-drift"
+    case corruptJSON = "corrupt-json"
 }
 
 private func makeRepositoryWorkspace() throws -> URL {

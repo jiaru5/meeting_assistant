@@ -22,7 +22,8 @@ grep -q "VS-MA-26 through VS-MA-30 task-based meeting workflow boundary" tests/A
 grep -q "VS-MA-20 opt-in native app-bundle MVP full-stack smoke boundary" tests/ArchitectureTest.md
 grep -q "MA_NATIVE_TRANSCRIPT_ACTION_CLIENT=process" tests/ArchitectureTest.md
 grep -q "MA_NATIVE_RECORDING_CONTROLLED_MIXED_AUDIO=1" tests/ArchitectureTest.md
-grep -q "Open Privacy Settings" tests/ArchitectureTest.md
+grep -q "Open Screen Recording Settings" tests/ArchitectureTest.md
+grep -q "Open Microphone Settings" tests/ArchitectureTest.md
 grep -q "NSWorkspace.shared.open" tests/ArchitectureTest.md
 grep -q "ma.permissionDependency.appIdentity" tests/ArchitectureTest.md
 grep -q "must not grant permissions" tests/ArchitectureTest.md
@@ -102,6 +103,7 @@ test -f UITests/MeetingAssistantNativeAppUITests/DesignedNativeShellAppBundleTes
 grep -R -q "check_dependencies" Sources tests App
 grep -R -q "ma.permissionDependency" Sources tests App UITests
 grep -R -q "ma.permissionDependency.openPrivacySettingsButton" Sources tests App UITests
+grep -R -q "ma.permissionDependency.openMicrophoneSettingsButton" Sources tests App UITests
 grep -R -q "ma.permissionDependency.appIdentity" Sources tests App UITests
 grep -R -q "LocalAppPermissionIdentity" Sources tests App UITests
 grep -R -q "bundlePath" Sources tests App UITests
@@ -253,8 +255,23 @@ fi
 grep -R -q "autoRefreshPreflightOnAppear" App/MeetingAssistantNativeApp.swift Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -R -q "workspaceURL" App/MeetingAssistantNativeApp.swift Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -R -q ".onChange(of: permissionViewModel.state)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
-grep -R -q "recordingViewModel.updateReadiness(readiness)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -R -q ".onChange(of: coordinator.recordingDraft.captureMicrophoneAudio)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -R -q "synchronizeRecordingReadiness" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -R -q "readiness.canStartRecording" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -R -q "processingViewModel.updateReadiness(readiness)" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -R -q "ma.meetingDetail.audioSourcePicker" Sources tests App UITests
+grep -R -q "ma.meetingDetail.transcriptToolbar" Sources tests App UITests
+grep -R -q "LazyVStack" Sources/MeetingAssistantNative/DesignedNativeShellView.swift
+grep -R -q "selectedProcessingAudioSourceID" Sources tests App UITests
+grep -R -q "processingRequestSourceArtifactID" Sources tests App UITests
+grep -R -q "processingIntegrityTypes" Sources tests App UITests
+grep -R -q "processingIntegrityPasses" Sources tests App UITests
+grep -R -q "transcriptWillLoad" Sources tests App UITests
+grep -R -q "MeetingTranscriptLoadToken" Sources tests App UITests
+grep -R -q "isCurrentTranscriptLoad" Sources tests App UITests
+grep -R -q "Task.detached(priority: .userInitiated)" App/MeetingAssistantNativeApp.swift
+grep -R -q ".onChange(of: workspaceCoordinator.recordingDraft)" App/MeetingAssistantNativeApp.swift
+grep -R -q "captureMicrophoneAudio: workspaceCoordinator.recordingDraft.captureMicrophoneAudio" App/MeetingAssistantNativeApp.swift
 grep -R -q '.keyboardShortcut("r", modifiers: \[.command, .option\])' Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -R -q '.keyboardShortcut("s", modifiers: \[.command, .option\])' Sources/MeetingAssistantNative/DesignedNativeShellView.swift
 grep -R -q '.keyboardShortcut("p", modifiers: \[.command, .option\])' Sources/MeetingAssistantNative/DesignedNativeShellView.swift
@@ -588,11 +605,15 @@ grep -R -q "MeetingAssistantNativeAppUITests" MeetingAssistantNative.xcodeproj/p
 
 permission_privacy_settings_file='Sources/MeetingAssistantNative/PermissionDependencyStatusView.swift'
 permission_view_model_file='Sources/MeetingAssistantNative/PermissionDependencyStatusViewModel.swift'
-grep -q 'Button("Open Privacy Settings")' "$permission_privacy_settings_file"
+grep -q 'Button("Open Screen Recording Settings")' "$permission_privacy_settings_file"
+grep -q 'Button("Open Microphone Settings")' "$permission_privacy_settings_file"
 grep -q 'openPrivacySettings()' "$permission_privacy_settings_file"
+grep -q 'openMicrophoneSettings()' "$permission_privacy_settings_file"
 grep -q 'NSWorkspace.shared.open(url)' "$permission_privacy_settings_file"
 grep -q 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture' "$permission_privacy_settings_file"
+grep -q 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone' "$permission_privacy_settings_file"
 grep -q 'PermissionDependencyAccessibilityID.openPrivacySettingsButton' "$permission_privacy_settings_file"
+grep -q 'PermissionDependencyAccessibilityID.openMicrophoneSettingsButton' "$permission_privacy_settings_file"
 grep -q 'kSecCodeInfoDesignatedRequirement' "$permission_view_model_file"
 grep -q 'SecRequirementCopyString' "$permission_view_model_file"
 grep -q 'kSecCodeInfoCertificates' "$permission_view_model_file"
