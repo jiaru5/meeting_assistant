@@ -208,8 +208,12 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
     private var transcriptValidationRevision = 0
     private var workspaceProjectionRevision = 0
     private var sessionProjectionRevisions: [String: Int] = [:]
+    private var activeTranscriptValidationRollbackSessionsByID: [
+        String: MeetingSessionSummary
+    ] = [:]
     private var sessionsProjectionTask: Task<MeetingSessionsRefreshOutcome, Never>?
     private var sessionsValidationTask: Task<MeetingSessionWorkspaceSnapshot?, Never>?
+    private var sessionsValidationCompletionTask: Task<Void, Never>?
     private var transcriptLoadRevision = 0
     private var activeTranscriptLoadToken: MeetingTranscriptLoadToken?
     private var explicitProcessingAudioSourceIDsBySession: [String: String] = [:]
@@ -258,6 +262,12 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         self.selectedProcessingAudioSourceID = nil
         self.route = initialRoute
         self.recordingDraft = recordingDraft
+    }
+
+    deinit {
+        sessionsProjectionTask?.cancel()
+        sessionsValidationCompletionTask?.cancel()
+        sessionsValidationTask?.cancel()
     }
 
     public var navigationIsLocked: Bool {
@@ -934,18 +944,27 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         projectedSessions: [MeetingSessionSummary]
     ) -> MeetingTranscriptValidationRequest? {
         let previousPendingSessionIDs = transcriptValidationPendingSessionIDs
+        let currentSessionsByID = Dictionary(
+            uniqueKeysWithValues: recentSessions.map { ($0.id, $0) }
+        )
         let rollbackSessionsByID = Dictionary(
-            uniqueKeysWithValues: recentSessions.lazy
-                .filter {
-                    pendingSessionIDs.contains($0.id)
-                        && !previousPendingSessionIDs.contains($0.id)
+            uniqueKeysWithValues: pendingSessionIDs.compactMap { sessionID in
+                let rollbackSession: MeetingSessionSummary?
+                if previousPendingSessionIDs.contains(sessionID) {
+                    rollbackSession = activeTranscriptValidationRollbackSessionsByID[sessionID]
+                } else {
+                    rollbackSession = currentSessionsByID[sessionID]
                 }
-                .map { ($0.id, $0) }
+                return rollbackSession.map { (sessionID, $0) }
+            }
         )
         transcriptValidationRevision += 1
         let requestedValidationRevision = transcriptValidationRevision
+        sessionsValidationCompletionTask?.cancel()
+        sessionsValidationCompletionTask = nil
         sessionsValidationTask?.cancel()
         sessionsValidationTask = nil
+        activeTranscriptValidationRollbackSessionsByID = rollbackSessionsByID
         transcriptValidationPendingSessionIDs = pendingSessionIDs
         recentSessions = projectedSessions
         guard !pendingSessionIDs.isEmpty else {
@@ -980,12 +999,25 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         } onCancel: {
             request.task.cancel()
         }
+        finishRegisteredTranscriptValidation(
+            request,
+            validatedSnapshot: validatedSnapshot,
+            wasCancelled: Task.isCancelled
+        )
+    }
 
+    private func finishRegisteredTranscriptValidation(
+        _ request: MeetingTranscriptValidationRequest,
+        validatedSnapshot: MeetingSessionWorkspaceSnapshot?,
+        wasCancelled: Bool
+    ) {
         guard transcriptValidationRevision == request.revision else {
             return
         }
+        sessionsValidationCompletionTask = nil
         sessionsValidationTask = nil
-        guard !Task.isCancelled,
+        activeTranscriptValidationRollbackSessionsByID.removeAll()
+        guard !wasCancelled,
               let validatedSnapshot else {
             rollbackCancelledTranscriptValidation(request)
             return
@@ -1020,9 +1052,23 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         guard let request else {
             return
         }
-        Task { [weak self] in
-            await self?.completeRegisteredTranscriptValidation(request)
+        let completionTask = Task { [weak self] in
+            let validatedSnapshot = await withTaskCancellationHandler {
+                await request.task.value
+            } onCancel: {
+                request.task.cancel()
+            }
+            let wasCancelled = Task.isCancelled
+            guard let self else {
+                return
+            }
+            self.finishRegisteredTranscriptValidation(
+                request,
+                validatedSnapshot: validatedSnapshot,
+                wasCancelled: wasCancelled
+            )
         }
+        sessionsValidationCompletionTask = completionTask
     }
 
     private func rollbackCancelledTranscriptValidation(
@@ -1049,8 +1095,11 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
 
     private func cancelActiveTranscriptValidation(clearPending: Bool) {
         transcriptValidationRevision += 1
+        sessionsValidationCompletionTask?.cancel()
+        sessionsValidationCompletionTask = nil
         sessionsValidationTask?.cancel()
         sessionsValidationTask = nil
+        activeTranscriptValidationRollbackSessionsByID.removeAll()
         if clearPending {
             transcriptValidationPendingSessionIDs.removeAll()
         }
@@ -1075,6 +1124,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
     private func noteProjectionMutation(for sessionID: String) {
         workspaceProjectionRevision += 1
         sessionProjectionRevisions[sessionID, default: 0] += 1
+        activeTranscriptValidationRollbackSessionsByID.removeValue(forKey: sessionID)
         transcriptValidationPendingSessionIDs.remove(sessionID)
     }
 

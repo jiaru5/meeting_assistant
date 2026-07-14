@@ -586,6 +586,42 @@ struct MeetingWorkspaceCoordinatorTests {
     }
 
     @Test
+    func repeatedPendingRefreshCarriesStableRollbackIntoNewestValidation() async throws {
+        let stableSession = summary(
+            id: "session-stable-before-refreshes",
+            title: "Stable before refreshes",
+            hasTranscript: true
+        )
+        let snapshot = MeetingSessionWorkspaceSnapshot(
+            sessions: [stableSession],
+            issues: []
+        )
+        let validationProbe = CoordinatorMultiTranscriptValidationProbe()
+        defer { validationProbe.resume(count: 2) }
+        let coordinator = makeCoordinator(
+            initialSessions: [stableSession],
+            sessionsProjectionLoader: { _ in snapshot },
+            registeredTranscriptsValidator: validationProbe.validate
+        )
+
+        let firstRefresh = Task { await coordinator.refreshSessions() }
+        await validationProbe.waitUntilCallCount(1)
+        #expect(coordinator.transcriptValidationPendingSessionIDs == [stableSession.id])
+
+        let secondRefresh = Task { await coordinator.refreshSessions() }
+        await validationProbe.waitUntilCallCount(2)
+        secondRefresh.cancel()
+        validationProbe.resume(count: 2)
+        await secondRefresh.value
+        await firstRefresh.value
+
+        let restored = try #require(coordinator.recentSessions.first)
+        #expect(restored.id == stableSession.id)
+        #expect(restored.hasTranscript)
+        #expect(coordinator.transcriptValidationPendingSessionIDs.isEmpty)
+    }
+
+    @Test
     func cancellingRefreshCancelsTranscriptValidationAndClearsPendingState() async throws {
         let registeredTranscript = summary(
             id: "session-cancel-validation",
@@ -1044,6 +1080,51 @@ struct MeetingWorkspaceCoordinatorTests {
     }
 
     @Test
+    func deletionBackgroundValidationCancelsWhenCoordinatorIsReleased() async throws {
+        let workspace = try makeDeletionWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let remainingSessionID = "session-lifetime-validation"
+        try writeDeletionWorkspaceSession(
+            workspace: workspace,
+            sessionID: remainingSessionID,
+            title: "Lifetime validation",
+            status: "transcribed",
+            artifacts: [[
+                "id": "artifact-lifetime-transcript",
+                "session_id": remainingSessionID,
+                "artifact_type": "transcript_text",
+                "path": "artifacts/transcript.json",
+                "capture_status": "available",
+                "checksum": "sha256:registered-for-lifetime-test",
+            ]]
+        )
+        let validationProbe = CoordinatorCancellableTranscriptValidationProbe()
+        var coordinator: MeetingWorkspaceCoordinator? = makeCoordinator(
+            workspaceURL: workspace,
+            registeredTranscriptsValidator: validationProbe.validate
+        )
+        weak let weakCoordinator = coordinator
+
+        let reconciliation = await coordinator?.reconcileDeletionAttempt(
+            sessionID: "session-already-deleted",
+            commandReportedDeletion: true
+        )
+        #expect(reconciliation == .sessionMissing)
+        await validationProbe.waitUntilStarted()
+
+        coordinator = nil
+        for _ in 0..<1_000 {
+            if weakCoordinator == nil, validationProbe.didObserveCancellation {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+
+        #expect(weakCoordinator == nil)
+        #expect(validationProbe.didObserveCancellation)
+    }
+
+    @Test
     func failedDeleteWithMissingSessionClearsStaleProjectionWithoutClaimingSuccess() async throws {
         let workspace = try makeDeletionWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
@@ -1465,6 +1546,59 @@ private final class CoordinatorTranscriptValidationProbe: @unchecked Sendable {
 
     func resume() {
         resumeValidation.signal()
+    }
+}
+
+private final class CoordinatorMultiTranscriptValidationProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var capturedCallCount = 0
+    private var callCountContinuations: [
+        (target: Int, continuation: CheckedContinuation<Void, Never>)
+    ] = []
+    private let resumeValidation = DispatchSemaphore(value: 0)
+
+    var callCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return capturedCallCount
+    }
+
+    func validate(
+        snapshot: MeetingSessionWorkspaceSnapshot,
+        workspaceURL: URL
+    ) -> MeetingSessionWorkspaceSnapshot? {
+        _ = workspaceURL
+        lock.lock()
+        capturedCallCount += 1
+        let readyContinuations = callCountContinuations.filter {
+            capturedCallCount >= $0.target
+        }
+        callCountContinuations.removeAll {
+            capturedCallCount >= $0.target
+        }
+        lock.unlock()
+        readyContinuations.forEach { $0.continuation.resume() }
+        resumeValidation.wait()
+        return snapshot
+    }
+
+    func waitUntilCallCount(_ target: Int) async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if capturedCallCount >= target {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                callCountContinuations.append((target, continuation))
+                lock.unlock()
+            }
+        }
+    }
+
+    func resume(count: Int) {
+        for _ in 0..<count {
+            resumeValidation.signal()
+        }
     }
 }
 
