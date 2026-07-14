@@ -31,6 +31,8 @@
 8. `scripts/test.sh` 默认运行快速组件测试，不启动真实 `.app` XCUITest；需要完整 app-bundle UI smoke 时运行 `scripts/test-app-bundle.sh`，或设置 `MA_NATIVE_APP_RUN_XCUITEST=1 scripts/test.sh`。`scripts/test-app-bundle.sh` 默认复用忽略目录 `build/DerivedData/AppBundleUITests` 以减少重复 Xcode 构建时间，必要时可用 `MA_NATIVE_APP_DERIVED_DATA_PATH` 指向隔离目录；如果已经为当前 DerivedData 中的 app bundle 授予 TCC 权限，可设置 `MA_NATIVE_APP_REUSE_XCTESTRUN=1` 复用现有 `.xctestrun` 和 app bundle，避免重新构建导致 Debug ad-hoc 签名变化。显式 app-bundle smoke 默认只对 test body 前 Automation Mode blocker 重试 1 次，可用 `MA_NATIVE_APP_UI_AUTOMATION_RETRY_ATTEMPTS=0` 关闭；真实 TCC 或业务断言失败不会被重试吞掉。
 9. MVP.1 任务级 app-bundle suite 可用 `MA_NATIVE_APP_TASK_XCUITEST=1 scripts/test-app-bundle.sh` 单独选择，或用 `MA_NATIVE_APP_RUN_TASK_XCUITEST=1 scripts/test.sh` 在 fast gate 后追加；默认快速测试不会启动 UI automation。该 suite 覆盖 blocked、saved/degraded、processing running/failure/retry、停止保存失败重试和 transcript load failure/reload，并继续复用任务视图及既有 command locator。
 
+任务 suite 可先运行 `MA_NATIVE_APP_TASK_XCUITEST=1 MA_NATIVE_APP_PREPARE_ONLY=1 scripts/test-app-bundle.sh`，只构建当前 fingerprint 对应的 `.xctestrun`、目标 `.app` 和 UI test runner；三者缺一时非零失败，齐备时分别打印目标 app 与 runner 的 path/signature/team/cdhash/designated requirement，不启动 UI Automation。无 flag 的完整 suite 也会先 build-for-testing、执行同一外部实例检查，再用 `test-without-building` 运行全部测试并保留原始退出码。实际运行前若检测到其他路径中正在运行的 `MeetingAssistantNative.app`，脚本默认失败并保留该进程；只有确认它是可丢弃测试实例时才显式设置 `MA_NATIVE_APP_FOREIGN_INSTANCE_POLICY=terminate`。显式 smoke 的 Automation Mode 自动重试只发生在日志尚无任何 `Test Case ... started` 记录时，避免重复已有录制、导出或删除副作用的 test body；无 flag 完整 suite 不新增该重试。
+
 当前已实现 VS-MA-14/VS-MA-15 controlled native capture artifact registration 部分证据：
 
 1. `NativeCaptureAdapter` 定义原生 capture adapter 的受控 start/stop 边界，固定只登记 `screen_video`、`system_audio`、`microphone_audio`、`mixed_audio` 四类目标产物。

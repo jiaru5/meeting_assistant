@@ -7,6 +7,7 @@ cd "$component_dir"
 derived_data_path="${MA_NATIVE_APP_DERIVED_DATA_PATH:-$component_dir/build/DerivedData/AppBundleUITests}"
 destination="${MA_NATIVE_APP_XCODE_DESTINATION:-platform=macOS}"
 reuse_xctestrun="${MA_NATIVE_APP_REUSE_XCTESTRUN:-auto}"
+prepare_only="${MA_NATIVE_APP_PREPARE_ONLY:-0}"
 xctestrun_fingerprint_path="$derived_data_path/.meeting-assistant-xctestrun-inputs.sha256"
 ui_automation_retry_attempts="${MA_NATIVE_APP_UI_AUTOMATION_RETRY_ATTEMPTS:-1}"
 ui_automation_retry_delay_seconds="${MA_NATIVE_APP_UI_AUTOMATION_RETRY_DELAY_SECONDS:-5}"
@@ -43,12 +44,24 @@ mvp_full_stack_log="$derived_data_path/mvp-full-stack-app-bundle-smoke.log"
 task_xcuitest="${MA_NATIVE_APP_TASK_XCUITEST:-0}"
 task_xcuitest_test="MeetingAssistantNativeAppUITests/DesignedNativeShellAppBundleTests"
 task_xcuitest_log="$derived_data_path/task-workflow-app-bundle-xcuitest.log"
+full_xcuitest_log="$derived_data_path/full-app-bundle-xcuitest.log"
 
 mkdir -p "$derived_data_path"
 
 is_truthy() {
   case "${1:-0}" in
     1 | true | TRUE | yes | YES)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_falsey() {
+  case "${1:-0}" in
+    0 | false | FALSE | no | NO)
       return 0
       ;;
     *)
@@ -215,6 +228,67 @@ find_app_bundle_under_test() {
   find "$derived_data_path/Build/Products" -path "*/MeetingAssistantNative.app" -type d -print -quit 2>/dev/null || true
 }
 
+print_ui_test_runner_identity_diagnostics() {
+  local runner_bundle_path="$1"
+  local info_plist
+  local bundle_id=""
+  local codesign_details=""
+  local designated_requirement=""
+  local signature=""
+  local team_identifier=""
+  local cdhash=""
+  local spctl_assessment=""
+
+  if [[ -z "$runner_bundle_path" || ! -d "$runner_bundle_path" ]]; then
+    return 0
+  fi
+
+  info_plist="$runner_bundle_path/Contents/Info.plist"
+  if [[ -f "$info_plist" ]]; then
+    bundle_id="$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$info_plist" 2>/dev/null || true)"
+  fi
+  codesign_details="$(codesign -dv "$runner_bundle_path" 2>&1 || true)"
+  designated_requirement="$(codesign -dr - "$runner_bundle_path" 2>&1 | grep -m 1 "designated =>" || true)"
+  signature="$(printf '%s\n' "$codesign_details" | sed -n 's/^Signature=//p' | head -n 1)"
+  team_identifier="$(printf '%s\n' "$codesign_details" | sed -n 's/^TeamIdentifier=//p' | head -n 1)"
+  cdhash="$(printf '%s\n' "$designated_requirement" | sed -n 's/.*cdhash H"\([^"]*\)".*/\1/p' | head -n 1)"
+  spctl_assessment="$(spctl -a -vv -t exec "$runner_bundle_path" 2>&1 | head -n 1 || true)"
+
+  {
+    echo "UI test runner identifier: ${bundle_id:-unknown}"
+    echo "UI test runner signature: ${signature:-unknown}"
+    echo "UI test runner team identifier: ${team_identifier:-unknown}"
+    echo "UI test runner cdhash: ${cdhash:-unknown}"
+    echo "UI test runner designated requirement: ${designated_requirement:-unknown}"
+    echo "UI test runner spctl assessment: ${spctl_assessment:-unknown}"
+  } >&2
+}
+
+find_ui_test_runner_bundle() {
+  find "$derived_data_path/Build/Products" -path "*/MeetingAssistantNativeAppUITests-Runner.app" -type d -print -quit 2>/dev/null || true
+}
+
+validate_prepared_app_bundle_artifacts() {
+  local app_bundle_path="$1"
+  local runner_bundle_path="$2"
+  local validation_status=0
+
+  if [[ -z "$xctestrun_path" || ! -f "$xctestrun_path" ]]; then
+    echo "error: prepared app-bundle XCUITest is missing its .xctestrun file." >&2
+    validation_status=1
+  fi
+  if [[ -z "$app_bundle_path" || ! -d "$app_bundle_path" ]]; then
+    echo "error: prepared app-bundle XCUITest is missing target app MeetingAssistantNative.app." >&2
+    validation_status=1
+  fi
+  if [[ -z "$runner_bundle_path" || ! -d "$runner_bundle_path" ]]; then
+    echo "error: prepared app-bundle XCUITest is missing UI runner MeetingAssistantNativeAppUITests-Runner.app." >&2
+    validation_status=1
+  fi
+
+  return "$validation_status"
+}
+
 collect_matching_app_bundle_paths() {
   local app_bundle_path="$1"
   local info_plist
@@ -323,13 +397,29 @@ print_app_bundle_tcc_identity_diagnostics() {
   } >&2
 }
 
-terminate_stale_meeting_assistant_instances() {
+handle_foreign_meeting_assistant_instances() {
   local app_bundle_path="$1"
   local smoke_name="$2"
   local expected_executable
+  local policy="${MA_NATIVE_APP_FOREIGN_INSTANCE_POLICY:-fail}"
 
-  if ! is_truthy "${MA_NATIVE_APP_TERMINATE_STALE_INSTANCES:-1}"; then
-    return 0
+  if [[ -n "${MA_NATIVE_APP_TERMINATE_STALE_INSTANCES+x}" ]]; then
+    if is_truthy "${MA_NATIVE_APP_TERMINATE_STALE_INSTANCES:-0}"; then
+      policy="terminate"
+    else
+      policy="ignore"
+    fi
+  fi
+  case "$policy" in
+    fail | terminate | ignore)
+      ;;
+    *)
+      echo "error: MA_NATIVE_APP_FOREIGN_INSTANCE_POLICY must be fail, terminate, or ignore." >&2
+      return 2
+      ;;
+  esac
+  if [[ "$policy" == "ignore" ]]; then
+    echo "warning: native-app $smoke_name app-bundle XCUITest will ignore other MeetingAssistantNative app instances by explicit request." >&2
   fi
   if [[ -z "$app_bundle_path" || ! -d "$app_bundle_path" ]]; then
     return 0
@@ -340,7 +430,7 @@ terminate_stale_meeting_assistant_instances() {
     return 0
   fi
 
-  python3 - "$expected_executable" "$smoke_name" <<'PY'
+  python3 - "$expected_executable" "$smoke_name" "$policy" <<'PY'
 import os
 import signal
 import subprocess
@@ -349,6 +439,7 @@ import time
 
 expected_executable = os.path.realpath(sys.argv[1])
 smoke_name = sys.argv[2]
+policy = sys.argv[3]
 executable_suffix = "/MeetingAssistantNative.app/Contents/MacOS/MeetingAssistantNative"
 
 try:
@@ -383,9 +474,33 @@ for line in process_table.splitlines():
         continue
     stale_processes.append((pid, executable))
 
+if not stale_processes:
+    sys.exit(0)
+
+if policy == "ignore":
+    for pid, executable in stale_processes:
+        print(
+            f"warning: native-app {smoke_name} app-bundle XCUITest is ignoring another MeetingAssistantNative instance pid={pid}: {executable}",
+            file=sys.stderr,
+        )
+    sys.exit(0)
+
+if policy == "fail":
+    print(
+        f"error: native-app {smoke_name} app-bundle XCUITest found another MeetingAssistantNative instance and will not stop it automatically.",
+        file=sys.stderr,
+    )
+    for pid, executable in stale_processes:
+        print(f" - pid={pid}: {executable}", file=sys.stderr)
+    print(
+        "Quit the other app manually, or set MA_NATIVE_APP_FOREIGN_INSTANCE_POLICY=terminate only after confirming it is a disposable test-owned instance.",
+        file=sys.stderr,
+    )
+    sys.exit(3)
+
 for pid, executable in stale_processes:
     print(
-        f"native-app {smoke_name} app-bundle XCUITest terminating stale MeetingAssistantNative instance pid={pid}: {executable}",
+        f"native-app {smoke_name} app-bundle XCUITest explicitly terminating another MeetingAssistantNative instance pid={pid}: {executable}",
         file=sys.stderr,
     )
     try:
@@ -544,27 +659,37 @@ print_ui_testing_automation_process_diagnostics() {
 is_ui_testing_automation_blocked() {
   local log_path="$1"
 
+  if grep -Eq "Test Case ('.*'|-\[.*\]) started\\.?$" "$log_path"; then
+    return 1
+  fi
+
   grep -Eqi 'LocalAuthentication|System authentication is running|Timed out while enabling automation mode|Failed to initialize for UI testing|Failed to enable Automation Mode' "$log_path"
 }
 
 run_app_bundle_test_without_building() {
   local smoke_name="$1"
   local log_path="$2"
-  local test_identifier="$3"
+  local test_identifier="${3:-}"
+  local retry_attempts="${4:-$ui_automation_retry_attempts}"
   local app_bundle_path
   local attempt=1
   local max_attempts
   local attempt_log
   local test_status
+  local foreign_instance_status
 
-  if ! [[ "$ui_automation_retry_attempts" =~ ^[0-9]+$ ]]; then
+  if ! [[ "$retry_attempts" =~ ^[0-9]+$ ]]; then
     echo "error: MA_NATIVE_APP_UI_AUTOMATION_RETRY_ATTEMPTS must be a non-negative integer" >&2
     return 2
   fi
-  max_attempts=$((ui_automation_retry_attempts + 1))
+  max_attempts=$((retry_attempts + 1))
 
   app_bundle_path="$(find_app_bundle_under_test)"
-  terminate_stale_meeting_assistant_instances "$app_bundle_path" "$smoke_name"
+  handle_foreign_meeting_assistant_instances "$app_bundle_path" "$smoke_name"
+  foreign_instance_status=$?
+  if [[ "$foreign_instance_status" -ne 0 ]]; then
+    return "$foreign_instance_status"
+  fi
   if is_truthy "${MA_NATIVE_APP_TCC_IDENTITY_DIAGNOSTICS:-1}"; then
     print_app_bundle_tcc_identity_diagnostics "$app_bundle_path" "$smoke_name"
   fi
@@ -578,10 +703,16 @@ run_app_bundle_test_without_building() {
     } >>"$log_path"
 
     set +e
-    xcodebuild test-without-building \
-      -xctestrun "$xctestrun_path" \
-      -destination "$destination" \
-      "-only-testing:$test_identifier" 2>&1 | tee "$attempt_log"
+    if [[ -n "$test_identifier" ]]; then
+      xcodebuild test-without-building \
+        -xctestrun "$xctestrun_path" \
+        -destination "$destination" \
+        "-only-testing:$test_identifier"
+    else
+      xcodebuild test-without-building \
+        -xctestrun "$xctestrun_path" \
+        -destination "$destination"
+    fi 2>&1 | tee "$attempt_log"
     test_status=${PIPESTATUS[0]}
     set +e
 
@@ -603,7 +734,7 @@ run_app_bundle_test_without_building() {
       return "$test_status"
     fi
 
-    echo "native-app $smoke_name app-bundle XCUITest was blocked before the test body; retrying after ${ui_automation_retry_delay_seconds}s ($attempt/$ui_automation_retry_attempts retries used)." >&2
+    echo "native-app $smoke_name app-bundle XCUITest was blocked before the test body; retrying after ${ui_automation_retry_delay_seconds}s ($attempt/$retry_attempts retries used)." >&2
     sleep "$ui_automation_retry_delay_seconds"
     attempt=$((attempt + 1))
   done
@@ -653,8 +784,39 @@ configure_host_ffmpeg_for_app_bundle() {
   fi
 }
 
+if ! is_truthy "$prepare_only" && ! is_falsey "$prepare_only"; then
+  echo "error: MA_NATIVE_APP_PREPARE_ONLY must be 0, 1, true, false, yes, or no." >&2
+  exit 2
+fi
+if is_truthy "$prepare_only" && ! is_truthy "$task_xcuitest"; then
+  echo "error: MA_NATIVE_APP_PREPARE_ONLY=1 currently requires MA_NATIVE_APP_TASK_XCUITEST=1." >&2
+  exit 2
+fi
+
 if is_truthy "$task_xcuitest"; then
   prepare_xctestrun "task workflow"
+
+  if is_truthy "$prepare_only"; then
+    app_bundle_path="$(find_app_bundle_under_test)"
+    runner_bundle_path="$(find_ui_test_runner_bundle)"
+    if ! validate_prepared_app_bundle_artifacts "$app_bundle_path" "$runner_bundle_path"; then
+      exit 1
+    fi
+    reset_xctestrun_smoke_env
+    echo "native-app task workflow app-bundle XCUITest prepared without starting UI automation."
+    echo "Prepared xctestrun: $xctestrun_path"
+    echo "Prepared app bundle path: $app_bundle_path"
+    echo "Prepared UI test runner path: $runner_bundle_path"
+    print_app_bundle_identity_diagnostics "$app_bundle_path"
+    print_ui_test_runner_identity_diagnostics "$runner_bundle_path"
+    if is_truthy "${MA_NATIVE_APP_TCC_IDENTITY_DIAGNOSTICS:-1}"; then
+      print_app_bundle_tcc_identity_diagnostics "$app_bundle_path" "task workflow"
+    fi
+    echo "Run the prepared task suite with:"
+    echo "  MA_NATIVE_APP_TASK_XCUITEST=1 MA_NATIVE_APP_REUSE_XCTESTRUN=auto MA_NATIVE_APP_UI_AUTOMATION_RETRY_ATTEMPTS=0 ./platform/native-app/scripts/test-app-bundle.sh"
+    exit 0
+  fi
+
   reset_xctestrun_smoke_env
 
   set +e
@@ -935,11 +1097,16 @@ if [[ "$mvp_full_stack_smoke" == "1" || "$mvp_full_stack_smoke" == "true" || "$m
   exit 0
 fi
 
-xcodebuild test \
-  -project "$component_dir/MeetingAssistantNative.xcodeproj" \
-  -scheme "MeetingAssistantNative" \
-  -destination "$destination" \
-  -derivedDataPath "$derived_data_path" \
-  -parallel-testing-enabled NO
+prepare_xctestrun "full suite"
+reset_xctestrun_smoke_env
+
+set +e
+run_app_bundle_test_without_building "full suite" "$full_xcuitest_log" "" "0"
+test_status=$?
+set -e
+if [[ "$test_status" -ne 0 ]]; then
+  echo "native-app full app-bundle XCUITest failed. Captured xcodebuild log: $full_xcuitest_log" >&2
+  exit "$test_status"
+fi
 
 echo "native-app app-bundle XCUITest passed."

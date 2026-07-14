@@ -4,6 +4,7 @@ import base64
 import json
 import hashlib
 import os
+import plistlib
 import re
 import shutil
 import subprocess
@@ -31,6 +32,76 @@ def load_adoption_runtime():
 
 
 class HarnessValidationTests(unittest.TestCase):
+    def create_native_app_bundle_xctestrun_fixture(
+        self,
+        derived_data: Path,
+        *,
+        include_app: bool = True,
+        include_runner: bool = True,
+    ) -> None:
+        products = derived_data / "Build/Products"
+        products.mkdir(parents=True, exist_ok=True)
+        xctestrun = products / "MeetingAssistantNative_test.xctestrun"
+        xctestrun.write_bytes(
+            plistlib.dumps(
+                {
+                    "MeetingAssistantNativeAppUITests": {
+                        "EnvironmentVariables": {},
+                        "TestingEnvironmentVariables": {},
+                    }
+                }
+            )
+        )
+
+        if include_app:
+            executable = products / "Debug/MeetingAssistantNative.app/Contents/MacOS/MeetingAssistantNative"
+            executable.parent.mkdir(parents=True, exist_ok=True)
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o755)
+
+        if include_runner:
+            runner = products / "Debug/MeetingAssistantNativeAppUITests-Runner.app/Contents/MacOS/MeetingAssistantNativeAppUITests-Runner"
+            runner.parent.mkdir(parents=True, exist_ok=True)
+            runner.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            runner.chmod(0o755)
+
+    def run_native_app_bundle_script(
+        self,
+        derived_data: Path,
+        overrides: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env.update(
+            {
+                "MA_NATIVE_APP_DERIVED_DATA_PATH": str(derived_data),
+                "MA_NATIVE_APP_REUSE_XCTESTRUN": "1",
+                "MA_NATIVE_APP_PREPARE_ONLY": "0",
+                "MA_NATIVE_APP_TASK_XCUITEST": "0",
+                "MA_NATIVE_APP_REAL_CAPTURE_SMOKE": "0",
+                "MA_NATIVE_APP_REAL_PROCESSING_SMOKE": "0",
+                "MA_NATIVE_APP_REAL_ACTION_SMOKE": "0",
+                "MA_NATIVE_APP_REAL_ACTION_OS_SMOKE": "0",
+                "MA_NATIVE_APP_REAL_RUNTIME_SMOKE": "0",
+                "MA_NATIVE_APP_VSMA21_HARDENING_SMOKE": "0",
+                "MA_NATIVE_APP_REAL_CAPTURE_SAME_CHAIN_SMOKE": "0",
+                "MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE": "0",
+                "MA_NATIVE_APP_MVP_FULL_STACK_SMOKE": "0",
+                "MA_NATIVE_APP_TCC_IDENTITY_DIAGNOSTICS": "0",
+            }
+        )
+        env.pop("MA_NATIVE_APP_FOREIGN_INSTANCE_POLICY", None)
+        env.pop("MA_NATIVE_APP_TERMINATE_STALE_INSTANCES", None)
+        if overrides:
+            env.update(overrides)
+        return subprocess.run(
+            ["bash", str(ROOT / "platform/native-app/scripts/test-app-bundle.sh")],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
     def copy_repo_fixture(self, directory: str) -> Path:
         fixture = Path(directory) / "repo"
         shutil.copytree(
@@ -1103,19 +1174,156 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("MA_NATIVE_APP_REUSE_XCTESTRUN=0", script)
         self.assertIn("fingerprint differs from the current checkout", script)
         self.assertIn("print_app_bundle_identity_diagnostics", script)
+        self.assertIn("print_ui_test_runner_identity_diagnostics", script)
         self.assertIn("App bundle cdhash", script)
         self.assertIn("App bundle designated requirement", script)
-        self.assertIn("terminate_stale_meeting_assistant_instances", script)
+        self.assertIn("UI test runner cdhash", script)
+        self.assertIn("UI test runner designated requirement", script)
+        self.assertIn("validate_prepared_app_bundle_artifacts", script)
+        self.assertIn("handle_foreign_meeting_assistant_instances", script)
+        self.assertIn('MA_NATIVE_APP_FOREIGN_INSTANCE_POLICY:-fail', script)
+        self.assertIn("will not stop it automatically", script)
+        self.assertIn("MA_NATIVE_APP_FOREIGN_INSTANCE_POLICY=terminate", script)
         self.assertIn("MA_NATIVE_APP_TERMINATE_STALE_INSTANCES", script)
         self.assertIn("/MeetingAssistantNative.app/Contents/MacOS/MeetingAssistantNative", script)
+        self.assertIn('prepare_only="${MA_NATIVE_APP_PREPARE_ONLY:-0}"', script)
+        self.assertIn("prepared without starting UI automation", script)
+        self.assertIn("MA_NATIVE_APP_UI_AUTOMATION_RETRY_ATTEMPTS=0", script)
+        self.assertIn("Test Case ('.*'|-\\[.*\\]) started", script)
+        self.assertIn('prepare_xctestrun "full suite"', script)
+        self.assertIn('run_app_bundle_test_without_building "full suite"', script)
         self.assertIn("MA_NATIVE_APP_REUSE_XCTESTRUN=auto", dev_commands)
         self.assertIn(".meeting-assistant-xctestrun-inputs.sha256", dev_commands)
         self.assertIn("反复弹 Screen Recording", dev_commands)
         self.assertIn("cdhash", dev_commands)
-        self.assertIn("MA_NATIVE_APP_TERMINATE_STALE_INSTANCES=0", dev_commands)
-        self.assertIn("旧 worktree", dev_commands)
+        self.assertIn("MA_NATIVE_APP_FOREIGN_INSTANCE_POLICY=terminate", dev_commands)
+        self.assertIn("MA_NATIVE_APP_PREPARE_ONLY=1", dev_commands)
+        self.assertIn("其他正在运行的 MeetingAssistantNative", dev_commands)
         self.assertIn("MA_NATIVE_APP_REUSE_XCTESTRUN=auto", e2e_readme)
         self.assertIn("Debug ad-hoc rebuild", e2e_readme)
+
+    def test_app_bundle_prepare_only_fails_when_target_app_or_ui_runner_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            missing_both = Path(temp_dir) / "missing-both"
+            self.create_native_app_bundle_xctestrun_fixture(
+                missing_both,
+                include_app=False,
+                include_runner=False,
+            )
+            missing_both_result = self.run_native_app_bundle_script(
+                missing_both,
+                {
+                    "MA_NATIVE_APP_TASK_XCUITEST": "1",
+                    "MA_NATIVE_APP_PREPARE_ONLY": "1",
+                },
+            )
+
+            self.assertEqual(missing_both_result.returncode, 1, missing_both_result.stderr)
+            self.assertIn("missing target app MeetingAssistantNative.app", missing_both_result.stderr)
+            self.assertIn(
+                "missing UI runner MeetingAssistantNativeAppUITests-Runner.app",
+                missing_both_result.stderr,
+            )
+
+            missing_runner = Path(temp_dir) / "missing-runner"
+            self.create_native_app_bundle_xctestrun_fixture(
+                missing_runner,
+                include_app=True,
+                include_runner=False,
+            )
+            missing_runner_result = self.run_native_app_bundle_script(
+                missing_runner,
+                {
+                    "MA_NATIVE_APP_TASK_XCUITEST": "1",
+                    "MA_NATIVE_APP_PREPARE_ONLY": "1",
+                },
+            )
+
+            self.assertEqual(missing_runner_result.returncode, 1, missing_runner_result.stderr)
+            self.assertNotIn("missing target app MeetingAssistantNative.app", missing_runner_result.stderr)
+            self.assertIn(
+                "missing UI runner MeetingAssistantNativeAppUITests-Runner.app",
+                missing_runner_result.stderr,
+            )
+
+    @unittest.skipUnless(Path("/usr/libexec/PlistBuddy").exists(), "requires macOS PlistBuddy")
+    def test_full_app_bundle_suite_checks_foreign_instance_policy_before_testing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            derived_data = Path(temp_dir) / "derived-data"
+            self.create_native_app_bundle_xctestrun_fixture(derived_data)
+
+            result = self.run_native_app_bundle_script(
+                derived_data,
+                {"MA_NATIVE_APP_FOREIGN_INSTANCE_POLICY": "invalid-test-policy"},
+            )
+
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("MA_NATIVE_APP_FOREIGN_INSTANCE_POLICY must be fail, terminate, or ignore", result.stderr)
+            self.assertFalse((derived_data / "full-app-bundle-xcuitest.log").exists())
+
+    @unittest.skipUnless(Path("/usr/libexec/PlistBuddy").exists(), "requires macOS PlistBuddy")
+    def test_app_bundle_prepare_only_reports_target_and_runner_identity_without_testing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            derived_data = Path(temp_dir) / "derived-data"
+            self.create_native_app_bundle_xctestrun_fixture(derived_data)
+
+            result = self.run_native_app_bundle_script(
+                derived_data,
+                {
+                    "MA_NATIVE_APP_TASK_XCUITEST": "1",
+                    "MA_NATIVE_APP_PREPARE_ONLY": "1",
+                },
+            )
+            output = result.stdout + result.stderr
+
+            self.assertEqual(result.returncode, 0, output)
+            self.assertIn("Prepared app bundle path:", output)
+            self.assertIn("Prepared UI test runner path:", output)
+            self.assertIn("App bundle signature:", output)
+            self.assertIn("App bundle team identifier:", output)
+            self.assertIn("App bundle cdhash:", output)
+            self.assertIn("App bundle designated requirement:", output)
+            self.assertIn("UI test runner signature:", output)
+            self.assertIn("UI test runner team identifier:", output)
+            self.assertIn("UI test runner cdhash:", output)
+            self.assertIn("UI test runner designated requirement:", output)
+            self.assertFalse((derived_data / "task-workflow-app-bundle-xcuitest.log").exists())
+
+    @unittest.skipUnless(Path("/usr/libexec/PlistBuddy").exists(), "requires macOS PlistBuddy")
+    def test_full_app_bundle_suite_uses_test_without_building_and_preserves_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            derived_data = temp_path / "derived-data"
+            self.create_native_app_bundle_xctestrun_fixture(derived_data)
+            fake_bin = temp_path / "bin"
+            fake_bin.mkdir()
+            xcodebuild_log = temp_path / "xcodebuild.log"
+            fake_xcodebuild = fake_bin / "xcodebuild"
+            fake_xcodebuild.write_text(
+                "#!/bin/sh\n"
+                "printf '%s\\n' \"$*\" >> \"$MA_NATIVE_APP_TEST_XCODEBUILD_LOG\"\n"
+                "if [ \"${1:-}\" = \"test-without-building\" ]; then\n"
+                "  exit 37\n"
+                "fi\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            fake_xcodebuild.chmod(0o755)
+
+            result = self.run_native_app_bundle_script(
+                derived_data,
+                {
+                    "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+                    "MA_NATIVE_APP_TEST_XCODEBUILD_LOG": str(xcodebuild_log),
+                    "MA_NATIVE_APP_FOREIGN_INSTANCE_POLICY": "ignore",
+                },
+            )
+            calls = xcodebuild_log.read_text(encoding="utf-8")
+
+            self.assertEqual(result.returncode, 37, result.stdout + result.stderr)
+            self.assertIn("test-without-building", calls)
+            self.assertNotIn("-only-testing:", calls)
+            self.assertNotIn("test -project", calls)
 
     def test_vs_ma_21_app_bundle_hardening_smoke_is_documented_and_explicit(self) -> None:
         script = (ROOT / "platform/native-app/scripts/test-app-bundle.sh").read_text(encoding="utf-8")

@@ -176,13 +176,22 @@ grep -q "MA_NATIVE_APP_REAL_CAPTURE_REAL_RUNTIME_SAME_CHAIN_SMOKE" scripts/test-
 grep -q "MA_NATIVE_APP_MVP_FULL_STACK_SMOKE" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_REUSE_XCTESTRUN" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_REUSE_XCTESTRUN:-auto" scripts/test-app-bundle.sh
+grep -q "MA_NATIVE_APP_PREPARE_ONLY" scripts/test-app-bundle.sh
+grep -q "MA_NATIVE_APP_FOREIGN_INSTANCE_POLICY:-fail" scripts/test-app-bundle.sh
+grep -Fq 'Test Case (' scripts/test-app-bundle.sh
 grep -q ".meeting-assistant-xctestrun-inputs.sha256" scripts/test-app-bundle.sh
 grep -q "compute_xctestrun_input_fingerprint" scripts/test-app-bundle.sh
 grep -q "print_app_bundle_identity_diagnostics" scripts/test-app-bundle.sh
+grep -q "print_ui_test_runner_identity_diagnostics" scripts/test-app-bundle.sh
+grep -q "validate_prepared_app_bundle_artifacts" scripts/test-app-bundle.sh
+grep -q 'prepare_xctestrun "full suite"' scripts/test-app-bundle.sh
+grep -q 'run_app_bundle_test_without_building "full suite"' scripts/test-app-bundle.sh
 grep -q "print_app_bundle_tcc_identity_diagnostics" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_TCC_IDENTITY_DIAGNOSTICS" scripts/test-app-bundle.sh
 grep -q "same CFBundleIdentifier" scripts/test-app-bundle.sh
 grep -q "App bundle cdhash" scripts/test-app-bundle.sh
+grep -q "UI test runner cdhash" scripts/test-app-bundle.sh
+grep -q "UI test runner designated requirement" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_UI_AUTOMATION_RETRY_ATTEMPTS" scripts/test-app-bundle.sh
 grep -q "reset_xctestrun_smoke_env" scripts/test-app-bundle.sh
 grep -q "run_app_bundle_test_without_building" scripts/test-app-bundle.sh
