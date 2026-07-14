@@ -718,7 +718,7 @@ struct TranscriptReviewWorkspaceLoaderTests {
     }
 
     @Test
-    func rejectsCrossSessionSpeakerLabelsPayload() throws {
+    func degradesCrossSessionSpeakerLabelsPayloadWithoutHidingTranscript() throws {
         let workspace = try temporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
 
@@ -768,22 +768,18 @@ struct TranscriptReviewWorkspaceLoaderTests {
             ]
         )
 
-        do {
-            _ = try TranscriptReviewWorkspaceLoader.load(workspaceURL: workspace, sessionID: sessionID)
-            Issue.record("Expected cross-session speaker payload to be rejected.")
-        } catch let error as TranscriptReviewWorkspaceLoaderError {
-            guard case .artifactSessionMismatch(let artifactID, let expected, let actual) = error else {
-                Issue.record("Expected artifactSessionMismatch, got \(error).")
-                return
-            }
-            #expect(artifactID == "artifact-speakers")
-            #expect(expected == sessionID)
-            #expect(actual == "other-session")
-        }
+        let input = try TranscriptReviewWorkspaceLoader.load(
+            workspaceURL: workspace,
+            sessionID: sessionID
+        )
+
+        #expect(input.transcript?.sessionID == sessionID)
+        #expect(input.speakerLabels == nil)
+        #expect(input.speakerLabelsDegradationReason?.contains("could not be safely loaded") == true)
     }
 
     @Test
-    func rejectsCrossSessionSpeakerLabelsRegistryEntry() throws {
+    func degradesCrossSessionSpeakerLabelsRegistryEntryWithoutHidingTranscript() throws {
         let workspace = try temporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
 
@@ -818,18 +814,14 @@ struct TranscriptReviewWorkspaceLoaderTests {
             ]
         )
 
-        do {
-            _ = try TranscriptReviewWorkspaceLoader.load(workspaceURL: workspace, sessionID: sessionID)
-            Issue.record("Expected cross-session speaker registry entry to be rejected.")
-        } catch let error as TranscriptReviewWorkspaceLoaderError {
-            guard case .artifactSessionMismatch(let artifactID, let expected, let actual) = error else {
-                Issue.record("Expected artifactSessionMismatch, got \(error).")
-                return
-            }
-            #expect(artifactID == "artifact-speakers")
-            #expect(expected == sessionID)
-            #expect(actual == "other-session")
-        }
+        let input = try TranscriptReviewWorkspaceLoader.load(
+            workspaceURL: workspace,
+            sessionID: sessionID
+        )
+
+        #expect(input.transcript?.sessionID == sessionID)
+        #expect(input.speakerLabels == nil)
+        #expect(input.speakerLabelsDegradationReason?.contains("could not be safely loaded") == true)
     }
 }
 

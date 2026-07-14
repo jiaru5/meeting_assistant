@@ -164,6 +164,7 @@ public struct MeetingSessionWorkspaceRepository: Sendable {
     }
 
     public func load(workspaceURL: URL) throws -> MeetingSessionWorkspaceSnapshot {
+        try Task.checkCancellation()
         guard let sessionsRoot = try validatedSessionsRoot(workspaceURL: workspaceURL) else {
             return MeetingSessionWorkspaceSnapshot(sessions: [], issues: [])
         }
@@ -178,10 +179,12 @@ public struct MeetingSessionWorkspaceRepository: Sendable {
         } catch {
             throw MeetingSessionWorkspaceRepositoryError.sessionsRootUnreadable(sessionsRoot.path)
         }
+        try Task.checkCancellation()
 
         var sessions: [MeetingSessionSummary] = []
         var issues: [MeetingSessionWorkspaceIssue] = []
         for entry in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            try Task.checkCancellation()
             switch loadSession(
                 entry: entry,
                 sessionsRoot: sessionsRoot,

@@ -81,6 +81,10 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         static func meetingRow(_ sessionID: String) -> String {
             "ma.meetings.row.\(sessionID)"
         }
+
+        static func transcriptText(_ segmentID: String) -> String {
+            "ma.transcript.text.\(segmentID)"
+        }
     }
 
     private var launchedApp: XCUIApplication?
@@ -111,8 +115,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         tapButton(ID.newRecordingButton, in: app)
         assertElement(ID.newRecordingHeading, in: app, contains: "Set up your recording")
         assertElement(ID.screenTarget, in: app, contains: "Entire screen")
-        assertExists(ID.readiness, in: app)
-        assertText("Ready to record", in: app)
+        assertElement(ID.readiness, in: app, contains: "Ready to record")
         attachScreenshot("02-new-recording-ready", of: app)
 
         replaceText(in: ID.titleField, with: "MVP.1 planning review", in: app)
@@ -138,7 +141,11 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
 
         tapButton(ID.generateTranscript, in: app)
         assertElement(ID.detailHeading, in: app, contains: "MVP.1 planning review")
-        assertText("The meeting transcript is ready for review.", in: app)
+        assertElement(
+            ID.transcriptText("segment-1"),
+            in: app,
+            contains: "The meeting transcript is ready for review."
+        )
         assertOnlyPrimaryTaskActions([ID.copyTranscript, ID.exportTranscript], in: app)
         attachScreenshot("06-transcript-ready", of: app)
 
@@ -161,7 +168,11 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
 
         tapButton(ID.meetingRow(sessionID), in: app)
         assertElement(ID.detailHeading, in: app, contains: "Transcript Review Fixture")
-        assertText("First transcript segment for review.", in: app)
+        assertElement(
+            ID.transcriptText("seg-1"),
+            in: app,
+            contains: "First transcript segment for review."
+        )
         assertOnlyPrimaryTaskActions([ID.copyTranscript, ID.exportTranscript], in: app)
 
         tapButton(ID.deleteMeeting, in: app)
@@ -187,6 +198,12 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         tapButton(ID.meetingRow(sessionID), in: app)
         assertElement(ID.detailHeading, in: app, contains: "Long Transcript Fixture")
         assertExists(ID.transcriptToolbar, in: app)
+        let toolbar = app.descendants(matching: .any)
+            .matching(identifier: ID.transcriptToolbar)
+            .firstMatch
+        let firstSegment = element(ID.transcriptText("seg-long-0"), in: app)
+        let initialToolbarMinY = toolbar.frame.minY
+        let initialFirstSegmentMinY = firstSegment.frame.minY
 
         let contentScrollView = app.scrollViews.allElementsBoundByIndex.first {
             $0.exists && $0.frame.width > 300
@@ -196,16 +213,22 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
             contentScrollView?.swipeUp()
         }
 
-        let toolbar = app.descendants(matching: .any)
-            .matching(identifier: ID.transcriptToolbar)
-            .firstMatch
         let copy = app.descendants(matching: .button)
             .matching(identifier: ID.copyTranscript)
             .firstMatch
         let export = app.descendants(matching: .button)
             .matching(identifier: ID.exportTranscript)
             .firstMatch
-        XCTAssertTrue(toolbar.exists && toolbar.isHittable)
+        XCTAssertTrue(toolbar.exists)
+        XCTAssertFalse(toolbar.frame.isEmpty)
+        XCTAssertTrue(app.windows.firstMatch.frame.intersects(toolbar.frame))
+        XCTAssertEqual(toolbar.frame.minY, initialToolbarMinY, accuracy: 3)
+        XCTAssertTrue(
+            !firstSegment.exists
+                || firstSegment.frame.minY < initialFirstSegmentMinY - 20
+                || !app.windows.firstMatch.frame.intersects(firstSegment.frame),
+            "Expected transcript content to move while the action toolbar remained fixed."
+        )
         XCTAssertTrue(copy.exists && copy.isHittable)
         XCTAssertTrue(export.exists && export.isHittable)
         assertOnlyPrimaryTaskActions([ID.copyTranscript, ID.exportTranscript], in: app)
@@ -251,7 +274,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
 
         assertElement(ID.newRecordingHeading, in: app, contains: "Set up your recording")
         assertElement(ID.readiness, in: app, contains: "Setup needs attention")
-        assertText("A permission or capture requirement", in: app)
+        assertElement(ID.readiness, in: app, contains: "A permission or capture requirement")
         assertOnlyPrimaryTaskActions(
             [ID.checkAgain],
             disabled: [ID.startRecording],
@@ -332,8 +355,8 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         XCTAssertTrue(microphone.label.contains("Microphone, Not captured"))
         XCTAssertFalse(microphone.label.contains("microphone_audio"))
         XCTAssertFalse(microphone.label.contains("missing"))
-        assertText("Saved with limited quality", in: app)
-        assertText("Successful files were kept", in: app)
+        assertElement(ID.artifactStatus("mixed_audio"), in: app, contains: "Saved with limited quality")
+        assertElement(ID.savedSummary, in: app, contains: "Successful files were kept")
         assertOnlyPrimaryTaskActions([ID.generateTranscript], in: app)
     }
 
@@ -366,7 +389,11 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertExists(ID.technicalDetails, in: app)
 
         tapButton(ID.generateTranscript, in: app)
-        assertText("The meeting transcript is ready for review", in: app)
+        assertElement(
+            ID.transcriptText("segment-1"),
+            in: app,
+            contains: "The meeting transcript is ready for review"
+        )
         assertOnlyPrimaryTaskActions([ID.copyTranscript, ID.exportTranscript], in: app)
     }
 
@@ -393,15 +420,27 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         tapButton(ID.meetingRow(sessionID), in: app)
         let picker = element(ID.audioSourcePicker, in: app)
         XCTAssertTrue(picker.isHittable)
-        XCTAssertTrue(picker.value as? String == "System audio")
+        let defaultAudioSelected = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "System audio"),
+            object: picker
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [defaultAudioSelected], timeout: 3), .completed)
         picker.click()
         let microphone = app.menuItems["Microphone"].firstMatch
         XCTAssertTrue(microphone.waitForExistence(timeout: 5))
         microphone.click()
-        XCTAssertEqual(picker.value as? String, "Microphone")
+        let microphoneSelected = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "Microphone"),
+            object: picker
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [microphoneSelected], timeout: 3), .completed)
 
         tapButton(ID.generateTranscript, in: app)
-        assertText("The meeting transcript is ready for review", in: app)
+        assertElement(
+            ID.transcriptText("seg-process-1"),
+            in: app,
+            contains: "The meeting transcript is ready for review"
+        )
         XCTAssertEqual(
             try processingFixture.invocationLines().first,
             [
@@ -475,7 +514,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         let app = launchApp(fixture: "transcript-missing-recoverable")
         let sessionID = "session-app-ui-transcript-missing-recoverable"
 
-        assertElement(ID.meetingRow(sessionID), in: app, contains: "Transcript unavailable")
+        assertElement(ID.meetingRow(sessionID), in: app, contains: "Transcript needs repair")
         tapButton(ID.meetingRow(sessionID), in: app)
 
         assertElement(ID.transcriptLoadError, in: app, contains: "original recording is still safe")
@@ -549,7 +588,11 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
 
         tapButton(ID.reloadTranscript, in: app)
         assertDoesNotExist(ID.transcriptLoadError, in: app)
-        assertText("The meeting transcript is ready for review", in: app)
+        assertElement(
+            ID.transcriptText("segment-reload-recovery"),
+            in: app,
+            contains: "The meeting transcript is ready for review"
+        )
         assertOnlyPrimaryTaskActions([ID.copyTranscript, ID.exportTranscript], in: app)
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: sessionURL.path))
@@ -585,7 +628,29 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
             )
 
             let row = element(ID.meetingRow(sessionID), in: app)
-            XCTAssertTrue(row.label.contains("Transcript needs repair"))
+            XCTAssertTrue(
+                row.label.contains("Checking transcript")
+                    || row.label.contains("Transcript needs repair"),
+                "Expected \(failure.rawValue) to begin in a safe checking or repair state. Actual label: \(row.label)"
+            )
+            XCTAssertFalse(
+                row.label.contains("Transcript ready"),
+                "Expected \(failure.rawValue) never to be exposed as a ready transcript. Actual label: \(row.label)"
+            )
+            XCTAssertFalse(
+                row.label.contains("Ready to transcribe"),
+                "Expected \(failure.rawValue) never to expose unsafe regeneration. Actual label: \(row.label)"
+            )
+            let repairPredicate = NSPredicate(
+                format: "exists == true AND label CONTAINS %@",
+                "Transcript needs repair"
+            )
+            let repairExpectation = XCTNSPredicateExpectation(predicate: repairPredicate, object: row)
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [repairExpectation], timeout: 8),
+                .completed,
+                "Expected \(failure.rawValue) to be presented as a transcript repair state. Actual label: \(row.label)"
+            )
             XCTAssertFalse(row.label.contains("Ready to transcribe"))
             tapButton(ID.meetingRow(sessionID), in: app)
 
@@ -892,11 +957,13 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         app.terminate()
         _ = app.wait(for: .notRunning, timeout: 5)
         app.launch()
-        if !app.wait(for: .runningForeground, timeout: 5) {
-            app.activate()
-        }
+        app.activate()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10), "Expected app bundle to run foreground.")
-        XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 5), "Expected app bundle window to exist.")
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5), "Expected app bundle window to exist.")
+        XCTAssertFalse(window.frame.isEmpty, "Expected app bundle window to have a visible frame.")
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)).click()
+        app.activate()
         launchedApp = app
         return app
     }
@@ -910,7 +977,9 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
     }
 
     private func attachScreenshot(_ name: String, of app: XCUIApplication) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5), "Expected the target window before capturing \(name).")
+        let attachment = XCTAttachment(screenshot: window.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
@@ -932,13 +1001,14 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
             scrollTowardElement(identifier, in: app)
         }
         XCTAssertTrue(element.waitForExistence(timeout: 5), "Expected button \(identifier) to exist.")
-        return matches.allElementsBoundByIndex.first { $0.exists && $0.isHittable } ?? element
+        let existingMatches = matches.allElementsBoundByIndex.filter(\.exists)
+        XCTAssertEqual(existingMatches.count, 1, "Expected exactly one button with identifier \(identifier).")
+        return existingMatches.first { $0.isHittable } ?? element
     }
 
     private func tapButton(_ identifier: String, in app: XCUIApplication) {
-        if app.state != .runningForeground {
-            app.activate()
-        }
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5), "Expected app to be foreground before tapping \(identifier).")
         let control = button(identifier, in: app)
         for _ in 0..<8 {
             if control.isHittable {
@@ -952,15 +1022,29 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
     }
 
     private func replaceText(in identifier: String, with text: String, in app: XCUIApplication) {
+        app.activate()
         let field = app.descendants(matching: .textField).matching(identifier: identifier).firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5), "Expected text field \(identifier) to exist.")
         field.click()
         field.typeKey("a", modifierFlags: .command)
-        field.typeText(text)
-        XCTAssertEqual(field.value as? String, text)
+        let words = text.split(separator: " ", omittingEmptySubsequences: false)
+        for (index, word) in words.enumerated() {
+            if index > 0 {
+                field.typeKey(" ", modifierFlags: [])
+            }
+            if !word.isEmpty {
+                field.typeText(String(word))
+            }
+        }
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", text),
+            object: field
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 3), .completed)
     }
 
     private func setToggle(_ identifier: String, to isOn: Bool, in app: XCUIApplication) {
+        app.activate()
         let toggle = element(identifier, in: app)
         if toggleIsOn(toggle) != isOn {
             toggle.click()
@@ -995,10 +1079,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
 
     private func element(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
         let element = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
-        if !element.waitForExistence(timeout: 2) {
-            scrollTowardElement(identifier, in: app)
-        }
-        XCTAssertTrue(element.waitForExistence(timeout: 5), "Expected element \(identifier) to exist.")
+        XCTAssertTrue(element.waitForExistence(timeout: 8), "Expected element \(identifier) to exist.")
         return element
     }
 
@@ -1011,7 +1092,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
     ) {
         let element = element(identifier, in: app)
         let predicate = NSPredicate(
-            format: "label CONTAINS %@ OR value CONTAINS %@",
+            format: "exists == true AND (label CONTAINS %@ OR value CONTAINS %@)",
             expectedText,
             expectedText
         )
@@ -1037,10 +1118,17 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
             expectedText,
             expectedText
         )
-        let match = app.descendants(matching: .any).matching(predicate).firstMatch
+        let match = app.staticTexts.matching(predicate).firstMatch
         XCTAssertTrue(
             match.waitForExistence(timeout: 8),
             "Expected visible text containing \(expectedText).",
+            file: file,
+            line: line
+        )
+        XCTAssertFalse(match.frame.isEmpty, "Expected \(expectedText) to have a visible frame.", file: file, line: line)
+        XCTAssertTrue(
+            app.windows.firstMatch.frame.intersects(match.frame),
+            "Expected \(expectedText) to be visible in the app window.",
             file: file,
             line: line
         )
@@ -1069,6 +1157,17 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
                 )
                 XCTAssertTrue(candidate.isEnabled, "Expected \(identifier) to be enabled.", file: file, line: line)
                 XCTAssertTrue(candidate.isHittable, "Expected \(identifier) to be hittable.", file: file, line: line)
+                XCTAssertEqual(
+                    app.descendants(matching: .button)
+                        .matching(identifier: identifier)
+                        .allElementsBoundByIndex
+                        .filter(\.exists)
+                        .count,
+                    1,
+                    "Expected exactly one current-task action \(identifier).",
+                    file: file,
+                    line: line
+                )
             } else if disabled.contains(identifier) {
                 XCTAssertTrue(
                     candidate.waitForExistence(timeout: 5),

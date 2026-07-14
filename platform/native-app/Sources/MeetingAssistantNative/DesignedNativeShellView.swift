@@ -9,6 +9,7 @@ public enum MeetingTaskAccessibilityID {
     public static let currentMeetingNavigation = "ma.navigation.currentMeeting"
     public static let diagnosticsNavigation = "ma.navigation.diagnostics"
     public static let meetingsHeading = "ma.meetings.heading"
+    public static let meetingsLoading = "ma.meetings.loading"
     public static let meetingsEmpty = "ma.meetings.empty"
     public static let newRecordingButton = "ma.meetings.newRecordingButton"
     public static let recentMeetings = "ma.meetings.recent"
@@ -180,10 +181,14 @@ func historicalMeetingRecoveryStatus(_ status: String) -> String? {
 func meetingUserStatus(
     _ status: String,
     hasTranscript: Bool,
-    hasRegisteredTranscript: Bool = false
+    hasRegisteredTranscript: Bool = false,
+    transcriptValidationIsPending: Bool = false
 ) -> String {
     if let recoveryStatus = historicalMeetingRecoveryStatus(status) {
         return recoveryStatus
+    }
+    if hasRegisteredTranscript, transcriptValidationIsPending {
+        return "Checking transcript"
     }
     if hasTranscript {
         return "Transcript ready"
@@ -282,8 +287,9 @@ public struct DesignedNativeShellView: View {
             synchronizeRecordingReadiness(permissionViewModel.state)
         }
         .task {
-            coordinator.refreshSessions()
+            async let sessionsRefresh: Void = coordinator.refreshSessions()
             await autoRefreshPreflightIfNeeded()
+            await sessionsRefresh
             synchronizeRecordingReadiness(permissionViewModel.state)
         }
     }
@@ -424,7 +430,23 @@ public struct DesignedNativeShellView: View {
                 )
             }
 
-            if coordinator.recentSessions.isEmpty {
+            if coordinator.sessionsAreLoading, coordinator.recentSessions.isEmpty {
+                VStack(spacing: 14) {
+                    ProgressView()
+                        .controlSize(.large)
+                    Text("Loading your meetings…")
+                        .font(.headline)
+                    Text("Reading the local meeting index on this Mac.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 58)
+                .frame(maxWidth: .infinity)
+                .cardStyle()
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Loading your meetings")
+                .accessibilityIdentifier(MeetingTaskAccessibilityID.meetingsLoading)
+            } else if coordinator.workspaceError == nil, coordinator.recentSessions.isEmpty {
                 VStack(spacing: 18) {
                     ZStack {
                         Circle()
@@ -496,20 +518,33 @@ public struct DesignedNativeShellView: View {
     }
 
     private func meetingRow(_ meeting: MeetingSessionSummary) -> some View {
-        Button {
+        let transcriptValidationIsPending = coordinator.transcriptValidationPendingSessionIDs.contains(meeting.id)
+        return Button {
             openMeeting(meeting)
         } label: {
             HStack(spacing: 14) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 9)
-                        .fill(statusColor(meeting.status, hasTranscript: meeting.hasTranscript).opacity(0.12))
+                        .fill(
+                            statusColor(
+                                meeting.status,
+                                hasTranscript: meeting.hasTranscript,
+                                hasRegisteredTranscript: meeting.hasRegisteredTranscript,
+                                transcriptValidationIsPending: transcriptValidationIsPending
+                            ).opacity(0.12)
+                        )
                         .frame(width: 40, height: 40)
-                    Image(systemName: meeting.hasTranscript ? "doc.text" : "waveform")
+                    Image(
+                        systemName: transcriptValidationIsPending
+                            ? "doc.text.magnifyingglass"
+                            : (meeting.hasTranscript ? "doc.text" : "waveform")
+                    )
                         .foregroundStyle(
                             statusColor(
                                 meeting.status,
                                 hasTranscript: meeting.hasTranscript,
-                                hasRegisteredTranscript: meeting.hasRegisteredTranscript
+                                hasRegisteredTranscript: meeting.hasRegisteredTranscript,
+                                transcriptValidationIsPending: transcriptValidationIsPending
                             )
                         )
                 }
@@ -529,7 +564,8 @@ public struct DesignedNativeShellView: View {
                     meetingUserStatus(
                         meeting.status,
                         hasTranscript: meeting.hasTranscript,
-                        hasRegisteredTranscript: meeting.hasRegisteredTranscript
+                        hasRegisteredTranscript: meeting.hasRegisteredTranscript,
+                        transcriptValidationIsPending: transcriptValidationIsPending
                     )
                 )
                     .font(.caption.weight(.medium))
@@ -537,7 +573,8 @@ public struct DesignedNativeShellView: View {
                         statusColor(
                             meeting.status,
                             hasTranscript: meeting.hasTranscript,
-                            hasRegisteredTranscript: meeting.hasRegisteredTranscript
+                            hasRegisteredTranscript: meeting.hasRegisteredTranscript,
+                            transcriptValidationIsPending: transcriptValidationIsPending
                         )
                     )
                     .padding(.horizontal, 9)
@@ -547,7 +584,8 @@ public struct DesignedNativeShellView: View {
                             statusColor(
                                 meeting.status,
                                 hasTranscript: meeting.hasTranscript,
-                                hasRegisteredTranscript: meeting.hasRegisteredTranscript
+                                hasRegisteredTranscript: meeting.hasRegisteredTranscript,
+                                transcriptValidationIsPending: transcriptValidationIsPending
                             ).opacity(0.1)
                         )
                     )
@@ -562,7 +600,7 @@ public struct DesignedNativeShellView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(
-            "\(displayTitle(meeting)), \(meetingUserStatus(meeting.status, hasTranscript: meeting.hasTranscript, hasRegisteredTranscript: meeting.hasRegisteredTranscript)), \(meetingMetadata(meeting))"
+            "\(displayTitle(meeting)), \(meetingUserStatus(meeting.status, hasTranscript: meeting.hasTranscript, hasRegisteredTranscript: meeting.hasRegisteredTranscript, transcriptValidationIsPending: transcriptValidationIsPending)), \(meetingMetadata(meeting))"
         )
         .accessibilityIdentifier(MeetingTaskAccessibilityID.meetingRow(meeting.id))
     }
@@ -663,13 +701,18 @@ public struct DesignedNativeShellView: View {
                 .font(.title3)
                 .foregroundStyle(readinessColor)
                 .frame(width: 28)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 5) {
                 Text(readinessTitle)
                     .font(.headline)
+                    .accessibilityLabel(readinessTitle)
+                    .accessibilityValue(readinessMessage)
+                    .accessibilityIdentifier(MeetingTaskAccessibilityID.readiness)
                 Text(readinessMessage)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityHidden(true)
             }
             Spacer()
             if !captureIsReady,
@@ -684,8 +727,6 @@ public struct DesignedNativeShellView: View {
             }
         }
         .cardStyle()
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(MeetingTaskAccessibilityID.readiness)
     }
 
     @ViewBuilder
@@ -914,6 +955,7 @@ public struct DesignedNativeShellView: View {
                     .controlSize(.large)
                 Text(processingProgressText)
                     .font(.title3.weight(.medium))
+                    .accessibilityIdentifier(ProcessingAccessibilityID.status)
                 Text("You can continue when this step finishes. Processing never uploads the meeting automatically.")
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -921,9 +963,6 @@ public struct DesignedNativeShellView: View {
             .padding(.vertical, 54)
             .frame(maxWidth: .infinity)
             .cardStyle()
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel(processingProgressText)
-            .accessibilityIdentifier(ProcessingAccessibilityID.status)
 
             technicalDetailsDisclosure
         }
@@ -1174,6 +1213,7 @@ public struct DesignedNativeShellView: View {
         HStack(spacing: 12) {
             Label("Transcript actions", systemImage: "doc.text")
                 .font(.headline)
+                .accessibilityIdentifier(MeetingTaskAccessibilityID.transcriptToolbar)
             Spacer()
             Button("Copy") {
                 Task { await transcriptActionViewModel.copyTranscript() }
@@ -1195,7 +1235,6 @@ public struct DesignedNativeShellView: View {
         .padding(.vertical, 12)
         .background(Color(nsColor: .windowBackgroundColor))
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(MeetingTaskAccessibilityID.transcriptToolbar)
     }
 
     private func transcriptRow(_ segment: TranscriptReviewVisibleSegment) -> some View {
@@ -1630,10 +1669,14 @@ public struct DesignedNativeShellView: View {
     private func statusColor(
         _ status: String,
         hasTranscript: Bool = false,
-        hasRegisteredTranscript: Bool = false
+        hasRegisteredTranscript: Bool = false,
+        transcriptValidationIsPending: Bool = false
     ) -> Color {
         if historicalMeetingRecoveryStatus(status) != nil {
             return .orange
+        }
+        if hasRegisteredTranscript, transcriptValidationIsPending {
+            return .accentColor
         }
         if !hasTranscript, hasRegisteredTranscript || status == "transcribed" {
             return .orange

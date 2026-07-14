@@ -184,6 +184,14 @@ struct DesignedNativeShellViewModelTests {
                 hasRegisteredTranscript: true
             ) == "Transcript needs repair"
         )
+        #expect(
+            meetingUserStatus(
+                "recorded",
+                hasTranscript: false,
+                hasRegisteredTranscript: true,
+                transcriptValidationIsPending: true
+            ) == "Checking transcript"
+        )
         #expect(meetingUserStatus("transcribed", hasTranscript: true) == "Transcript ready")
         #expect(meetingUserStatus("unexpected", hasTranscript: false) == "Needs attention")
         #expect(meetingUserStatus("unexpected", hasTranscript: true) == "Needs attention")

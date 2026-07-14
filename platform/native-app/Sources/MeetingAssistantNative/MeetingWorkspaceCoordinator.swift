@@ -81,6 +81,100 @@ private struct DeletionWorkspaceReload: Sendable {
     let selectedMeetingError: String?
 }
 
+private enum MeetingSessionsRefreshOutcome: Sendable {
+    case loaded(MeetingSessionWorkspaceSnapshot)
+    case failed(String)
+    case cancelled
+}
+
+private struct MeetingTranscriptValidationRequest: Sendable {
+    let revision: Int
+    let pendingSessionIDs: Set<String>
+    let requestedSessionRevisions: [String: Int]
+    let rollbackSessionsByID: [String: MeetingSessionSummary]
+    let task: Task<MeetingSessionWorkspaceSnapshot?, Never>
+}
+
+private func validatingRegisteredTranscripts(
+    in snapshot: MeetingSessionWorkspaceSnapshot,
+    workspaceURL: URL
+) -> MeetingSessionWorkspaceSnapshot? {
+    var sessions: [MeetingSessionSummary] = []
+    sessions.reserveCapacity(snapshot.sessions.count)
+    for session in snapshot.sessions {
+        guard !Task.isCancelled else {
+            return nil
+        }
+        guard session.hasRegisteredTranscript else {
+            sessions.append(session)
+            continue
+        }
+
+        let transcriptIsUsable: Bool
+        let speakerLabelsAreUsable: Bool
+        do {
+            let input = try TranscriptReviewWorkspaceLoader.load(
+                workspaceURL: workspaceURL,
+                sessionID: session.id
+            )
+            transcriptIsUsable = input.transcript?.sessionID == session.id
+            speakerLabelsAreUsable = transcriptIsUsable && input.speakerLabels != nil
+        } catch {
+            transcriptIsUsable = false
+            speakerLabelsAreUsable = false
+        }
+
+        sessions.append(replacingTranscriptAvailability(
+            in: session,
+            hasTranscript: transcriptIsUsable,
+            hasSpeakerLabels: speakerLabelsAreUsable
+        ))
+    }
+    return MeetingSessionWorkspaceSnapshot(sessions: sessions, issues: snapshot.issues)
+}
+
+private func markingRegisteredTranscriptsAsPending(
+    in snapshot: MeetingSessionWorkspaceSnapshot,
+    excluding excludedSessionIDs: Set<String> = []
+) -> MeetingSessionWorkspaceSnapshot {
+    MeetingSessionWorkspaceSnapshot(
+        sessions: snapshot.sessions.map { session in
+            guard session.hasRegisteredTranscript,
+                  !excludedSessionIDs.contains(session.id) else {
+                return session
+            }
+            return replacingTranscriptAvailability(
+                in: session,
+                hasTranscript: false,
+                hasSpeakerLabels: false
+            )
+        },
+        issues: snapshot.issues
+    )
+}
+
+private func replacingTranscriptAvailability(
+    in session: MeetingSessionSummary,
+    hasTranscript: Bool,
+    hasSpeakerLabels: Bool
+) -> MeetingSessionSummary {
+    MeetingSessionSummary(
+        id: session.id,
+        title: session.title,
+        status: session.status,
+        startedAt: session.startedAt,
+        endedAt: session.endedAt,
+        updatedAt: session.updatedAt,
+        durationLabel: session.durationLabel,
+        artifactCount: session.artifactCount,
+        hasTranscript: hasTranscript,
+        hasSpeakerLabels: hasSpeakerLabels,
+        hasProcessableAudio: session.hasProcessableAudio,
+        processableAudioSources: session.processableAudioSources,
+        hasRegisteredTranscript: session.hasRegisteredTranscript
+    )
+}
+
 @MainActor
 public final class MeetingWorkspaceCoordinator: ObservableObject {
     @Published public private(set) var route: MeetingWorkspaceRoute
@@ -95,27 +189,69 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
     @Published public private(set) var transcriptLoadError: String?
     @Published public private(set) var transcriptTechnicalError: String?
     @Published public private(set) var transcriptIsLoading = false
+    @Published public private(set) var sessionsAreLoading = true
+    @Published public private(set) var transcriptValidationPendingSessionIDs: Set<String> = []
     @Published public private(set) var notice: String?
     @Published public private(set) var recordingStartedAt: Date?
 
     public let workspaceURL: URL
     private let repository: MeetingSessionWorkspaceRepository
+    private let sessionsProjectionLoader: @Sendable (URL) throws -> MeetingSessionWorkspaceSnapshot
+    private let registeredTranscriptsValidator: @Sendable (
+        MeetingSessionWorkspaceSnapshot,
+        URL
+    ) -> MeetingSessionWorkspaceSnapshot?
     private var seededSessions: [MeetingSessionSummary]
     private let injectedSessionIDs: Set<String>
     private var selectionRevision = 0
+    private var sessionsRefreshRevision = 0
+    private var transcriptValidationRevision = 0
+    private var workspaceProjectionRevision = 0
+    private var sessionProjectionRevisions: [String: Int] = [:]
+    private var sessionsProjectionTask: Task<MeetingSessionsRefreshOutcome, Never>?
+    private var sessionsValidationTask: Task<MeetingSessionWorkspaceSnapshot?, Never>?
     private var transcriptLoadRevision = 0
     private var activeTranscriptLoadToken: MeetingTranscriptLoadToken?
     private var explicitProcessingAudioSourceIDsBySession: [String: String] = [:]
 
-    public init(
+    public convenience init(
         workspaceURL: URL,
         repository: MeetingSessionWorkspaceRepository = MeetingSessionWorkspaceRepository(),
         initialSessions: [MeetingSessionSummary] = [],
         initialRoute: MeetingWorkspaceRoute = .meetings,
         recordingDraft: MeetingRecordingDraft = MeetingRecordingDraft()
     ) {
+        self.init(
+            workspaceURL: workspaceURL,
+            repository: repository,
+            initialSessions: initialSessions,
+            initialRoute: initialRoute,
+            recordingDraft: recordingDraft,
+            sessionsProjectionLoader: { url in
+                try repository.load(workspaceURL: url)
+            },
+            registeredTranscriptsValidator: validatingRegisteredTranscripts
+        )
+    }
+
+    init(
+        workspaceURL: URL,
+        repository: MeetingSessionWorkspaceRepository = MeetingSessionWorkspaceRepository(),
+        initialSessions: [MeetingSessionSummary] = [],
+        initialRoute: MeetingWorkspaceRoute = .meetings,
+        recordingDraft: MeetingRecordingDraft = MeetingRecordingDraft(),
+        sessionsProjectionLoader: @escaping @Sendable (
+            URL
+        ) throws -> MeetingSessionWorkspaceSnapshot,
+        registeredTranscriptsValidator: @escaping @Sendable (
+            MeetingSessionWorkspaceSnapshot,
+            URL
+        ) -> MeetingSessionWorkspaceSnapshot?
+    ) {
         self.workspaceURL = workspaceURL.standardizedFileURL
         self.repository = repository
+        self.sessionsProjectionLoader = sessionsProjectionLoader
+        self.registeredTranscriptsValidator = registeredTranscriptsValidator
         self.seededSessions = initialSessions
         self.injectedSessionIDs = Set(initialSessions.map(\.id))
         self.recentSessions = initialSessions
@@ -155,17 +291,83 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         return "Untitled meeting"
     }
 
-    public func refreshSessions() {
-        do {
-            let snapshot = try repository.load(workspaceURL: workspaceURL)
-            workspaceIssues = snapshot.issues
-            workspaceError = nil
-            workspaceTechnicalError = nil
-            recentSessions = mergedSessions(snapshot.sessions, seededSessions)
-        } catch {
-            workspaceError = "Meeting Assistant could not read the local meeting workspace. Your existing files were not changed."
-            workspaceTechnicalError = error.localizedDescription
-            recentSessions = seededSessions
+    public func refreshSessions() async {
+        sessionsRefreshRevision += 1
+        let requestedRevision = sessionsRefreshRevision
+        sessionsProjectionTask?.cancel()
+        sessionsProjectionTask = nil
+        if recentSessions.isEmpty {
+            sessionsAreLoading = true
+        }
+        let projectionLoader = sessionsProjectionLoader
+        let workspaceURL = workspaceURL
+
+        while sessionsRefreshRevision == requestedRevision {
+            guard !Task.isCancelled else {
+                finishCancelledRefresh(requestedRevision: requestedRevision)
+                return
+            }
+            let requestedProjectionRevision = workspaceProjectionRevision
+            let projectionTask = Task.detached(priority: .userInitiated) {
+                guard !Task.isCancelled else {
+                    return MeetingSessionsRefreshOutcome.cancelled
+                }
+                do {
+                    let snapshot = try projectionLoader(workspaceURL)
+                    guard !Task.isCancelled else {
+                        return MeetingSessionsRefreshOutcome.cancelled
+                    }
+                    return MeetingSessionsRefreshOutcome.loaded(snapshot)
+                } catch {
+                    guard !Task.isCancelled else {
+                        return MeetingSessionsRefreshOutcome.cancelled
+                    }
+                    return MeetingSessionsRefreshOutcome.failed(error.localizedDescription)
+                }
+            }
+            sessionsProjectionTask = projectionTask
+            let outcome = await withTaskCancellationHandler {
+                await projectionTask.value
+            } onCancel: {
+                projectionTask.cancel()
+            }
+
+            guard sessionsRefreshRevision == requestedRevision else {
+                return
+            }
+            sessionsProjectionTask = nil
+            guard !Task.isCancelled else {
+                finishCancelledRefresh(requestedRevision: requestedRevision)
+                return
+            }
+            guard workspaceProjectionRevision == requestedProjectionRevision else {
+                continue
+            }
+
+            sessionsAreLoading = false
+            switch outcome {
+            case .loaded(let snapshot):
+                workspaceIssues = snapshot.issues
+                workspaceError = nil
+                workspaceTechnicalError = nil
+                let pendingSessionIDs = registeredTranscriptSessionIDs(in: snapshot)
+                let pendingSnapshot = markingRegisteredTranscriptsAsPending(in: snapshot)
+                if let validationRequest = beginRegisteredTranscriptValidation(
+                    from: snapshot,
+                    pendingSessionIDs: pendingSessionIDs,
+                    projectedSessions: mergedSessions(pendingSnapshot.sessions, seededSessions)
+                ) {
+                    await completeRegisteredTranscriptValidation(validationRequest)
+                }
+            case .failed(let technicalError):
+                cancelActiveTranscriptValidation(clearPending: true)
+                workspaceError = "Meeting Assistant could not read the local meeting workspace. Your existing files were not changed."
+                workspaceTechnicalError = technicalError
+                recentSessions = seededSessions
+            case .cancelled:
+                finishCancelledRefresh(requestedRevision: requestedRevision)
+            }
+            return
         }
     }
 
@@ -258,6 +460,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
             return nil
         }
 
+        noteProjectionMutation(for: selectedSession.id)
         currentSession = selectedSession
         synchronizeProcessingAudioSelection(for: selectedSession)
         recentSessions = replacingSession(selectedSession, in: recentSessions)
@@ -280,6 +483,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
 
     public func recordingDidStart(sessionID: String, now: Date = Date()) {
         let timestamp = ISO8601DateFormatter().string(from: now)
+        noteProjectionMutation(for: sessionID)
         explicitProcessingAudioSourceIDsBySession.removeValue(forKey: sessionID)
         selectedProcessingAudioSourceID = nil
         transcriptIsLoading = false
@@ -351,6 +555,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
             hasProcessableAudio: !processableAudioSources.isEmpty,
             processableAudioSources: processableAudioSources
         )
+        noteProjectionMutation(for: sessionID)
         currentSession = saved
         synchronizeProcessingAudioSelection(for: saved)
         seededSessions = mergedSessions([saved], seededSessions)
@@ -411,6 +616,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         sessionID: String,
         commandReportedDeletion: Bool
     ) async -> MeetingDeletionWorkspaceReconciliation {
+        noteProjectionMutation(for: sessionID)
         notice = nil
         invalidateTranscriptLoad()
         transcriptLoadError = nil
@@ -450,7 +656,19 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
             seededSessions.removeAll { $0.id == sessionID }
 
             if let selectedMeetingError = reload.selectedMeetingError {
-                recentSessions = mergedSessions(snapshot.sessions, seededSessions)
+                let excludedSessionIDs: Set<String> = [sessionID]
+                let pendingSessionIDs = registeredTranscriptSessionIDs(
+                    in: snapshot,
+                    excluding: excludedSessionIDs
+                )
+                let pendingSnapshot = markingRegisteredTranscriptsAsPending(
+                    in: snapshot,
+                    excluding: excludedSessionIDs
+                )
+                let projectedSessions = mergedSessions(
+                    pendingSnapshot.sessions,
+                    seededSessions
+                )
                     .filter { $0.id != sessionID }
                 currentSession = nil
                 selectedProcessingAudioSourceID = nil
@@ -459,14 +677,30 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
                 route = .meetings
                 workspaceError = "Meeting Assistant could not safely reload the meeting after the delete attempt. Old meeting details were cleared to avoid showing stale files."
                 workspaceTechnicalError = selectedMeetingError
+                completeRegisteredTranscriptValidationInBackground(
+                    beginRegisteredTranscriptValidation(
+                        from: snapshot,
+                        pendingSessionIDs: pendingSessionIDs,
+                        projectedSessions: projectedSessions
+                    )
+                )
                 return .workspaceUnreadable
             }
 
             if let refreshed = reload.selectedMeeting {
+                let excludedSessionIDs: Set<String> = [sessionID]
+                let pendingSessionIDs = registeredTranscriptSessionIDs(
+                    in: snapshot,
+                    excluding: excludedSessionIDs
+                )
+                let pendingSnapshot = markingRegisteredTranscriptsAsPending(
+                    in: snapshot,
+                    excluding: excludedSessionIDs
+                )
                 seededSessions = mergedSessions([refreshed], seededSessions)
-                recentSessions = replacingSession(
+                let projectedSessions = replacingSession(
                     refreshed,
-                    in: mergedSessions(snapshot.sessions, seededSessions)
+                    in: mergedSessions(pendingSnapshot.sessions, seededSessions)
                 )
                 currentSession = refreshed
                 synchronizeProcessingAudioSelection(for: refreshed)
@@ -479,10 +713,26 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
                     workspaceError = nil
                 }
                 workspaceTechnicalError = nil
+                completeRegisteredTranscriptValidationInBackground(
+                    beginRegisteredTranscriptValidation(
+                        from: snapshot,
+                        pendingSessionIDs: pendingSessionIDs,
+                        projectedSessions: projectedSessions
+                    )
+                )
                 return .sessionPresent(refreshed)
             }
 
-            recentSessions = mergedSessions(snapshot.sessions, seededSessions)
+            let excludedSessionIDs: Set<String> = [sessionID]
+            let pendingSessionIDs = registeredTranscriptSessionIDs(
+                in: snapshot,
+                excluding: excludedSessionIDs
+            )
+            let pendingSnapshot = markingRegisteredTranscriptsAsPending(
+                in: snapshot,
+                excluding: excludedSessionIDs
+            )
+            let projectedSessions = mergedSessions(pendingSnapshot.sessions, seededSessions)
                 .filter { $0.id != sessionID }
             currentSession = nil
             selectedProcessingAudioSourceID = nil
@@ -490,6 +740,13 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
             recordingStartedAt = nil
             activity = .idle
             route = .meetings
+            completeRegisteredTranscriptValidationInBackground(
+                beginRegisteredTranscriptValidation(
+                    from: snapshot,
+                    pendingSessionIDs: pendingSessionIDs,
+                    projectedSessions: projectedSessions
+                )
+            )
 
             if let issue = snapshot.issues.first(where: { $0.sessionID == sessionID }) {
                 workspaceError = "Meeting Assistant could not safely reload the meeting after the delete attempt. Old meeting details were cleared to avoid showing stale files."
@@ -523,7 +780,10 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         }
     }
 
-    public func transcriptDidLoad(_ token: MeetingTranscriptLoadToken) {
+    public func transcriptDidLoad(
+        _ token: MeetingTranscriptLoadToken,
+        hasSpeakerLabels: Bool? = nil
+    ) {
         guard isCurrentTranscriptLoad(token) else {
             return
         }
@@ -532,6 +792,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         transcriptLoadError = nil
         transcriptTechnicalError = nil
         if let currentSession {
+            noteProjectionMutation(for: currentSession.id)
             let updated = MeetingSessionSummary(
                 id: currentSession.id,
                 title: currentSession.title,
@@ -542,7 +803,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
                 durationLabel: currentSession.durationLabel,
                 artifactCount: currentSession.artifactCount,
                 hasTranscript: true,
-                hasSpeakerLabels: currentSession.hasSpeakerLabels,
+                hasSpeakerLabels: hasSpeakerLabels ?? currentSession.hasSpeakerLabels,
                 hasProcessableAudio: currentSession.hasProcessableAudio,
                 processableAudioSources: currentSession.processableAudioSources,
                 hasRegisteredTranscript: true
@@ -569,6 +830,17 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
             transcriptLoadError = "The transcript could not be opened. The original recording and any available files are still safe. Reload it after repairing the meeting files, return to Meetings, or delete the meeting if it is no longer needed."
         }
         transcriptTechnicalError = error.localizedDescription
+        if let currentSession {
+            noteProjectionMutation(for: currentSession.id)
+            let updated = replacingTranscriptAvailability(
+                in: currentSession,
+                hasTranscript: false,
+                hasSpeakerLabels: false
+            )
+            self.currentSession = updated
+            seededSessions = mergedSessions([updated], seededSessions)
+            recentSessions = mergedSessions([updated], recentSessions)
+        }
         activity = .idle
     }
 
@@ -600,6 +872,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
 
     public func deletionDidFinish(sessionID: String) {
         selectionRevision += 1
+        noteProjectionMutation(for: sessionID)
         seededSessions.removeAll { $0.id == sessionID }
         recentSessions.removeAll { $0.id == sessionID }
         currentSession = nil
@@ -612,7 +885,9 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         activity = .idle
         notice = "Meeting deleted. Exports saved outside the workspace were kept."
         route = .meetings
-        refreshSessions()
+        Task {
+            await refreshSessions()
+        }
     }
 
     public func clearCurrentSession(returnToMeetings: Bool = true) {
@@ -640,12 +915,167 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         return true
     }
 
+    private func registeredTranscriptSessionIDs(
+        in snapshot: MeetingSessionWorkspaceSnapshot,
+        excluding excludedSessionIDs: Set<String> = []
+    ) -> Set<String> {
+        Set(
+            snapshot.sessions.lazy
+                .filter {
+                    $0.hasRegisteredTranscript && !excludedSessionIDs.contains($0.id)
+                }
+                .map(\.id)
+        )
+    }
+
+    private func beginRegisteredTranscriptValidation(
+        from snapshot: MeetingSessionWorkspaceSnapshot,
+        pendingSessionIDs: Set<String>,
+        projectedSessions: [MeetingSessionSummary]
+    ) -> MeetingTranscriptValidationRequest? {
+        let previousPendingSessionIDs = transcriptValidationPendingSessionIDs
+        let rollbackSessionsByID = Dictionary(
+            uniqueKeysWithValues: recentSessions.lazy
+                .filter {
+                    pendingSessionIDs.contains($0.id)
+                        && !previousPendingSessionIDs.contains($0.id)
+                }
+                .map { ($0.id, $0) }
+        )
+        transcriptValidationRevision += 1
+        let requestedValidationRevision = transcriptValidationRevision
+        sessionsValidationTask?.cancel()
+        sessionsValidationTask = nil
+        transcriptValidationPendingSessionIDs = pendingSessionIDs
+        recentSessions = projectedSessions
+        guard !pendingSessionIDs.isEmpty else {
+            return nil
+        }
+
+        let requestedSessionRevisions = Dictionary(
+            uniqueKeysWithValues: pendingSessionIDs.map {
+                ($0, sessionProjectionRevisions[$0, default: 0])
+            }
+        )
+        let validator = registeredTranscriptsValidator
+        let workspaceURL = workspaceURL
+        let validationTask = Task.detached(priority: .utility) {
+            validator(snapshot, workspaceURL)
+        }
+        sessionsValidationTask = validationTask
+        return MeetingTranscriptValidationRequest(
+            revision: requestedValidationRevision,
+            pendingSessionIDs: pendingSessionIDs,
+            requestedSessionRevisions: requestedSessionRevisions,
+            rollbackSessionsByID: rollbackSessionsByID,
+            task: validationTask
+        )
+    }
+
+    private func completeRegisteredTranscriptValidation(
+        _ request: MeetingTranscriptValidationRequest
+    ) async {
+        let validatedSnapshot = await withTaskCancellationHandler {
+            await request.task.value
+        } onCancel: {
+            request.task.cancel()
+        }
+
+        guard transcriptValidationRevision == request.revision else {
+            return
+        }
+        sessionsValidationTask = nil
+        guard !Task.isCancelled,
+              let validatedSnapshot else {
+            rollbackCancelledTranscriptValidation(request)
+            return
+        }
+
+        var refreshedSessions = recentSessions
+        for validatedSession in validatedSnapshot.sessions
+        where request.pendingSessionIDs.contains(validatedSession.id) {
+            guard sessionProjectionRevisions[validatedSession.id, default: 0]
+                == request.requestedSessionRevisions[validatedSession.id],
+                  let currentSession = refreshedSessions.first(where: {
+                      $0.id == validatedSession.id
+                  }) else {
+                continue
+            }
+            refreshedSessions = replacingSession(
+                replacingTranscriptAvailability(
+                    in: currentSession,
+                    hasTranscript: validatedSession.hasTranscript,
+                    hasSpeakerLabels: validatedSession.hasSpeakerLabels
+                ),
+                in: refreshedSessions
+            )
+        }
+        recentSessions = refreshedSessions
+        transcriptValidationPendingSessionIDs.subtract(request.pendingSessionIDs)
+    }
+
+    private func completeRegisteredTranscriptValidationInBackground(
+        _ request: MeetingTranscriptValidationRequest?
+    ) {
+        guard let request else {
+            return
+        }
+        Task { [weak self] in
+            await self?.completeRegisteredTranscriptValidation(request)
+        }
+    }
+
+    private func rollbackCancelledTranscriptValidation(
+        _ request: MeetingTranscriptValidationRequest
+    ) {
+        var rolledBackSessions = recentSessions
+        for sessionID in request.pendingSessionIDs {
+            guard sessionProjectionRevisions[sessionID, default: 0]
+                == request.requestedSessionRevisions[sessionID] else {
+                continue
+            }
+            if let rollbackSession = request.rollbackSessionsByID[sessionID] {
+                rolledBackSessions = replacingSession(
+                    rollbackSession,
+                    in: rolledBackSessions
+                )
+            } else {
+                rolledBackSessions.removeAll { $0.id == sessionID }
+            }
+        }
+        recentSessions = rolledBackSessions
+        transcriptValidationPendingSessionIDs.subtract(request.pendingSessionIDs)
+    }
+
+    private func cancelActiveTranscriptValidation(clearPending: Bool) {
+        transcriptValidationRevision += 1
+        sessionsValidationTask?.cancel()
+        sessionsValidationTask = nil
+        if clearPending {
+            transcriptValidationPendingSessionIDs.removeAll()
+        }
+    }
+
+    private func finishCancelledRefresh(requestedRevision: Int) {
+        guard sessionsRefreshRevision == requestedRevision else {
+            return
+        }
+        sessionsProjectionTask = nil
+        sessionsAreLoading = false
+    }
+
     private func mergedSessions(
         _ preferred: [MeetingSessionSummary],
         _ fallback: [MeetingSessionSummary]
     ) -> [MeetingSessionSummary] {
         var seen = Set<String>()
         return (preferred + fallback).filter { seen.insert($0.id).inserted }
+    }
+
+    private func noteProjectionMutation(for sessionID: String) {
+        workspaceProjectionRevision += 1
+        sessionProjectionRevisions[sessionID, default: 0] += 1
+        transcriptValidationPendingSessionIDs.remove(sessionID)
     }
 
     private func replacingSession(

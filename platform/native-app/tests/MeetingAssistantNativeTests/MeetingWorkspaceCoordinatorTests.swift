@@ -213,7 +213,7 @@ struct MeetingWorkspaceCoordinatorTests {
             repository: repository
         )
 
-        coordinator.refreshSessions()
+        await coordinator.refreshSessions()
 
         #expect(checksumProbe.paths.isEmpty)
         let projected = try #require(coordinator.recentSessions.first)
@@ -233,6 +233,431 @@ struct MeetingWorkspaceCoordinatorTests {
         #expect(coordinator.selectedProcessingAudioSourceID == "artifact-selected-audio")
         #expect(checksumProbe.paths == [artifactURL.path])
         #expect(checksumProbe.mainThreadObservations == [false])
+    }
+
+    @Test
+    func refreshValidatesRegisteredTranscriptBeforePublishingRecentAvailability() async throws {
+        let workspace = try makeDeletionWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let sessionID = "session-refresh-transcript-drift"
+        let originalTranscript = Data("original transcript payload".utf8)
+        let expectedChecksum = "sha256:" + SHA256.hash(data: originalTranscript).map {
+            String(format: "%02x", $0)
+        }.joined()
+        try writeDeletionWorkspaceSession(
+            workspace: workspace,
+            sessionID: sessionID,
+            title: "Transcript drift",
+            status: "transcribed",
+            artifacts: [[
+                "id": "artifact-refresh-transcript",
+                "session_id": sessionID,
+                "artifact_type": "transcript_text",
+                "path": "artifacts/transcript.json",
+                "capture_status": "available",
+                "checksum": expectedChecksum,
+            ]]
+        )
+        let transcriptURL = workspace
+            .appendingPathComponent("sessions/\(sessionID)/artifacts", isDirectory: true)
+            .appendingPathComponent("transcript.json", isDirectory: false)
+        try FileManager.default.createDirectory(
+            at: transcriptURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("changed transcript payload".utf8).write(to: transcriptURL)
+        let coordinator = makeCoordinator(workspaceURL: workspace)
+
+        await coordinator.refreshSessions()
+
+        let recent = try #require(coordinator.recentSessions.first)
+        #expect(!coordinator.sessionsAreLoading)
+        #expect(recent.id == sessionID)
+        #expect(recent.hasRegisteredTranscript)
+        #expect(!recent.hasTranscript)
+    }
+
+    @Test
+    func refreshKeepsValidRegisteredTranscriptAvailable() async throws {
+        let workspace = try makeDeletionWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let sessionID = "session-refresh-transcript-valid"
+        let transcriptData = try JSONSerialization.data(
+            withJSONObject: [
+                "id": "transcript-refresh-valid",
+                "session_id": sessionID,
+                "source_artifact_id": "artifact-source-audio",
+                "status": "succeeded",
+                "segments": [[
+                    "segment_id": "segment-refresh-valid",
+                    "start_ms": 0,
+                    "end_ms": 1_000,
+                    "text": "A valid transcript remains ready.",
+                ]],
+            ],
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        let checksum = "sha256:" + SHA256.hash(data: transcriptData).map {
+            String(format: "%02x", $0)
+        }.joined()
+        try writeDeletionWorkspaceSession(
+            workspace: workspace,
+            sessionID: sessionID,
+            title: "Valid transcript",
+            status: "transcribed",
+            artifacts: [[
+                "id": "artifact-refresh-transcript",
+                "session_id": sessionID,
+                "artifact_type": "transcript_text",
+                "path": "artifacts/transcript.json",
+                "capture_status": "available",
+                "checksum": checksum,
+            ]]
+        )
+        let transcriptURL = workspace
+            .appendingPathComponent("sessions/\(sessionID)/artifacts", isDirectory: true)
+            .appendingPathComponent("transcript.json", isDirectory: false)
+        try FileManager.default.createDirectory(
+            at: transcriptURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try transcriptData.write(to: transcriptURL)
+        let coordinator = makeCoordinator(workspaceURL: workspace)
+
+        await coordinator.refreshSessions()
+
+        let recent = try #require(coordinator.recentSessions.first)
+        #expect(!coordinator.sessionsAreLoading)
+        #expect(recent.id == sessionID)
+        #expect(recent.hasRegisteredTranscript)
+        #expect(recent.hasTranscript)
+        #expect(!recent.hasSpeakerLabels)
+    }
+
+    @Test
+    func refreshKeepsValidTranscriptWhenRegisteredSpeakerLabelsAreCorrupt() async throws {
+        let workspace = try makeDeletionWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let sessionID = "session-refresh-speakers-corrupt"
+        let transcriptData = try JSONSerialization.data(
+            withJSONObject: [
+                "id": "transcript-refresh-speakers-corrupt",
+                "session_id": sessionID,
+                "source_artifact_id": "artifact-source-audio",
+                "status": "succeeded",
+                "segments": [[
+                    "segment_id": "segment-refresh-speakers-corrupt",
+                    "start_ms": 0,
+                    "end_ms": 1_000,
+                    "text": "The transcript stays readable without labels.",
+                ]],
+            ],
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        let speakerData = Data("not speaker label json".utf8)
+        let transcriptChecksum = "sha256:" + SHA256.hash(data: transcriptData).map {
+            String(format: "%02x", $0)
+        }.joined()
+        let speakerChecksum = "sha256:" + SHA256.hash(data: speakerData).map {
+            String(format: "%02x", $0)
+        }.joined()
+        try writeDeletionWorkspaceSession(
+            workspace: workspace,
+            sessionID: sessionID,
+            title: "Transcript-only fallback",
+            status: "transcribed",
+            artifacts: [
+                [
+                    "id": "artifact-refresh-transcript",
+                    "session_id": sessionID,
+                    "artifact_type": "transcript_text",
+                    "path": "artifacts/transcript.json",
+                    "capture_status": "available",
+                    "checksum": transcriptChecksum,
+                ],
+                [
+                    "id": "artifact-refresh-speakers",
+                    "session_id": sessionID,
+                    "artifact_type": "speaker_labels",
+                    "path": "artifacts/speaker_labels.json",
+                    "capture_status": "available",
+                    "checksum": speakerChecksum,
+                ],
+            ]
+        )
+        let artifactsURL = workspace
+            .appendingPathComponent("sessions/\(sessionID)/artifacts", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: artifactsURL,
+            withIntermediateDirectories: true
+        )
+        try transcriptData.write(to: artifactsURL.appendingPathComponent("transcript.json"))
+        try speakerData.write(to: artifactsURL.appendingPathComponent("speaker_labels.json"))
+        let reviewInput = try TranscriptReviewWorkspaceLoader.load(
+            workspaceURL: workspace,
+            sessionID: sessionID
+        )
+        #expect(reviewInput.transcript?.sessionID == sessionID)
+        #expect(reviewInput.speakerLabels == nil)
+        #expect(reviewInput.speakerLabelsDegradationReason?.contains("could not be safely loaded") == true)
+        let coordinator = makeCoordinator(workspaceURL: workspace)
+
+        await coordinator.refreshSessions()
+
+        let recent = try #require(coordinator.recentSessions.first)
+        #expect(recent.id == sessionID)
+        #expect(recent.hasRegisteredTranscript)
+        #expect(recent.hasTranscript)
+        #expect(!recent.hasSpeakerLabels)
+    }
+
+    @Test
+    func staleTranscriptValidationCannotOverwriteAUserOpenedSession() async throws {
+        let workspace = try makeDeletionWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let sessionID = "session-refresh-open-race"
+        let transcriptData = try JSONSerialization.data(
+            withJSONObject: [
+                "id": "transcript-refresh-open-race",
+                "session_id": sessionID,
+                "source_artifact_id": "artifact-source-audio",
+                "status": "succeeded",
+                "segments": [[
+                    "segment_id": "segment-refresh-open-race",
+                    "start_ms": 0,
+                    "end_ms": 1_000,
+                    "text": "Opening wins over stale validation.",
+                ]],
+            ],
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        let checksum = "sha256:" + SHA256.hash(data: transcriptData).map {
+            String(format: "%02x", $0)
+        }.joined()
+        try writeDeletionWorkspaceSession(
+            workspace: workspace,
+            sessionID: sessionID,
+            title: "Refresh race",
+            status: "transcribed",
+            artifacts: [[
+                "id": "artifact-refresh-transcript",
+                "session_id": sessionID,
+                "artifact_type": "transcript_text",
+                "path": "artifacts/transcript.json",
+                "capture_status": "available",
+                "checksum": checksum,
+            ]]
+        )
+        let transcriptURL = workspace
+            .appendingPathComponent("sessions/\(sessionID)/artifacts", isDirectory: true)
+            .appendingPathComponent("transcript.json", isDirectory: false)
+        try FileManager.default.createDirectory(
+            at: transcriptURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try transcriptData.write(to: transcriptURL)
+        let validationProbe = CoordinatorTranscriptValidationProbe()
+        defer { validationProbe.resume() }
+        let coordinator = makeCoordinator(
+            workspaceURL: workspace,
+            registeredTranscriptsValidator: validationProbe.validate
+        )
+
+        let refreshTask = Task { await coordinator.refreshSessions() }
+        await validationProbe.waitUntilStarted()
+
+        let pending = try #require(coordinator.recentSessions.first)
+        #expect(!coordinator.sessionsAreLoading)
+        #expect(coordinator.transcriptValidationPendingSessionIDs == [sessionID])
+        #expect(!pending.hasTranscript)
+
+        let opened = await coordinator.open(pending)
+        #expect(opened?.hasTranscript == true)
+        #expect(coordinator.transcriptValidationPendingSessionIDs.isEmpty)
+
+        validationProbe.resume()
+        await refreshTask.value
+
+        let recent = try #require(coordinator.recentSessions.first)
+        #expect(recent.hasTranscript)
+        #expect(coordinator.currentSession?.hasTranscript == true)
+        #expect(!coordinator.sessionsAreLoading)
+        #expect(coordinator.transcriptValidationPendingSessionIDs.isEmpty)
+    }
+
+    @Test
+    func projectionMutationDuringRefreshRetriesWithoutDroppingHistory() async throws {
+        let historical = summary(
+            id: "session-historical",
+            title: "Historical meeting",
+            hasTranscript: false
+        )
+        let projectionProbe = CoordinatorProjectionLoadProbe(
+            snapshot: MeetingSessionWorkspaceSnapshot(
+                sessions: [historical],
+                issues: []
+            )
+        )
+        defer { projectionProbe.resumeFirstLoad() }
+        let coordinator = makeCoordinator(
+            sessionsProjectionLoader: projectionProbe.load
+        )
+
+        let refreshTask = Task { await coordinator.refreshSessions() }
+        await projectionProbe.waitUntilFirstLoadStarted()
+
+        coordinator.recordingDraft.title = "New meeting"
+        coordinator.recordingDidStart(
+            sessionID: "session-new",
+            now: Date(timeIntervalSince1970: 2_000)
+        )
+        coordinator.recordingDidSave(
+            .recorded(sessionID: "session-new", artifacts: []),
+            now: Date(timeIntervalSince1970: 2_010)
+        )
+        projectionProbe.resumeFirstLoad()
+        await refreshTask.value
+
+        #expect(projectionProbe.loadCount >= 2)
+        #expect(Set(coordinator.recentSessions.map(\.id)) == [
+            "session-historical",
+            "session-new",
+        ])
+        #expect(!coordinator.sessionsAreLoading)
+        #expect(coordinator.transcriptValidationPendingSessionIDs.isEmpty)
+    }
+
+    @Test
+    func cancellingRefreshDuringProjectionCancelsDetachedLoadAndClearsLoading() async {
+        let projectionProbe = CoordinatorCancellableProjectionLoadProbe()
+        let coordinator = makeCoordinator(
+            sessionsProjectionLoader: projectionProbe.load
+        )
+
+        let refreshTask = Task { await coordinator.refreshSessions() }
+        await projectionProbe.waitUntilStarted()
+        refreshTask.cancel()
+        await refreshTask.value
+
+        #expect(projectionProbe.didObserveCancellation)
+        #expect(!coordinator.sessionsAreLoading)
+        #expect(coordinator.recentSessions.isEmpty)
+        #expect(coordinator.transcriptValidationPendingSessionIDs.isEmpty)
+    }
+
+    @Test
+    func stableProjectionWithoutRegisteredTranscriptsInvalidatesOlderValidation() async throws {
+        let pendingSession = summary(
+            id: "session-old-pending",
+            title: "Old pending",
+            hasTranscript: true
+        )
+        let stableSession = summary(
+            id: "session-new-stable",
+            title: "New stable",
+            hasTranscript: false
+        )
+        let projectionProbe = CoordinatorSequentialProjectionLoadProbe(
+            snapshots: [
+                MeetingSessionWorkspaceSnapshot(sessions: [pendingSession], issues: []),
+                MeetingSessionWorkspaceSnapshot(sessions: [stableSession], issues: []),
+            ]
+        )
+        let validationProbe = CoordinatorTranscriptValidationProbe()
+        defer { validationProbe.resume() }
+        let coordinator = makeCoordinator(
+            sessionsProjectionLoader: projectionProbe.load,
+            registeredTranscriptsValidator: validationProbe.validate
+        )
+
+        let firstRefresh = Task { await coordinator.refreshSessions() }
+        await validationProbe.waitUntilStarted()
+        #expect(coordinator.transcriptValidationPendingSessionIDs == [pendingSession.id])
+
+        await coordinator.refreshSessions()
+        #expect(coordinator.recentSessions.map(\.id) == [stableSession.id])
+        #expect(coordinator.transcriptValidationPendingSessionIDs.isEmpty)
+
+        validationProbe.resume()
+        await firstRefresh.value
+
+        #expect(coordinator.recentSessions.map(\.id) == [stableSession.id])
+        #expect(coordinator.transcriptValidationPendingSessionIDs.isEmpty)
+    }
+
+    @Test
+    func cancellingRefreshCancelsTranscriptValidationAndClearsPendingState() async throws {
+        let registeredTranscript = summary(
+            id: "session-cancel-validation",
+            title: "Cancel validation",
+            hasTranscript: true
+        )
+        let snapshot = MeetingSessionWorkspaceSnapshot(
+            sessions: [registeredTranscript],
+            issues: []
+        )
+        let validationProbe = CoordinatorCancellableTranscriptValidationProbe()
+        let coordinator = makeCoordinator(
+            sessionsProjectionLoader: { _ in snapshot },
+            registeredTranscriptsValidator: validationProbe.validate
+        )
+
+        let refreshTask = Task { await coordinator.refreshSessions() }
+        await validationProbe.waitUntilStarted()
+
+        #expect(coordinator.transcriptValidationPendingSessionIDs == [registeredTranscript.id])
+        #expect(coordinator.recentSessions.first?.hasTranscript == false)
+        refreshTask.cancel()
+        await refreshTask.value
+
+        #expect(validationProbe.didObserveCancellation)
+        #expect(!coordinator.sessionsAreLoading)
+        #expect(coordinator.transcriptValidationPendingSessionIDs.isEmpty)
+        #expect(coordinator.recentSessions.allSatisfy {
+            $0.id != registeredTranscript.id
+        })
+    }
+
+    @Test
+    func refreshRejectsRegisteredTranscriptWithInvalidJSONAfterChecksumPasses() async throws {
+        let workspace = try makeDeletionWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let sessionID = "session-refresh-transcript-corrupt"
+        let corruptTranscript = Data("not transcript json".utf8)
+        let checksum = "sha256:" + SHA256.hash(data: corruptTranscript).map {
+            String(format: "%02x", $0)
+        }.joined()
+        try writeDeletionWorkspaceSession(
+            workspace: workspace,
+            sessionID: sessionID,
+            title: "Corrupt transcript",
+            status: "transcribed",
+            artifacts: [[
+                "id": "artifact-refresh-transcript",
+                "session_id": sessionID,
+                "artifact_type": "transcript_text",
+                "path": "artifacts/transcript.json",
+                "capture_status": "available",
+                "checksum": checksum,
+            ]]
+        )
+        let transcriptURL = workspace
+            .appendingPathComponent("sessions/\(sessionID)/artifacts", isDirectory: true)
+            .appendingPathComponent("transcript.json", isDirectory: false)
+        try FileManager.default.createDirectory(
+            at: transcriptURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try corruptTranscript.write(to: transcriptURL)
+        let coordinator = makeCoordinator(workspaceURL: workspace)
+
+        await coordinator.refreshSessions()
+
+        let recent = try #require(coordinator.recentSessions.first)
+        #expect(!coordinator.sessionsAreLoading)
+        #expect(recent.id == sessionID)
+        #expect(recent.hasRegisteredTranscript)
+        #expect(!recent.hasTranscript)
     }
 
     @Test
@@ -276,6 +701,9 @@ struct MeetingWorkspaceCoordinatorTests {
 
         #expect(coordinator.transcriptLoadError?.contains("/Users/jerry") == false)
         #expect(coordinator.transcriptTechnicalError?.contains("/Users/jerry/Meetings/broken.json") == true)
+        #expect(coordinator.currentSession?.hasRegisteredTranscript == true)
+        #expect(coordinator.currentSession?.hasTranscript == false)
+        #expect(coordinator.recentSessions.first?.hasTranscript == false)
 
         coordinator.navigate(to: .diagnostics)
         coordinator.navigate(to: .meetingDetail)
@@ -340,6 +768,24 @@ struct MeetingWorkspaceCoordinatorTests {
         coordinator.transcriptDidLoad(secondLoad)
         #expect(coordinator.currentSession?.hasTranscript == true)
         #expect(coordinator.currentSession?.status == "transcribed")
+    }
+
+    @Test
+    func transcriptCompletionPublishesActualSpeakerLabelAvailability() async throws {
+        let meeting = summary(
+            id: "session-speaker-degradation",
+            title: "Speaker degradation",
+            hasTranscript: true
+        )
+        let coordinator = makeCoordinator(initialSessions: [meeting])
+        await coordinator.open(meeting)
+
+        let loadToken = try #require(coordinator.transcriptWillLoad(for: meeting.id))
+        coordinator.transcriptDidLoad(loadToken, hasSpeakerLabels: false)
+
+        #expect(coordinator.currentSession?.hasTranscript == true)
+        #expect(coordinator.currentSession?.hasSpeakerLabels == false)
+        #expect(coordinator.recentSessions.first?.hasSpeakerLabels == false)
     }
 
     @Test
@@ -519,7 +965,7 @@ struct MeetingWorkspaceCoordinatorTests {
             ]]
         )
         let coordinator = makeCoordinator(workspaceURL: workspace)
-        coordinator.refreshSessions()
+        await coordinator.refreshSessions()
         let recent = try #require(coordinator.recentSessions.first)
 
         let openedSession = await coordinator.open(recent)
@@ -541,6 +987,60 @@ struct MeetingWorkspaceCoordinatorTests {
         #expect(refreshed.hasRegisteredTranscript)
         #expect(!refreshed.hasTranscript)
         #expect(coordinator.currentSession?.hasRegisteredTranscript == true)
+    }
+
+    @Test
+    func deletionReconciliationNeverPublishesAnotherRegisteredTranscriptAsReadyBeforeValidation() async throws {
+        let workspace = try makeDeletionWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let remainingSessionID = "session-remaining-transcript"
+        try writeDeletionWorkspaceSession(
+            workspace: workspace,
+            sessionID: remainingSessionID,
+            title: "Remaining transcript",
+            status: "transcribed",
+            artifacts: [[
+                "id": "artifact-remaining-transcript",
+                "session_id": remainingSessionID,
+                "artifact_type": "transcript_text",
+                "path": "artifacts/transcript.json",
+                "capture_status": "available",
+                "checksum": "sha256:registered-but-unverified",
+            ]]
+        )
+        let validationProbe = CoordinatorTranscriptValidationProbe()
+        defer { validationProbe.resume() }
+        let coordinator = makeCoordinator(
+            workspaceURL: workspace,
+            registeredTranscriptsValidator: validationProbe.validate
+        )
+
+        let reconciliationTask = Task {
+            await coordinator.reconcileDeletionAttempt(
+                sessionID: "session-deleted",
+                commandReportedDeletion: true
+            )
+        }
+        await validationProbe.waitUntilStarted()
+
+        let pending = try #require(coordinator.recentSessions.first)
+        #expect(pending.id == remainingSessionID)
+        #expect(pending.hasRegisteredTranscript)
+        #expect(!pending.hasTranscript)
+        #expect(coordinator.transcriptValidationPendingSessionIDs == [remainingSessionID])
+
+        let reconciliation = await reconciliationTask.value
+        validationProbe.resume()
+        for _ in 0..<1_000 {
+            if coordinator.transcriptValidationPendingSessionIDs.isEmpty {
+                break
+            }
+            await Task.yield()
+        }
+
+        #expect(reconciliation == .sessionMissing)
+        #expect(coordinator.recentSessions.first?.hasTranscript == false)
+        #expect(coordinator.transcriptValidationPendingSessionIDs.isEmpty)
     }
 
     @Test
@@ -652,12 +1152,35 @@ struct MeetingWorkspaceCoordinatorTests {
     private func makeCoordinator(
         workspaceURL: URL? = nil,
         initialSessions: [MeetingSessionSummary] = [],
-        repository: MeetingSessionWorkspaceRepository = MeetingSessionWorkspaceRepository()
+        repository: MeetingSessionWorkspaceRepository = MeetingSessionWorkspaceRepository(),
+        sessionsProjectionLoader: (@Sendable (
+            URL
+        ) throws -> MeetingSessionWorkspaceSnapshot)? = nil,
+        registeredTranscriptsValidator: (@Sendable (
+            MeetingSessionWorkspaceSnapshot,
+            URL
+        ) -> MeetingSessionWorkspaceSnapshot?)? = nil
     ) -> MeetingWorkspaceCoordinator {
-        MeetingWorkspaceCoordinator(
-            workspaceURL: workspaceURL
-                ?? FileManager.default.temporaryDirectory
-                    .appendingPathComponent("meeting-coordinator-tests-\(UUID().uuidString)"),
+        let resolvedWorkspaceURL = workspaceURL
+            ?? FileManager.default.temporaryDirectory
+                .appendingPathComponent("meeting-coordinator-tests-\(UUID().uuidString)")
+        if sessionsProjectionLoader != nil || registeredTranscriptsValidator != nil {
+            let resolvedProjectionLoader = sessionsProjectionLoader ?? { url in
+                try repository.load(workspaceURL: url)
+            }
+            let resolvedValidator = registeredTranscriptsValidator ?? { snapshot, _ in
+                snapshot
+            }
+            return MeetingWorkspaceCoordinator(
+                workspaceURL: resolvedWorkspaceURL,
+                repository: repository,
+                initialSessions: initialSessions,
+                sessionsProjectionLoader: resolvedProjectionLoader,
+                registeredTranscriptsValidator: resolvedValidator
+            )
+        }
+        return MeetingWorkspaceCoordinator(
+            workspaceURL: resolvedWorkspaceURL,
             repository: repository,
             initialSessions: initialSessions
         )
@@ -756,6 +1279,244 @@ private final class CoordinatorChecksumProbe: @unchecked Sendable {
         }
         let digest = SHA256.hash(data: data)
         return "sha256:" + digest.map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+private final class CoordinatorProjectionLoadProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private let snapshot: MeetingSessionWorkspaceSnapshot
+    private var capturedLoadCount = 0
+    private var firstLoadStarted = false
+    private var firstLoadContinuation: CheckedContinuation<Void, Never>?
+    private let resumeFirstLoadSemaphore = DispatchSemaphore(value: 0)
+
+    init(snapshot: MeetingSessionWorkspaceSnapshot) {
+        self.snapshot = snapshot
+    }
+
+    var loadCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return capturedLoadCount
+    }
+
+    func load(_ workspaceURL: URL) throws -> MeetingSessionWorkspaceSnapshot {
+        _ = workspaceURL
+        lock.lock()
+        capturedLoadCount += 1
+        let isFirstLoad = capturedLoadCount == 1
+        if isFirstLoad {
+            firstLoadStarted = true
+        }
+        let continuation = isFirstLoad ? firstLoadContinuation : nil
+        if isFirstLoad {
+            firstLoadContinuation = nil
+        }
+        lock.unlock()
+        continuation?.resume()
+
+        if isFirstLoad {
+            resumeFirstLoadSemaphore.wait()
+        }
+        try Task.checkCancellation()
+        return snapshot
+    }
+
+    func waitUntilFirstLoadStarted() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if firstLoadStarted {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                firstLoadContinuation = continuation
+                lock.unlock()
+            }
+        }
+    }
+
+    func resumeFirstLoad() {
+        resumeFirstLoadSemaphore.signal()
+    }
+}
+
+private final class CoordinatorCancellableProjectionLoadProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var loadStarted = false
+    private var cancellationObserved = false
+    private var startedContinuation: CheckedContinuation<Void, Never>?
+
+    var didObserveCancellation: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancellationObserved
+    }
+
+    func load(_ workspaceURL: URL) throws -> MeetingSessionWorkspaceSnapshot {
+        _ = workspaceURL
+        lock.lock()
+        loadStarted = true
+        let continuation = startedContinuation
+        startedContinuation = nil
+        lock.unlock()
+        continuation?.resume()
+
+        let timeout = Date().addingTimeInterval(5)
+        while !Task.isCancelled, Date() < timeout {
+            Thread.sleep(forTimeInterval: 0.002)
+        }
+        if Task.isCancelled {
+            lock.lock()
+            cancellationObserved = true
+            lock.unlock()
+            throw CancellationError()
+        }
+        return MeetingSessionWorkspaceSnapshot(sessions: [], issues: [])
+    }
+
+    func waitUntilStarted() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if loadStarted {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                startedContinuation = continuation
+                lock.unlock()
+            }
+        }
+    }
+}
+
+private final class CoordinatorSequentialProjectionLoadProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private let snapshots: [MeetingSessionWorkspaceSnapshot]
+    private var nextSnapshotIndex = 0
+
+    init(snapshots: [MeetingSessionWorkspaceSnapshot]) {
+        precondition(!snapshots.isEmpty)
+        self.snapshots = snapshots
+    }
+
+    func load(_ workspaceURL: URL) throws -> MeetingSessionWorkspaceSnapshot {
+        _ = workspaceURL
+        lock.lock()
+        let index = min(nextSnapshotIndex, snapshots.count - 1)
+        nextSnapshotIndex += 1
+        let snapshot = snapshots[index]
+        lock.unlock()
+        return snapshot
+    }
+}
+
+private final class CoordinatorTranscriptValidationProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var validationStarted = false
+    private var startedContinuation: CheckedContinuation<Void, Never>?
+    private let resumeValidation = DispatchSemaphore(value: 0)
+
+    func validate(
+        snapshot: MeetingSessionWorkspaceSnapshot,
+        workspaceURL: URL
+    ) -> MeetingSessionWorkspaceSnapshot? {
+        _ = workspaceURL
+        lock.lock()
+        validationStarted = true
+        let continuation = startedContinuation
+        startedContinuation = nil
+        lock.unlock()
+        continuation?.resume()
+        resumeValidation.wait()
+        let staleSessions = snapshot.sessions.map { session in
+            MeetingSessionSummary(
+                id: session.id,
+                title: session.title,
+                status: session.status,
+                startedAt: session.startedAt,
+                endedAt: session.endedAt,
+                updatedAt: session.updatedAt,
+                durationLabel: session.durationLabel,
+                artifactCount: session.artifactCount,
+                hasTranscript: false,
+                hasSpeakerLabels: false,
+                hasProcessableAudio: session.hasProcessableAudio,
+                processableAudioSources: session.processableAudioSources,
+                hasRegisteredTranscript: session.hasRegisteredTranscript
+            )
+        }
+        return MeetingSessionWorkspaceSnapshot(
+            sessions: staleSessions,
+            issues: snapshot.issues
+        )
+    }
+
+    func waitUntilStarted() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if validationStarted {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                startedContinuation = continuation
+                lock.unlock()
+            }
+        }
+    }
+
+    func resume() {
+        resumeValidation.signal()
+    }
+}
+
+private final class CoordinatorCancellableTranscriptValidationProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var validationStarted = false
+    private var cancellationObserved = false
+    private var startedContinuation: CheckedContinuation<Void, Never>?
+
+    var didObserveCancellation: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancellationObserved
+    }
+
+    func validate(
+        snapshot: MeetingSessionWorkspaceSnapshot,
+        workspaceURL: URL
+    ) -> MeetingSessionWorkspaceSnapshot? {
+        _ = snapshot
+        _ = workspaceURL
+        lock.lock()
+        validationStarted = true
+        let continuation = startedContinuation
+        startedContinuation = nil
+        lock.unlock()
+        continuation?.resume()
+
+        let timeout = Date().addingTimeInterval(5)
+        while !Task.isCancelled, Date() < timeout {
+            Thread.sleep(forTimeInterval: 0.002)
+        }
+        guard Task.isCancelled else {
+            return nil
+        }
+        lock.lock()
+        cancellationObserved = true
+        lock.unlock()
+        return nil
+    }
+
+    func waitUntilStarted() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if validationStarted {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                startedContinuation = continuation
+                lock.unlock()
+            }
+        }
     }
 }
 

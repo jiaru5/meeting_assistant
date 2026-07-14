@@ -580,7 +580,7 @@ private struct NativeControlPlaneRootView: View {
             let deletedSessionID = await transcriptActionViewModel.confirmDelete()
             guard workspaceCoordinator.currentSession?.id == expectedSessionID else {
                 workspaceCoordinator.deletionDidFail()
-                workspaceCoordinator.refreshSessions()
+                await workspaceCoordinator.refreshSessions()
                 return
             }
 
@@ -689,7 +689,10 @@ private struct NativeControlPlaneRootView: View {
             preservingFailureFeedback: preservingActionFailure
         )
         loadedTranscriptSessionID = sessionID
-        workspaceCoordinator.transcriptDidLoad(loadToken)
+        workspaceCoordinator.transcriptDidLoad(
+            loadToken,
+            hasSpeakerLabels: input.speakerLabels != nil
+        )
     }
 
     @MainActor

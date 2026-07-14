@@ -64,6 +64,9 @@ public enum TranscriptReviewWorkspaceLoaderError: Error, Equatable, Sendable, Lo
 }
 
 public enum TranscriptReviewWorkspaceLoader {
+    private static let speakerLabelsUnavailableReason =
+        "Speaker labels could not be safely loaded. The transcript is still available."
+
     public static func load(
         workspaceURL: URL,
         sessionID: String
@@ -88,10 +91,14 @@ public enum TranscriptReviewWorkspaceLoader {
             return TranscriptReviewInput(sessionTitle: session.title, transcript: nil)
         }
         try validateArtifactSession(transcriptArtifact, expectedSessionID: sessionID)
-        let transcriptURL = try validatedArtifactURL(sessionRoot: sessionRoot, artifact: transcriptArtifact)
+        let transcriptPayload = try validatedArtifactPayload(
+            sessionRoot: sessionRoot,
+            artifact: transcriptArtifact
+        )
         let transcript: TranscriptReviewTranscript = try decodeArtifact(
             TranscriptReviewTranscript.self,
-            from: transcriptURL,
+            from: transcriptPayload.data,
+            path: transcriptPayload.url.path,
             artifactID: transcriptArtifact.id
         )
         guard transcript.sessionID == sessionID else {
@@ -105,11 +112,16 @@ public enum TranscriptReviewWorkspaceLoader {
         let speakerArtifact = session.artifacts.first {
             $0.artifactType == "speaker_labels" && $0.isReadableArtifact
         }
-        let speakerPayload = try loadSpeakerLabels(
-            artifact: speakerArtifact,
-            sessionRoot: sessionRoot,
-            sessionID: sessionID
-        )
+        let speakerPayload: (artifact: SpeakerLabelsReviewArtifact?, degradationReason: String?)
+        do {
+            speakerPayload = try loadSpeakerLabels(
+                artifact: speakerArtifact,
+                sessionRoot: sessionRoot,
+                sessionID: sessionID
+            )
+        } catch {
+            speakerPayload = (nil, speakerLabelsUnavailableReason)
+        }
 
         return TranscriptReviewInput(
             sessionTitle: session.title,
@@ -129,10 +141,14 @@ public enum TranscriptReviewWorkspaceLoader {
         }
         try validateArtifactSession(artifact, expectedSessionID: sessionID)
 
-        let speakerURL = try validatedArtifactURL(sessionRoot: sessionRoot, artifact: artifact)
+        let speakerPayload = try validatedArtifactPayload(
+            sessionRoot: sessionRoot,
+            artifact: artifact
+        )
         let speakerLabels: SpeakerLabelsReviewArtifact = try decodeArtifact(
             SpeakerLabelsReviewArtifact.self,
-            from: speakerURL,
+            from: speakerPayload.data,
+            path: speakerPayload.url.path,
             artifactID: artifact.id
         )
         guard speakerLabels.sessionID == sessionID else {
@@ -207,16 +223,16 @@ public enum TranscriptReviewWorkspaceLoader {
 
     private static func decodeArtifact<T: Decodable>(
         _ type: T.Type,
-        from url: URL,
+        from data: Data,
+        path: String,
         artifactID: String
     ) throws -> T {
         do {
-            let data = try Data(contentsOf: url)
             return try JSONDecoder().decode(type, from: data)
         } catch {
             throw TranscriptReviewWorkspaceLoaderError.invalidArtifactJSON(
                 artifactID: artifactID,
-                path: url.path
+                path: path
             )
         }
     }
@@ -231,7 +247,10 @@ public enum TranscriptReviewWorkspaceLoader {
         }
     }
 
-    private static func validatedArtifactURL(sessionRoot: URL, artifact: WorkspaceArtifact) throws -> URL {
+    private static func validatedArtifactPayload(
+        sessionRoot: URL,
+        artifact: WorkspaceArtifact
+    ) throws -> (url: URL, data: Data) {
         let requested = artifact.path.hasPrefix("/")
             ? URL(fileURLWithPath: artifact.path, isDirectory: false)
             : sessionRoot.appendingPathComponent(artifact.path, isDirectory: false)
@@ -275,11 +294,12 @@ public enum TranscriptReviewWorkspaceLoader {
                 path: resolved.path
             )
         }
-        try validateChecksum(artifact: artifact, url: resolved)
-        return resolved
+        let data = try Data(contentsOf: resolved)
+        try validateChecksum(artifact: artifact, data: data)
+        return (resolved, data)
     }
 
-    private static func validateChecksum(artifact: WorkspaceArtifact, url: URL) throws {
+    private static func validateChecksum(artifact: WorkspaceArtifact, data: Data) throws {
         guard let checksum = artifact.checksum,
               checksum.hasPrefix("sha256:"),
               checksum.count == "sha256:".count + 64
@@ -290,7 +310,8 @@ public enum TranscriptReviewWorkspaceLoader {
             )
         }
 
-        let actual = try sha256Checksum(for: url)
+        let digest = SHA256.hash(data: data)
+        let actual = "sha256:" + digest.map { String(format: "%02x", $0) }.joined()
         guard actual == checksum else {
             throw TranscriptReviewWorkspaceLoaderError.checksumDrift(
                 artifactID: artifact.id,
@@ -298,12 +319,6 @@ public enum TranscriptReviewWorkspaceLoader {
                 actual: actual
             )
         }
-    }
-
-    private static func sha256Checksum(for url: URL) throws -> String {
-        let digest = SHA256.hash(data: try Data(contentsOf: url))
-        let hex = digest.map { String(format: "%02x", $0) }.joined()
-        return "sha256:\(hex)"
     }
 
     private static func isValidSessionID(_ value: String) -> Bool {

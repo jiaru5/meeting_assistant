@@ -553,6 +553,12 @@
 
 2026-07-06 14:51 CST 交付前复跑 `MA_NATIVE_APP_XCODE_DESTINATION='platform=macOS,arch=arm64' MA_NATIVE_APP_REUSE_XCTESTRUN=1 MA_NATIVE_APP_REAL_ACTION_OS_SMOKE=1 ./platform/native-app/scripts/test-app-bundle.sh` 通过，单个 XCUITest 0 failure、耗时 74.221 秒，xcresult `/Users/jerry/Library/Developer/Xcode/DerivedData/MeetingAssistantNative-cwwkvzdtrmamqwdsqrlgyctdklzq/Logs/Test/Test-MeetingAssistantNative-2026.07.06_14-50-31-+0800.xcresult`。
 
+## 2026-07-14 MVP.1 任务体验防误报与并发收口证据
+
+| 证据批次 | 关联验证项 | 本轮自动化证据 | 仍未取得的证据与边界 |
+|---|---|---|---|
+| 本轮 `develop` MVP.1 task experience follow-up | `PV-MA-014`; 关联 `PV-MA-001`、`PV-MA-002`、`PV-MA-006`、`PV-MA-010` | Recent meetings 对已登记 transcript 先发布 `Checking transcript`，再用同一份 artifact bytes 完成 checksum 与 decode；损坏 transcript fail closed 为 repair，损坏或跨 session 的可选 speaker labels 只降级标签、不隐藏有效 transcript。projection mutation 会按 workspace revision 自动重试，projection/validation caller cancellation 会传给 detached task；新稳定 projection 即使没有 pending transcript 也会使旧 validator token 失效，validation 取消会恢复上次稳定 row 或移除本轮首次发现 row，避免把“未完成校验”误报为 `Transcript needs repair`。删除 reconciliation 同步发布其他会议的 pending projection 后立即完成自身状态切换，深校验在 generation guard 下后台收敛，不再让已解锁的新任务等待旧删除 continuation。App 安装 transcript 时显式同步实际 speaker-label availability。UI locator/任务测试收紧 readiness、processing、Meetings loading/error/empty 互斥、稳定 transcript segment、固定 toolbar、picker、唯一主操作和 broken-transcript 初始状态断言。2026-07-14 当前工作树执行 `./platform/native-app/scripts/test.sh` 通过：hosted XCTest 13/13、Swift Testing 242/242；`./platform/native-app/scripts/architecture.sh` 通过；`xcodebuild build-for-testing -project platform/native-app/MeetingAssistantNative.xcodeproj -scheme MeetingAssistantNative -destination 'platform=macOS' -derivedDataPath /tmp/meeting-assistant-mvp1-task-postreview-20260714-1355 -parallel-testing-enabled NO` 输出 `TEST BUILD SUCCEEDED`，证明最新 app 与 17 条 task XCUITest 源码可编译。 | 尚未把 `build-for-testing` 记作 task XCUITest 实跑。当前 macOS 首次启用 UI Automation 会触发 LocalAuthentication，必须由用户本人用 Apple Watch 或密码批准；在取得该授权前，17 条 test body、对应 xcresult/截图、VoiceOver 走查和 3–5 名代表性用户无指导研究仍无新证据，`PV-MA-014` 保持 `partial`，不得声称体验验收完成。Developer ID、公证、App Store、自动更新、团队功能和自动纪要不属于本轮优先范围。 |
+
 ## 标准验证命令目标
 
 ```bash
