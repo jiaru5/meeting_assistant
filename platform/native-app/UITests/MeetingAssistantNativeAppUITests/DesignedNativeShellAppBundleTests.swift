@@ -59,6 +59,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         static let deleteMeeting = "ma.transcriptAction.deleteButton"
         static let deletePrompt = "ma.transcriptAction.deletePrompt"
         static let deletePromptText = "ma.transcriptAction.deletePromptText"
+        static let cancelDelete = "ma.transcriptAction.deleteCancelButton"
         static let confirmDelete = "ma.transcriptAction.deleteConfirmButton"
         static let actionSuccess = "ma.transcriptAction.success"
 
@@ -125,7 +126,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertToggle(ID.microphone, isOn: false, in: app)
         assertOnlyPrimaryTaskActions([ID.startRecording], in: app)
 
-        tapButton(ID.startRecording, in: app)
+        app.typeKey("r", modifierFlags: [.command, .option])
         assertElement(ID.detailStatus, in: app, contains: "Recording")
         assertElement(ID.detailHeading, in: app, contains: "MVP.1 planning review")
         assertExists(ID.recordingTimer, in: app)
@@ -133,13 +134,13 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertOnlyPrimaryTaskActions([ID.stopRecording], in: app)
         attachScreenshot("03-recording-live", of: app)
 
-        tapButton(ID.stopRecording, in: app)
+        app.typeKey("s", modifierFlags: [.command, .option])
         assertElement(ID.detailHeading, in: app, contains: "MVP.1 planning review")
         assertElement(ID.savedSummary, in: app, contains: "2 meeting files are ready")
         assertOnlyPrimaryTaskActions([ID.generateTranscript], in: app)
         attachScreenshot("04-recording-saved", of: app)
 
-        tapButton(ID.generateTranscript, in: app)
+        app.typeKey("p", modifierFlags: [.command, .option])
         assertElement(ID.detailHeading, in: app, contains: "MVP.1 planning review")
         assertElement(
             ID.transcriptText("segment-1"),
@@ -149,10 +150,10 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertOnlyPrimaryTaskActions([ID.copyTranscript, ID.exportTranscript], in: app)
         attachScreenshot("06-transcript-ready", of: app)
 
-        tapButton(ID.copyTranscript, in: app)
+        app.typeKey("c", modifierFlags: [.command, .option])
         assertElement(ID.actionSuccess, in: app, contains: "Transcript copied")
 
-        tapButton(ID.exportTranscript, in: app)
+        app.typeKey("e", modifierFlags: [.command, .option])
         assertElement(ID.actionSuccess, in: app, contains: "Transcript exported")
         assertOnlyPrimaryTaskActions([ID.copyTranscript, ID.exportTranscript], in: app)
     }
@@ -175,8 +176,32 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         )
         assertOnlyPrimaryTaskActions([ID.copyTranscript, ID.exportTranscript], in: app)
 
+        let sessionIDText = axElement(containing: sessionID, in: app)
+        XCTAssertFalse(
+            sessionIDText.exists,
+            "Expected raw session ID to stay out of the app window accessibility tree by default."
+        )
+        tapButton(ID.technicalDetails, in: app)
+        XCTAssertTrue(
+            sessionIDText.waitForExistence(timeout: 5),
+            "Expected the raw session ID only after Technical details is expanded."
+        )
+
         tapButton(ID.deleteMeeting, in: app)
         assertExists(ID.deletePrompt, in: app)
+        assertText("Delete Transcript Review Fixture?", in: app)
+        assertElement(ID.deletePromptText, in: app, contains: "Exports saved elsewhere on this Mac will be kept")
+        assertExists(ID.cancelDelete, in: app)
+        assertExists(ID.confirmDelete, in: app)
+        app.typeKey(.return, modifierFlags: [])
+        assertDoesNotExist(ID.deletePrompt, in: app)
+        assertElement(ID.detailHeading, in: app, contains: "Transcript Review Fixture")
+        assertExists(ID.currentMeetingNavigation, in: app)
+        assertExists(ID.deleteMeeting, in: app)
+
+        tapButton(ID.deleteMeeting, in: app)
+        assertExists(ID.deletePrompt, in: app)
+        assertText("Delete Transcript Review Fixture?", in: app)
         assertElement(ID.deletePromptText, in: app, contains: "Exports saved elsewhere on this Mac will be kept")
         tapButton(ID.confirmDelete, in: app)
 
@@ -1081,6 +1106,18 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         let element = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
         XCTAssertTrue(element.waitForExistence(timeout: 8), "Expected element \(identifier) to exist.")
         return element
+    }
+
+    private func axElement(containing text: String, in app: XCUIApplication) -> XCUIElement {
+        let predicate = NSPredicate(
+            format: "label CONTAINS %@ OR value CONTAINS %@",
+            text,
+            text
+        )
+        return app.windows.firstMatch
+            .descendants(matching: .any)
+            .matching(predicate)
+            .firstMatch
     }
 
     private func assertElement(

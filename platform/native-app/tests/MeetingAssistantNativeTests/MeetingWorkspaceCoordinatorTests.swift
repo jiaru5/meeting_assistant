@@ -1442,7 +1442,7 @@ private final class CoordinatorCancellableProjectionLoadProbe: @unchecked Sendab
         lock.unlock()
         continuation?.resume()
 
-        let timeout = Date().addingTimeInterval(5)
+        let timeout = Date().addingTimeInterval(1)
         while !Task.isCancelled, Date() < timeout {
             Thread.sleep(forTimeInterval: 0.002)
         }

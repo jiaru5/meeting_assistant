@@ -95,6 +95,23 @@ private struct MeetingTranscriptValidationRequest: Sendable {
     let task: Task<MeetingSessionWorkspaceSnapshot?, Never>
 }
 
+private func valueForwardingCancellation<Success: Sendable>(
+    from task: Task<Success, Never>
+) async -> Success {
+    await withTaskCancellationHandler(
+        operation: {
+            if Task.isCancelled {
+                task.cancel()
+            }
+            return await task.value
+        },
+        onCancel: {
+            task.cancel()
+        },
+        isolation: nil
+    )
+}
+
 private func validatingRegisteredTranscripts(
     in snapshot: MeetingSessionWorkspaceSnapshot,
     workspaceURL: URL
@@ -336,11 +353,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
                 }
             }
             sessionsProjectionTask = projectionTask
-            let outcome = await withTaskCancellationHandler {
-                await projectionTask.value
-            } onCancel: {
-                projectionTask.cancel()
-            }
+            let outcome = await valueForwardingCancellation(from: projectionTask)
 
             guard sessionsRefreshRevision == requestedRevision else {
                 return
@@ -994,11 +1007,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
     private func completeRegisteredTranscriptValidation(
         _ request: MeetingTranscriptValidationRequest
     ) async {
-        let validatedSnapshot = await withTaskCancellationHandler {
-            await request.task.value
-        } onCancel: {
-            request.task.cancel()
-        }
+        let validatedSnapshot = await valueForwardingCancellation(from: request.task)
         finishRegisteredTranscriptValidation(
             request,
             validatedSnapshot: validatedSnapshot,
@@ -1053,11 +1062,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
             return
         }
         let completionTask = Task { [weak self] in
-            let validatedSnapshot = await withTaskCancellationHandler {
-                await request.task.value
-            } onCancel: {
-                request.task.cancel()
-            }
+            let validatedSnapshot = await valueForwardingCancellation(from: request.task)
             let wasCancelled = Task.isCancelled
             guard let self else {
                 return

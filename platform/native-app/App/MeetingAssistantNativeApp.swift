@@ -306,14 +306,14 @@ private struct NativeControlPlaneRootView: View {
                     transcriptActionViewModel.requestDeleteConfirmation()
                     return true
                 },
-                confirmDelete: {
+                cancelDelete: {
                     guard workspaceCoordinator.route == .meetingDetail,
                           workspaceCoordinator.activity == .idle,
                           workspaceCoordinator.currentSession?.id == transcriptActionViewModel.state.sessionID,
-                          transcriptActionViewModel.state.canConfirmDelete else {
+                          transcriptActionViewModel.state.isDeletePromptVisible else {
                         return false
                     }
-                    confirmCurrentMeetingDeletion()
+                    transcriptActionViewModel.cancelDelete()
                     return true
                 }
             )
@@ -856,7 +856,7 @@ private struct NativeLocalAppKeyboardShortcutView: NSViewRepresentable {
     let copyTranscript: () -> Bool
     let exportTranscript: () -> Bool
     let requestDelete: () -> Bool
-    let confirmDelete: () -> Bool
+    let cancelDelete: () -> Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -866,7 +866,7 @@ private struct NativeLocalAppKeyboardShortcutView: NSViewRepresentable {
             copyTranscript: copyTranscript,
             exportTranscript: exportTranscript,
             requestDelete: requestDelete,
-            confirmDelete: confirmDelete
+            cancelDelete: cancelDelete
         )
     }
 
@@ -882,7 +882,7 @@ private struct NativeLocalAppKeyboardShortcutView: NSViewRepresentable {
         context.coordinator.copyTranscript = copyTranscript
         context.coordinator.exportTranscript = exportTranscript
         context.coordinator.requestDelete = requestDelete
-        context.coordinator.confirmDelete = confirmDelete
+        context.coordinator.cancelDelete = cancelDelete
     }
 
     final class Coordinator {
@@ -892,7 +892,7 @@ private struct NativeLocalAppKeyboardShortcutView: NSViewRepresentable {
         var copyTranscript: () -> Bool
         var exportTranscript: () -> Bool
         var requestDelete: () -> Bool
-        var confirmDelete: () -> Bool
+        var cancelDelete: () -> Bool
         private var monitor: Any?
 
         init(
@@ -902,7 +902,7 @@ private struct NativeLocalAppKeyboardShortcutView: NSViewRepresentable {
             copyTranscript: @escaping () -> Bool,
             exportTranscript: @escaping () -> Bool,
             requestDelete: @escaping () -> Bool,
-            confirmDelete: @escaping () -> Bool
+            cancelDelete: @escaping () -> Bool
         ) {
             self.startRecording = startRecording
             self.stopRecording = stopRecording
@@ -910,7 +910,7 @@ private struct NativeLocalAppKeyboardShortcutView: NSViewRepresentable {
             self.copyTranscript = copyTranscript
             self.exportTranscript = exportTranscript
             self.requestDelete = requestDelete
-            self.confirmDelete = confirmDelete
+            self.cancelDelete = cancelDelete
         }
 
         deinit {
@@ -930,7 +930,7 @@ private struct NativeLocalAppKeyboardShortcutView: NSViewRepresentable {
 
         private func handle(_ event: NSEvent) -> NSEvent? {
             if event.keyCode == 36 || event.keyCode == 76 {
-                return confirmDelete() ? nil : event
+                return cancelDelete() ? nil : event
             }
 
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)

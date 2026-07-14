@@ -1,6 +1,39 @@
 import AppKit
 import SwiftUI
 
+private enum MeetingTaskAccessibilityFocusTarget: Hashable {
+    case pageHeading
+    case deleteAction
+    case deleteConfirmation
+}
+
+private enum MeetingTaskKeyboardFocusTarget: Hashable {
+    case primaryAction
+    case copyTranscript
+    case deleteAction
+    case deleteCancel
+    case deleteConfirm
+}
+
+@MainActor
+private func postMeetingAccessibilityAnnouncement(
+    _ message: String,
+    priority: NSAccessibilityPriorityLevel = .medium
+) {
+    let announcement = message.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !announcement.isEmpty else {
+        return
+    }
+    NSAccessibility.post(
+        element: NSApplication.shared,
+        notification: .announcementRequested,
+        userInfo: [
+            .announcement: announcement,
+            .priority: priority.rawValue,
+        ]
+    )
+}
+
 public enum MeetingTaskAccessibilityID {
     public static let navigation = "ma.shell.navigation"
     public static let routeStatus = "ma.shell.selectedSection"
@@ -222,6 +255,8 @@ public struct DesignedNativeShellView: View {
     private let confirmDelete: () -> Void
     @State private var didAutoRefreshPreflight = false
     @State private var showTechnicalDetails = false
+    @AccessibilityFocusState private var accessibilityFocus: MeetingTaskAccessibilityFocusTarget?
+    @FocusState private var keyboardFocus: MeetingTaskKeyboardFocusTarget?
 
     public init(
         coordinator: MeetingWorkspaceCoordinator,
@@ -285,12 +320,252 @@ public struct DesignedNativeShellView: View {
         }
         .onChange(of: coordinator.recordingDraft.captureMicrophoneAudio) { _, _ in
             synchronizeRecordingReadiness(permissionViewModel.state)
+            handleReadinessAccessibilityChange(permissionViewModel.state.phase)
+        }
+        .onChange(of: permissionViewModel.state.phase) { _, phase in
+            handleReadinessAccessibilityChange(phase)
+        }
+        .onChange(of: coordinator.route) { _, _ in
+            moveAccessibilityFocus(to: .pageHeading)
+        }
+        .onChange(of: coordinator.currentSession?.id) { _, _ in
+            moveAccessibilityFocus(to: .pageHeading)
+        }
+        .onChange(of: recordingViewModel.state.phase) { _, phase in
+            handleRecordingAccessibilityChange(phase)
+        }
+        .onChange(of: processingViewModel.state.phase) { _, phase in
+            handleProcessingAccessibilityChange(phase)
+        }
+        .onChange(of: coordinator.transcriptIsLoading) { _, isLoading in
+            handleTranscriptLoadingAccessibilityChange(isLoading)
+        }
+        .onChange(of: coordinator.transcriptLoadError) { _, error in
+            guard coordinator.route == .meetingDetail,
+                  let error else {
+                return
+            }
+            moveAccessibilityFocus(to: .pageHeading)
+            moveKeyboardFocus(to: .primaryAction)
+            postMeetingAccessibilityAnnouncement(
+                "The transcript could not be opened. The meeting recording is unchanged. \(error)",
+                priority: .high
+            )
+        }
+        .onChange(of: transcriptActionViewModel.state.isDeletePromptVisible) { wasVisible, isVisible in
+            handleDeletePromptAccessibilityChange(wasVisible: wasVisible, isVisible: isVisible)
+        }
+        .onChange(of: transcriptActionViewModel.state.successSummary) { _, summary in
+            guard let summary else {
+                return
+            }
+            postMeetingAccessibilityAnnouncement(summary)
+        }
+        .onChange(of: transcriptActionViewModel.state.failureSummary) { _, summary in
+            guard let summary else {
+                return
+            }
+            postMeetingAccessibilityAnnouncement(summary, priority: .high)
+        }
+        .onChange(of: coordinator.notice) { _, notice in
+            guard let notice else {
+                return
+            }
+            postMeetingAccessibilityAnnouncement(notice)
+        }
+        .onChange(of: coordinator.workspaceError) { _, error in
+            guard let error else {
+                return
+            }
+            postMeetingAccessibilityAnnouncement(
+                "Your meetings could not be loaded. Nothing was changed. \(error)",
+                priority: .high
+            )
         }
         .task {
             async let sessionsRefresh: Void = coordinator.refreshSessions()
             await autoRefreshPreflightIfNeeded()
             await sessionsRefresh
             synchronizeRecordingReadiness(permissionViewModel.state)
+        }
+    }
+
+    private func moveAccessibilityFocus(to target: MeetingTaskAccessibilityFocusTarget) {
+        DispatchQueue.main.async {
+            accessibilityFocus = target
+        }
+    }
+
+    private func moveKeyboardFocus(to target: MeetingTaskKeyboardFocusTarget?) {
+        DispatchQueue.main.async {
+            keyboardFocus = target
+        }
+    }
+
+    private func handleRecordingAccessibilityChange(_ phase: RecordingControlPhase) {
+        let announcement: String?
+        let priority: NSAccessibilityPriorityLevel
+        switch phase {
+        case .starting:
+            announcement = "Starting recording."
+            priority = .medium
+        case .recording:
+            announcement = "Recording started. Stop recording is available."
+            priority = .high
+        case .stopping:
+            announcement = "Saving the recording. The current meeting remains selected."
+            priority = .medium
+        case .recorded:
+            announcement = recordingViewModel.state.savedSummary ?? "Recording saved."
+            priority = .high
+        case .failed:
+            if recordingViewModel.state.sessionID == nil {
+                announcement = "Recording did not start. \(recordingViewModel.state.errorMessage ?? "Check the recording setup and try again.")"
+            } else {
+                announcement = "The recording could not be saved. The current session is still available for another stop attempt. \(recordingViewModel.state.errorMessage ?? "")"
+            }
+            priority = .high
+        case .idle, .ready:
+            announcement = nil
+            priority = .medium
+        }
+
+        switch phase {
+        case .starting:
+            moveAccessibilityFocus(to: .pageHeading)
+            moveKeyboardFocus(to: nil)
+        case .recording:
+            moveKeyboardFocus(to: .primaryAction)
+        case .stopping:
+            moveKeyboardFocus(to: nil)
+        case .recorded, .failed:
+            moveAccessibilityFocus(to: .pageHeading)
+            moveKeyboardFocus(to: .primaryAction)
+        case .idle, .ready:
+            break
+        }
+        if let announcement {
+            postMeetingAccessibilityAnnouncement(announcement, priority: priority)
+        }
+    }
+
+    private func handleReadinessAccessibilityChange(_ phase: PermissionDependencyPhase) {
+        if captureIsReady, phase != .checking {
+            postMeetingAccessibilityAnnouncement("Ready to record.", priority: .high)
+            return
+        }
+        switch phase {
+        case .checking:
+            postMeetingAccessibilityAnnouncement("Checking recording readiness on this Mac.")
+        case .ready:
+            postMeetingAccessibilityAnnouncement(
+                "Recording setup needs attention. \(readinessMessage)"
+            )
+        case .blocked:
+            postMeetingAccessibilityAnnouncement(
+                "Recording setup needs attention. \(readinessMessage)",
+                priority: .high
+            )
+        case .failed:
+            postMeetingAccessibilityAnnouncement(
+                "Recording setup check failed. \(readinessMessage)",
+                priority: .high
+            )
+        case .idle:
+            break
+        }
+    }
+
+    private func handleProcessingAccessibilityChange(_ phase: ProcessingStatePhase) {
+        let announcement: String?
+        let priority: NSAccessibilityPriorityLevel
+        switch phase {
+        case .generatingTranscript:
+            announcement = "Creating the transcript. The original recording remains safe."
+            priority = .medium
+        case .generatingSpeakerLabels:
+            announcement = "Transcript text was created. Adding anonymous speaker labels before final review."
+            priority = .medium
+        case .completed:
+            announcement = nil
+            priority = .medium
+        case .degraded:
+            announcement = nil
+            priority = .medium
+        case .failed:
+            announcement = "The transcript could not be created. The original recording is unchanged. \(processingViewModel.state.errorMessage ?? "You can retry the transcript.")"
+            priority = .high
+        case .blocked:
+            announcement = coordinator.route == .meetingDetail
+                ? "Transcript setup needs attention. The recording remains safe."
+                : nil
+            priority = .high
+        case .idle:
+            announcement = nil
+            priority = .medium
+        }
+
+        if phase == .generatingTranscript,
+           coordinator.route == .meetingDetail {
+            moveAccessibilityFocus(to: .pageHeading)
+            moveKeyboardFocus(to: nil)
+        } else if phase == .failed,
+                  coordinator.route == .meetingDetail {
+            moveAccessibilityFocus(to: .pageHeading)
+            moveKeyboardFocus(to: .primaryAction)
+        }
+        if let announcement {
+            postMeetingAccessibilityAnnouncement(announcement, priority: priority)
+        }
+    }
+
+    private func handleTranscriptLoadingAccessibilityChange(_ isLoading: Bool) {
+        guard coordinator.route == .meetingDetail else {
+            return
+        }
+        if isLoading {
+            moveAccessibilityFocus(to: .pageHeading)
+            moveKeyboardFocus(to: nil)
+            postMeetingAccessibilityAnnouncement(
+                "Opening the saved local transcript. The meeting remains on this Mac."
+            )
+            return
+        }
+
+        DispatchQueue.main.async {
+            guard coordinator.route == .meetingDetail,
+                  coordinator.transcriptLoadError == nil,
+                  transcriptViewModel.state.contentState != .missing else {
+                return
+            }
+            accessibilityFocus = .pageHeading
+            keyboardFocus = .copyTranscript
+            postMeetingAccessibilityAnnouncement(
+                "The transcript for \(coordinator.currentMeetingTitle) is ready for review.",
+                priority: .high
+            )
+        }
+    }
+
+    private func handleDeletePromptAccessibilityChange(
+        wasVisible: Bool,
+        isVisible: Bool
+    ) {
+        if isVisible {
+            DispatchQueue.main.async {
+                keyboardFocus = .deleteCancel
+                accessibilityFocus = .deleteConfirmation
+            }
+            postMeetingAccessibilityAnnouncement(
+                "Delete \(coordinator.currentMeetingTitle)? Meeting files inside the Meeting Assistant workspace will be removed. Exports saved elsewhere will be kept.",
+                priority: .high
+            )
+        } else if wasVisible,
+                  transcriptActionViewModel.state.phase == .ready {
+            DispatchQueue.main.async {
+                keyboardFocus = .deleteAction
+                accessibilityFocus = .deleteAction
+            }
         }
     }
 
@@ -361,7 +636,8 @@ public struct DesignedNativeShellView: View {
         route: MeetingWorkspaceRoute,
         identifier: String
     ) -> some View {
-        Button {
+        let isSelected = coordinator.route == route
+        return Button {
             if route == .newRecording {
                 coordinator.beginNewRecording()
             } else {
@@ -374,18 +650,24 @@ public struct DesignedNativeShellView: View {
                 Text(title)
                     .lineLimit(1)
                 Spacer(minLength: 0)
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.semibold))
+                        .accessibilityHidden(true)
+                }
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(coordinator.route == route ? Color.accentColor.opacity(0.14) : Color.clear)
+                    .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.clear)
             )
         }
         .buttonStyle(.plain)
         .disabled(coordinator.navigationIsLocked && coordinator.route != route)
         .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? .isSelected : AccessibilityTraits())
         .accessibilityIdentifier(identifier)
     }
 
@@ -690,6 +972,7 @@ public struct DesignedNativeShellView: View {
                 .controlSize(.large)
                 .disabled(!recordingViewModel.canStart)
                 .keyboardShortcut("r", modifiers: [.command, .option])
+                .focused($keyboardFocus, equals: .primaryAction)
                 .accessibilityIdentifier(RecordingControlAccessibilityID.startButton)
             }
         }
@@ -788,6 +1071,7 @@ public struct DesignedNativeShellView: View {
                     .font(.largeTitle.weight(.semibold))
                     .multilineTextAlignment(.center)
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityFocused($accessibilityFocus, equals: .pageHeading)
                     .accessibilityIdentifier(MeetingTaskAccessibilityID.detailHeading)
 
                 if recordingViewModel.state.phase == .recording {
@@ -822,6 +1106,7 @@ public struct DesignedNativeShellView: View {
             .frame(maxWidth: .infinity)
             .disabled(!recordingViewModel.canStop)
             .keyboardShortcut("s", modifiers: [.command, .option])
+            .focused($keyboardFocus, equals: .primaryAction)
             .accessibilityIdentifier(RecordingControlAccessibilityID.stopButton)
 
             Text("Stopping saves the recording before any transcript is created.")
@@ -924,6 +1209,7 @@ public struct DesignedNativeShellView: View {
                     .controlSize(.large)
                     .disabled(!processingViewModel.canStart)
                     .keyboardShortcut("p", modifiers: [.command, .option])
+                    .focused($keyboardFocus, equals: .primaryAction)
                     .accessibilityIdentifier(ProcessingAccessibilityID.startButton)
                 }
                 .cardStyle()
@@ -1017,6 +1303,7 @@ public struct DesignedNativeShellView: View {
                         .buttonStyle(.borderedProminent)
                         .disabled(!processingViewModel.canStart)
                         .keyboardShortcut("p", modifiers: [.command, .option])
+                        .focused($keyboardFocus, equals: .primaryAction)
                         .accessibilityIdentifier(ProcessingAccessibilityID.startButton)
                     }
                 } else {
@@ -1070,6 +1357,7 @@ public struct DesignedNativeShellView: View {
                 HStack(spacing: 10) {
                     Button("Reload transcript", action: reloadTranscript)
                         .buttonStyle(.bordered)
+                        .focused($keyboardFocus, equals: .primaryAction)
                         .accessibilityIdentifier(MeetingTaskAccessibilityID.reloadTranscript)
                 }
             }
@@ -1221,6 +1509,7 @@ public struct DesignedNativeShellView: View {
             .buttonStyle(.borderedProminent)
             .disabled(!transcriptActionViewModel.state.canCopy)
             .keyboardShortcut("c", modifiers: [.command, .option])
+            .focused($keyboardFocus, equals: .copyTranscript)
             .accessibilityIdentifier(TranscriptActionAccessibilityID.copyButton)
 
             Button("Export…") {
@@ -1283,6 +1572,8 @@ public struct DesignedNativeShellView: View {
                 .foregroundStyle(.red)
                 .disabled(!transcriptActionViewModel.state.canRequestDelete)
                 .keyboardShortcut("d", modifiers: [.command, .option])
+                .focused($keyboardFocus, equals: .deleteAction)
+                .accessibilityFocused($accessibilityFocus, equals: .deleteAction)
                 .accessibilityIdentifier(TranscriptActionAccessibilityID.deleteButton)
             }
 
@@ -1290,6 +1581,8 @@ public struct DesignedNativeShellView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Delete \(coordinator.currentMeetingTitle)?")
                         .font(.headline)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityFocused($accessibilityFocus, equals: .deleteConfirmation)
                     Text("The meeting and its files inside the Meeting Assistant workspace will be removed. Exports saved elsewhere on this Mac will be kept.")
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1298,11 +1591,13 @@ public struct DesignedNativeShellView: View {
                         Button("Cancel") {
                             transcriptActionViewModel.cancelDelete()
                         }
+                        .focused($keyboardFocus, equals: .deleteCancel)
                         .accessibilityIdentifier(TranscriptActionAccessibilityID.deleteCancelButton)
                         Button("Delete meeting", action: confirmDelete)
                             .buttonStyle(.borderedProminent)
                             .tint(.red)
                             .disabled(!transcriptActionViewModel.state.canConfirmDelete)
+                            .focused($keyboardFocus, equals: .deleteConfirm)
                             .accessibilityIdentifier(TranscriptActionAccessibilityID.deleteConfirmButton)
                     }
                 }
@@ -1436,6 +1731,7 @@ public struct DesignedNativeShellView: View {
                 .font(.largeTitle.weight(.semibold))
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
+                .accessibilityFocused($accessibilityFocus, equals: .pageHeading)
                 .accessibilityIdentifier(identifier)
             Text(subtitle)
                 .font(.body)
@@ -1467,10 +1763,12 @@ public struct DesignedNativeShellView: View {
             if let actionIdentifier {
                 Button(actionTitle, action: action)
                     .buttonStyle(.borderedProminent)
+                    .focused($keyboardFocus, equals: .primaryAction)
                     .accessibilityIdentifier(actionIdentifier)
             } else {
                 Button(actionTitle, action: action)
                     .buttonStyle(.borderedProminent)
+                    .focused($keyboardFocus, equals: .primaryAction)
             }
         }
         .cardStyle()
