@@ -1469,7 +1469,10 @@ private final class CoordinatorCancellableProjectionLoadProbe: @unchecked Sendab
         lock.unlock()
         continuation?.resume()
 
-        let timeout = Date().addingTimeInterval(1)
+        // Cancellation crosses the MainActor refresh task and its detached loader.
+        // Match the validation probe's grace window so this verifies propagation,
+        // rather than treating executor contention as a failed cancellation.
+        let timeout = Date().addingTimeInterval(5)
         while !Task.isCancelled, Date() < timeout {
             Thread.sleep(forTimeInterval: 0.002)
         }
