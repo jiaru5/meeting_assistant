@@ -9,6 +9,7 @@ but never substitutes for a human observer's attestation.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import importlib.util
 import json
@@ -54,6 +55,10 @@ SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 PHONE_PATTERN = re.compile(r"(?<!\w)(?:\+?[0-9][0-9 ()-]{7,}[0-9])(?!\w)")
 RAW_SESSION_ID_PATTERN = re.compile(r"\b(?:session|sess)[-_][A-Za-z0-9][A-Za-z0-9._-]{5,}\b", re.IGNORECASE)
+NON_HUMAN_ATTESTOR_PATTERN = re.compile(
+    r"(?:\b(?:agent|ai|automation|automated|bot|robot|script|xctest|xcuitest)\b|智能体|自动化|机器人|脚本)",
+    re.IGNORECASE,
+)
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 TRUSTED_GIT = "/usr/bin/git"
 _CURRENT_SUBJECT_UNSET = object()
@@ -190,41 +195,81 @@ def _resolve_path(value: str, *, label: str) -> Path:
     return Path(os.path.abspath(os.path.expanduser(value)))
 
 
-def _require_regular_non_symlink(path: Path, *, label: str) -> os.stat_result:
+def _open_regular_non_symlink(path: Path, *, label: str) -> int:
+    """Open one regular leaf without following a symlink.
+
+    Callers that need bytes must consume this descriptor rather than re-opening
+    ``path``.  This keeps the inspected inode, parsed content, and digest bound
+    to the same file even when a local path is being changed concurrently.
+    """
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise VisualReviewToolError(
+            f"{label} requires an operating system with O_NOFOLLOW support: {path}"
+        )
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
     try:
-        metadata = path.lstat()
+        descriptor = os.open(path, flags)
     except FileNotFoundError as exc:
         raise VisualReviewToolError(f"{label} is missing: {path}") from exc
     except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+            raise VisualReviewToolError(
+                f"{label} must be a regular non-symlink file: {path}"
+            ) from exc
+        raise VisualReviewToolError(f"{label} could not be opened safely: {path}: {exc}") from exc
+    try:
+        metadata = os.fstat(descriptor)
+    except OSError as exc:
+        os.close(descriptor)
         raise VisualReviewToolError(f"{label} could not be inspected safely: {path}: {exc}") from exc
     if not stat.S_ISREG(metadata.st_mode):
-        raise VisualReviewToolError(
-            f"{label} must be a regular non-symlink file: {path}"
-        )
-    return metadata
+        os.close(descriptor)
+        raise VisualReviewToolError(f"{label} must be a regular non-symlink file: {path}")
+    return descriptor
 
 
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
+def _require_regular_non_symlink(path: Path, *, label: str) -> os.stat_result:
+    descriptor = _open_regular_non_symlink(path, label=label)
     try:
-        with path.open("rb") as handle:
-            for block in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(block)
+        return os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _read_regular_bytes(path: Path, *, label: str) -> bytes:
+    descriptor = _open_regular_non_symlink(path, label=label)
+    try:
+        try:
+            handle = os.fdopen(descriptor, "rb")
+        except OSError:
+            raise
+        descriptor = -1
+        with handle:
+            return handle.read()
     except OSError as exc:
-        raise VisualReviewToolError(f"could not hash file safely: {path}: {exc}") from exc
-    return digest.hexdigest()
-
-
-def _read_json_regular(path: Path, *, label: str) -> Any:
-    _require_regular_non_symlink(path, label=label)
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError) as exc:
         raise VisualReviewToolError(f"{label} could not be read safely: {path}: {exc}") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _read_json_regular_with_bytes(path: Path, *, label: str) -> tuple[Any, bytes]:
+    raw = _read_regular_bytes(path, label=label)
+    try:
+        return json.loads(raw.decode("utf-8")), raw
+    except UnicodeError as exc:
+        raise VisualReviewToolError(f"{label} could not be decoded safely: {path}: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise VisualReviewToolError(
             f"{label} is not valid JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}"
         ) from exc
+
+
+def _read_json_regular(path: Path, *, label: str) -> Any:
+    document, _ = _read_json_regular_with_bytes(path, label=label)
+    return document
 
 
 def _validate_png_path_and_sha256(
@@ -238,17 +283,12 @@ def _validate_png_path_and_sha256(
     path = _absolute_path(path_value, label=f"task screenshot {name!r} path")
     if path.suffix.lower() != ".png":
         raise VisualReviewToolError(f"task screenshot {name!r} must use a .png path")
-    _require_regular_non_symlink(path, label=f"task screenshot {name!r}")
     if not isinstance(expected_sha256, str) or not SHA256_PATTERN.fullmatch(expected_sha256):
         raise VisualReviewToolError(f"task screenshot {name!r} must record a lowercase SHA-256")
-    try:
-        with path.open("rb") as handle:
-            signature = handle.read(len(PNG_SIGNATURE))
-    except OSError as exc:
-        raise VisualReviewToolError(f"could not read task screenshot {name!r}: {exc}") from exc
-    if signature != PNG_SIGNATURE:
+    image_bytes = _read_regular_bytes(path, label=f"task screenshot {name!r}")
+    if image_bytes[: len(PNG_SIGNATURE)] != PNG_SIGNATURE:
         raise VisualReviewToolError(f"task screenshot {name!r} is not a PNG file")
-    observed_sha256 = _sha256_file(path)
+    observed_sha256 = hashlib.sha256(image_bytes).hexdigest()
     if observed_sha256 != expected_sha256:
         raise VisualReviewToolError(
             f"task screenshot {name!r} SHA-256 does not match its task report"
@@ -280,7 +320,7 @@ def _strict_task_evidence_validator() -> Any:
 
 
 def _validate_trusted_task_report(
-    *, report_path: Path, report: dict[str, Any], subject_commit: str
+    *, report_path: Path, report: dict[str, Any], report_bytes: bytes, subject_commit: str
 ) -> None:
     if "fixture_checks_passed" not in report or report.get("fixture_checks_passed") is not None:
         raise VisualReviewToolError(
@@ -301,12 +341,39 @@ def _validate_trusted_task_report(
         "tested_app_executable_sha256": app_identity.get("executable_sha256"),
     }
     validator = _strict_task_evidence_validator()
+    descriptor = -1
+    snapshot_path: Path | None = None
     try:
-        validator(report_path=report_path, subject=subject)
+        descriptor, snapshot_name = tempfile.mkstemp(
+            prefix="mvp1-screenshot-visual-review-task-report-", suffix=".json"
+        )
+        snapshot_path = Path(snapshot_name)
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = -1
+            handle.write(report_bytes)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except OSError as exc:
+        if snapshot_path is not None:
+            snapshot_path.unlink(missing_ok=True)
+        raise VisualReviewToolError(
+            f"task evidence report could not be snapshotted for strict provenance validation: {exc}"
+        ) from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    try:
+        if snapshot_path is None:
+            raise VisualReviewToolError("task evidence report snapshot was not created")
+        validator(report_path=snapshot_path, subject=subject)
     except Exception as exc:
         raise VisualReviewToolError(
             f"task evidence report failed strict trusted provenance verification: {exc}"
         ) from exc
+    finally:
+        if snapshot_path is not None:
+            snapshot_path.unlink(missing_ok=True)
 
 
 def validated_task_evidence(
@@ -318,7 +385,7 @@ def validated_task_evidence(
     if not isinstance(subject_commit, str) or not COMMIT_PATTERN.fullmatch(subject_commit):
         raise VisualReviewToolError("subject_commit must be a 40-character lowercase Git commit hash")
     report_path = _resolve_path(report_path_value, label="task evidence report")
-    report = _read_json_regular(report_path, label="task evidence report")
+    report, report_bytes = _read_json_regular_with_bytes(report_path, label="task evidence report")
     if not isinstance(report, dict):
         raise VisualReviewToolError("task evidence report must be a JSON object")
     if (
@@ -342,6 +409,7 @@ def validated_task_evidence(
     _validate_trusted_task_report(
         report_path=report_path,
         report=report,
+        report_bytes=report_bytes,
         subject_commit=subject_commit,
     )
 
@@ -372,7 +440,7 @@ def validated_task_evidence(
         )
     return {
         "report_path": str(report_path),
-        "report_sha256": _sha256_file(report_path),
+        "report_sha256": hashlib.sha256(report_bytes).hexdigest(),
         "subject_commit": subject_commit,
         "screenshots": bound_screenshots,
     }
@@ -487,8 +555,13 @@ def _validate_attestation(value: Any, errors: list[str]) -> None:
         errors.append(
             "reviewer_attestation.attested_at must be a timezone-aware ISO-8601 timestamp"
         )
-    if not _is_nonempty_string(value.get("attested_by_role")):
+    attested_by_role = value.get("attested_by_role")
+    if not _is_nonempty_string(attested_by_role):
         errors.append("reviewer_attestation.attested_by_role must be a non-empty role or pseudonym")
+    elif NON_HUMAN_ATTESTOR_PATTERN.search(str(attested_by_role)):
+        errors.append(
+            "reviewer_attestation.attested_by_role must not self-identify an agent, automation, XCUITest, or other non-human observer"
+        )
     if value.get("statement") != ATTESTATION_STATEMENT:
         errors.append("reviewer_attestation.statement must match the manual human visual attestation")
     if value.get("synthetic_data_confirmed") is not True:
@@ -1037,7 +1110,12 @@ def _atomic_write_outputs(outputs: list[tuple[Path, str]]) -> None:
             except OSError as exc:
                 raise VisualReviewToolError(f"failed to atomically publish output {target}: {exc}") from exc
             published.append((target, device, inode))
-            mode = stat.S_IMODE(target.stat().st_mode)
+            metadata = _require_regular_non_symlink(target, label="published output")
+            if (metadata.st_dev, metadata.st_ino) != (device, inode):
+                raise VisualReviewToolError(
+                    f"published output identity changed before verification: {target}"
+                )
+            mode = stat.S_IMODE(metadata.st_mode)
             if mode != 0o600:
                 raise VisualReviewToolError(f"output permissions must be 0600: {target} is {mode:04o}")
     except Exception:

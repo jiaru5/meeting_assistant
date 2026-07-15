@@ -333,6 +333,14 @@ def directory_manifest(path: Path) -> dict[str, Any]:
     }
 
 
+def stable_directory_manifest(path: Path) -> dict[str, Any]:
+    first = directory_manifest(path)
+    second = directory_manifest(path)
+    if first != second:
+        raise VerificationError("retained artifact directory changed while final manifest was collected")
+    return second
+
+
 def secure_evidence_tree(path: Path) -> None:
     if path.is_symlink():
         raise VerificationError(f"evidence path must not be a symlink: {path}")
@@ -1240,10 +1248,6 @@ def main() -> int:
             raise VerificationError(
                 "prepared xctestrun fingerprint does not match the current app/test input fingerprint"
             )
-        report["xcresult"] = {
-            "path": str(xcresult_path),
-            **directory_manifest(xcresult_path),
-        }
         source_methods = source_test_methods(source_path)
         report["test_source"]["methods"] = source_methods
         summary = run_json(
@@ -1287,6 +1291,18 @@ def main() -> int:
         report["attachments"]["exported_screenshots"] = screenshots
     except (OSError, VerificationError) as error:
         findings.append(f"could not export task screenshots: {error}")
+
+    # xcresulttool may materialize its local SQLite cache while reading or exporting an
+    # XCResult bundle.  Capture the retained-bundle manifest only after every
+    # xcresulttool operation has completed, so the report binds the bytes that a
+    # subsequent human-evidence verifier will actually observe.
+    try:
+        report["xcresult"] = {
+            "path": str(xcresult_path),
+            **stable_directory_manifest(xcresult_path),
+        }
+    except (OSError, VerificationError) as error:
+        findings.append(f"could not manifest retained task xcresult: {error}")
 
     os_fields = report["os"]
     if not all(os_fields.get(key) for key in ("system", "release", "machine")):

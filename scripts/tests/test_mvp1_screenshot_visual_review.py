@@ -197,6 +197,73 @@ class MVP1ScreenshotVisualReviewTests(unittest.TestCase):
         self.assertFalse(validation["checks"]["manual_human_attestation_valid"])
         self.assertIn("human visual observer", "\n".join(validation["errors"]))
 
+    def test_explicit_agent_or_automation_role_cannot_count_as_human_review(self) -> None:
+        review = self.valid_review()
+        review["reviewer_attestation"]["attested_by_role"] = "XCUITest automation agent"
+
+        validation = self.validate(review)
+
+        self.assertFalse(validation["ready_for_review"])
+        self.assertFalse(validation["checks"]["manual_human_attestation_valid"])
+        self.assertIn("must not self-identify", "\n".join(validation["errors"]))
+
+    def test_task_report_snapshot_keeps_strict_validation_on_the_same_report_bytes(self) -> None:
+        original_report_bytes = self.task_report.read_bytes()
+        snapshot_paths: list[Path] = []
+
+        def inspect_snapshot(*, report_path: Path, subject: dict) -> dict:
+            snapshot_paths.append(report_path)
+            self.assertEqual(report_path.read_bytes(), original_report_bytes)
+            return {}
+
+        original_reader = self.module._read_json_regular_with_bytes
+
+        def read_then_replace(path: Path, *, label: str):
+            document, report_bytes = original_reader(path, label=label)
+            if path == self.task_report:
+                changed = dict(document)
+                changed["subject_commit"] = "b" * 40
+                self.task_report.write_text(json.dumps(changed), encoding="utf-8")
+            return document, report_bytes
+
+        self.module._strict_task_evidence_validator = lambda: inspect_snapshot
+        with mock.patch.object(
+            self.module,
+            "_read_json_regular_with_bytes",
+            side_effect=read_then_replace,
+        ):
+            template = self.template()
+
+        self.assertEqual(len(snapshot_paths), 1)
+        self.assertFalse(snapshot_paths[0].exists())
+        self.assertEqual(
+            template["task_evidence"]["report_sha256"],
+            hashlib.sha256(original_report_bytes).hexdigest(),
+        )
+
+    def test_task_report_and_screenshot_reads_use_no_follow_descriptors(self) -> None:
+        observed_flags: dict[Path, int] = {}
+        original_open = os.open
+        protected_paths = {
+            self.task_report,
+            *(self.screenshot_directory / f"{name}.png" for name in self.module.REQUIRED_SCREENSHOTS),
+        }
+
+        def recording_open(path, flags, mode=0o777, *, dir_fd=None):
+            normalized = Path(path)
+            if normalized in protected_paths:
+                observed_flags[normalized] = flags
+            if dir_fd is None:
+                return original_open(path, flags, mode)
+            return original_open(path, flags, mode, dir_fd=dir_fd)
+
+        with mock.patch.object(self.module.os, "open", side_effect=recording_open):
+            self.template()
+
+        self.assertEqual(set(observed_flags), protected_paths)
+        for flags in observed_flags.values():
+            self.assertNotEqual(flags & os.O_NOFOLLOW, 0)
+
     def test_failed_screenshot_without_matching_finding_blocks(self) -> None:
         review = self.valid_review()
         review["screenshots"][2]["result"] = "fail"

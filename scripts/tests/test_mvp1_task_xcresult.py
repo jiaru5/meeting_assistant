@@ -171,6 +171,8 @@ if args[:1] == ["xcresulttool"]:
 if args[:3] == ["get", "test-results", "summary"]:
     bundle = Path(args[args.index("--path") + 1])
     print((bundle / "summary.json").read_text(encoding="utf-8"))
+    if (bundle / "emit-xcresult-cache-on-read").exists():
+        (bundle / "database.sqlite3").write_bytes(b"xcresulttool cache bytes\\n")
 elif args[:3] == ["get", "test-results", "tests"]:
     bundle = Path(args[args.index("--path") + 1])
     print((bundle / "tests.json").read_text(encoding="utf-8"))
@@ -456,6 +458,23 @@ else:
         )
         self.assertEqual(1, redirected_git.returncode)
         self.assertTrue(self._report("git-environment-scrubbed")["fixture_checks_passed"])
+
+    def test_retained_xcresult_manifest_is_captured_after_xcresulttool_cache_materializes(self) -> None:
+        self._write_fixture()
+        (self.xcresult / "emit-xcresult-cache-on-read").write_text("1\n", encoding="utf-8")
+
+        completed = self._run(output_name="xcresult-cache-materialized")
+
+        self.assertEqual(1, completed.returncode, completed.stderr)
+        report = self._report("xcresult-cache-materialized")
+        self.assertTrue((self.xcresult / "database.sqlite3").is_file())
+        self.assertEqual(
+            {
+                "path": str(self.xcresult.resolve()),
+                **self.verifier_module.directory_manifest(self.xcresult),
+            },
+            report["xcresult"],
+        )
 
     def test_xcode_attachment_suffixes_are_normalized_without_accepting_arbitrary_names(self) -> None:
         self._write_fixture()
