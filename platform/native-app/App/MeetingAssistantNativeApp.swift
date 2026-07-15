@@ -118,6 +118,7 @@ private final class MeetingAssistantNativeMainWindow {
             backing: .buffered,
             defer: false
         )
+        window.appearance = NSAppearance(named: .aqua)
         window.title = "Meeting Assistant Native"
         window.contentViewController = hostingController
         window.isReleasedWhenClosed = false

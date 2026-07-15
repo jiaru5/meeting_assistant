@@ -1439,6 +1439,7 @@ private enum SwiftUIViewSourceContract {
                 "var hasVisibleWindow: Bool",
                 "NSHostingController(rootView: rootView)",
                 "NSWindow(",
+                "window.appearance = NSAppearance(named: .aqua)",
                 "window.setAccessibilityElement(true)",
                 "window.setAccessibilityRole(.window)",
                 "window.setAccessibilitySubrole(.standardWindow)",
