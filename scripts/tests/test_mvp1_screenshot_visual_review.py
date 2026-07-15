@@ -39,7 +39,7 @@ class MVP1ScreenshotVisualReviewTests(unittest.TestCase):
         self.subject_commit = "a" * 40
         self.module.current_commit = lambda root=None: self.subject_commit
         self.module._strict_task_evidence_validator = lambda: (
-            lambda *, report_path, subject: {}
+            lambda *, report_path, report_bytes, subject: {}
         )
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.base = Path(self.temporary_directory.name)
@@ -207,13 +207,13 @@ class MVP1ScreenshotVisualReviewTests(unittest.TestCase):
         self.assertFalse(validation["checks"]["manual_human_attestation_valid"])
         self.assertIn("must not self-identify", "\n".join(validation["errors"]))
 
-    def test_task_report_snapshot_keeps_strict_validation_on_the_same_report_bytes(self) -> None:
+    def test_strict_validation_receives_the_same_task_report_bytes(self) -> None:
         original_report_bytes = self.task_report.read_bytes()
-        snapshot_paths: list[Path] = []
+        validator_inputs: list[tuple[Path, bytes]] = []
 
-        def inspect_snapshot(*, report_path: Path, subject: dict) -> dict:
-            snapshot_paths.append(report_path)
-            self.assertEqual(report_path.read_bytes(), original_report_bytes)
+        def inspect_snapshot(*, report_path: Path, report_bytes: bytes, subject: dict) -> dict:
+            validator_inputs.append((report_path, report_bytes))
+            self.assertEqual(report_bytes, original_report_bytes)
             return {}
 
         original_reader = self.module._read_json_regular_with_bytes
@@ -234,8 +234,7 @@ class MVP1ScreenshotVisualReviewTests(unittest.TestCase):
         ):
             template = self.template()
 
-        self.assertEqual(len(snapshot_paths), 1)
-        self.assertFalse(snapshot_paths[0].exists())
+        self.assertEqual([(self.task_report, original_report_bytes)], validator_inputs)
         self.assertEqual(
             template["task_evidence"]["report_sha256"],
             hashlib.sha256(original_report_bytes).hexdigest(),
@@ -263,6 +262,16 @@ class MVP1ScreenshotVisualReviewTests(unittest.TestCase):
         self.assertEqual(set(observed_flags), protected_paths)
         for flags in observed_flags.values():
             self.assertNotEqual(flags & os.O_NOFOLLOW, 0)
+            self.assertNotEqual(flags & os.O_NONBLOCK, 0)
+
+    def test_fifo_input_is_rejected_without_blocking(self) -> None:
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("platform does not support FIFO fixtures")
+        fifo = self.base / "task-evidence.fifo"
+        os.mkfifo(fifo)
+
+        with self.assertRaisesRegex(self.module.VisualReviewToolError, "regular non-symlink"):
+            self.module._read_regular_bytes(fifo, label="task evidence report")
 
     def test_failed_screenshot_without_matching_finding_blocks(self) -> None:
         review = self.valid_review()

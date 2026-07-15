@@ -209,6 +209,10 @@ def _open_regular_non_symlink(path: Path, *, label: str) -> int:
     flags = os.O_RDONLY | os.O_NOFOLLOW
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NONBLOCK"):
+        flags |= os.O_NONBLOCK
+    if hasattr(os, "O_NOCTTY"):
+        flags |= os.O_NOCTTY
     try:
         descriptor = os.open(path, flags)
     except FileNotFoundError as exc:
@@ -341,39 +345,12 @@ def _validate_trusted_task_report(
         "tested_app_executable_sha256": app_identity.get("executable_sha256"),
     }
     validator = _strict_task_evidence_validator()
-    descriptor = -1
-    snapshot_path: Path | None = None
     try:
-        descriptor, snapshot_name = tempfile.mkstemp(
-            prefix="mvp1-screenshot-visual-review-task-report-", suffix=".json"
-        )
-        snapshot_path = Path(snapshot_name)
-        os.fchmod(descriptor, 0o600)
-        with os.fdopen(descriptor, "wb") as handle:
-            descriptor = -1
-            handle.write(report_bytes)
-            handle.flush()
-            os.fsync(handle.fileno())
-    except OSError as exc:
-        if snapshot_path is not None:
-            snapshot_path.unlink(missing_ok=True)
-        raise VisualReviewToolError(
-            f"task evidence report could not be snapshotted for strict provenance validation: {exc}"
-        ) from exc
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
-    try:
-        if snapshot_path is None:
-            raise VisualReviewToolError("task evidence report snapshot was not created")
-        validator(report_path=snapshot_path, subject=subject)
+        validator(report_path=report_path, report_bytes=report_bytes, subject=subject)
     except Exception as exc:
         raise VisualReviewToolError(
             f"task evidence report failed strict trusted provenance verification: {exc}"
         ) from exc
-    finally:
-        if snapshot_path is not None:
-            snapshot_path.unlink(missing_ok=True)
 
 
 def validated_task_evidence(

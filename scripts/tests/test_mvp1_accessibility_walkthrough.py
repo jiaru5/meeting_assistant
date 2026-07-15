@@ -251,6 +251,29 @@ class MVP1AccessibilityWalkthroughTests(unittest.TestCase):
             template["task_evidence"]["report_path"],
         )
 
+    def test_explicit_task_report_bytes_bind_strict_validation_to_the_caller_snapshot(self) -> None:
+        walkthrough = self.valid_walkthrough()
+        original_report_bytes = self.task_evidence_report.read_bytes()
+        changed_report = json.loads(original_report_bytes)
+        changed_report["subject_commit"] = "0" * 40
+        self.task_evidence_report.write_text(json.dumps(changed_report), encoding="utf-8")
+
+        observed = self.module._validated_task_evidence(
+            report_path=self.task_evidence_report,
+            report_bytes=original_report_bytes,
+            subject=walkthrough["subject"],
+        )
+
+        self.assertEqual(
+            hashlib.sha256(original_report_bytes).hexdigest(),
+            observed["report_sha256"],
+        )
+        with self.assertRaisesRegex(self.module.WalkthroughToolError, "does not bind the walkthrough"):
+            self.module._validated_task_evidence(
+                report_path=self.task_evidence_report,
+                subject=walkthrough["subject"],
+            )
+
     def test_human_attestation_requires_confirmation_timezone_role_and_exact_statement(self) -> None:
         walkthrough = self.valid_walkthrough()
         walkthrough["observer_attestation"] = {

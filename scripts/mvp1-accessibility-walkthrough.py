@@ -403,12 +403,22 @@ def _validated_task_evidence(
     *,
     report_path: Path,
     subject: dict[str, Any],
+    report_bytes: bytes | None = None,
 ) -> dict[str, str]:
-    if not report_path.is_file():
-        raise WalkthroughToolError(f"task xcresult evidence report is missing: {report_path}")
+    if report_bytes is None:
+        if not report_path.is_file():
+            raise WalkthroughToolError(f"task xcresult evidence report is missing: {report_path}")
+        try:
+            raw_report = report_path.read_bytes()
+        except OSError as exc:
+            raise WalkthroughToolError(f"task xcresult evidence report is unreadable: {exc}") from exc
+    elif not isinstance(report_bytes, bytes):
+        raise WalkthroughToolError("task xcresult evidence report bytes must be bytes")
+    else:
+        raw_report = report_bytes
     try:
-        report = json.loads(report_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        report = json.loads(raw_report.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
         raise WalkthroughToolError(f"task xcresult evidence report is unreadable: {exc}") from exc
     if not isinstance(report, dict):
         raise WalkthroughToolError("task xcresult evidence report must be a JSON object")
@@ -568,7 +578,7 @@ def _validated_task_evidence(
         raise WalkthroughToolError("task xcresult evidence bundle contents are missing or changed")
     return {
         "report_path": str(report_path),
-        "report_sha256": _sha256_file(report_path),
+        "report_sha256": hashlib.sha256(raw_report).hexdigest(),
         "prepared_input_fingerprint": prepared_fingerprint,
         "xctestrun_sha256": xctestrun_sha256,
     }
