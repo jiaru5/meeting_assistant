@@ -4,6 +4,8 @@ set -euo pipefail
 component_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$component_dir"
 
+repo_root="$(cd "$component_dir/../.." && pwd)"
+
 derived_data_path="${MA_NATIVE_APP_DERIVED_DATA_PATH:-$component_dir/build/DerivedData/AppBundleUITests}"
 destination="${MA_NATIVE_APP_XCODE_DESTINATION:-platform=macOS}"
 reuse_xctestrun="${MA_NATIVE_APP_REUSE_XCTESTRUN:-auto}"
@@ -45,8 +47,83 @@ task_xcuitest="${MA_NATIVE_APP_TASK_XCUITEST:-0}"
 task_xcuitest_test="MeetingAssistantNativeAppUITests/DesignedNativeShellAppBundleTests"
 task_xcuitest_log="$derived_data_path/task-workflow-app-bundle-xcuitest.log"
 full_xcuitest_log="$derived_data_path/full-app-bundle-xcuitest.log"
+task_xcuitest_source="$component_dir/UITests/MeetingAssistantNativeAppUITests/DesignedNativeShellAppBundleTests.swift"
+task_xcresult_verifier="$repo_root/scripts/mvp1-task-xcresult.py"
+xcresult_run_id="${MA_NATIVE_APP_XCRESULT_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+last_result_bundle_path=""
+last_result_evidence_dir=""
+validated_task_input_fingerprint=""
+validated_task_subject_commit=""
+last_task_artifact_binding_path=""
+last_task_artifact_binding_sha256=""
+last_task_frozen_verifier_path=""
+last_task_frozen_verifier_sha256=""
+xcodebuild_tool="${MA_NATIVE_APP_XCODEBUILD_TOOL:-$(command -v xcodebuild || true)}"
+python_tool="/usr/bin/python3"
+xcresulttool="${MA_NATIVE_APP_XCRESULTTOOL:-}"
+codesign_tool="${MA_NATIVE_APP_CODESIGN_TOOL:-/usr/bin/codesign}"
+git_tool="${MA_NATIVE_APP_GIT_TOOL:-/usr/bin/git}"
+image_decode_tool="${MA_NATIVE_APP_IMAGE_DECODE_TOOL:-/usr/bin/sips}"
+app_bundle_lock_path="$derived_data_path/.meeting-assistant-app-bundle.lock"
+app_bundle_lock_owner="$$-$(date -u +%Y%m%dT%H%M%SZ)"
+app_bundle_lock_candidate="$derived_data_path/.meeting-assistant-app-bundle.owner.$app_bundle_lock_owner"
 
 mkdir -p "$derived_data_path"
+
+release_app_bundle_lock() {
+  if [[ -z "$app_bundle_lock_candidate" || ! -e "$app_bundle_lock_candidate" ]]; then
+    return 0
+  fi
+  if [[ -e "$app_bundle_lock_path" && ! -L "$app_bundle_lock_path" ]] \
+    && [[ "$app_bundle_lock_path" -ef "$app_bundle_lock_candidate" ]]; then
+    rm -f "$app_bundle_lock_path"
+  fi
+  rm -f "$app_bundle_lock_candidate"
+}
+trap release_app_bundle_lock EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if [[ ! -f "$python_tool" || -L "$python_tool" || ! -x "$python_tool" ]]; then
+  echo "error: trusted system Python launcher is unavailable: $python_tool" >&2
+  exit 2
+fi
+if [[ -z "$xcodebuild_tool" || ! -x "$xcodebuild_tool" ]]; then
+  echo "error: xcodebuild is unavailable; set MA_NATIVE_APP_XCODEBUILD_TOOL to an executable path." >&2
+  exit 2
+fi
+
+if ! (
+  umask 077
+  set -o noclobber
+  printf '%s\n' "$app_bundle_lock_owner" >"$app_bundle_lock_candidate"
+) 2>/dev/null; then
+  echo "error: could not create unique DerivedData lock owner file: $app_bundle_lock_candidate" >&2
+  exit 2
+fi
+if ! "$python_tool" -I -S - "$app_bundle_lock_candidate" "$app_bundle_lock_path" <<'PY'
+import os
+import sys
+
+candidate, lock_path = sys.argv[1:3]
+try:
+    os.link(candidate, lock_path, follow_symlinks=False)
+except FileExistsError:
+    raise SystemExit(1)
+except OSError as error:
+    print(f"error: could not acquire DerivedData lock safely: {error}", file=sys.stderr)
+    raise SystemExit(2)
+PY
+then
+  echo "error: another app-bundle workflow owns DerivedData lock: $app_bundle_lock_path" >&2
+  echo "Wait for that workflow to finish; remove the lock only after confirming no xcodebuild is using this DerivedData." >&2
+  exit 2
+fi
+if [[ -L "$app_bundle_lock_path" || ! "$app_bundle_lock_path" -ef "$app_bundle_lock_candidate" ]]; then
+  echo "error: DerivedData lock identity changed immediately after acquisition: $app_bundle_lock_path" >&2
+  exit 2
+fi
 
 is_truthy() {
   case "${1:-0}" in
@@ -70,6 +147,108 @@ is_falsey() {
   esac
 }
 
+sha256_path() {
+  "$python_tool" -I -S -c \
+    'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' \
+    "$1"
+}
+
+sha256_stream() {
+  "$python_tool" -I -S -c \
+    'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
+}
+
+run_clean_git() {
+  local root="$1"
+  shift
+  /usr/bin/env -i \
+    GIT_CONFIG_NOSYSTEM=1 \
+    HOME=/var/empty \
+    LANG=C \
+    PATH=/usr/bin:/bin \
+    "$git_tool" -C "$root" "$@"
+}
+
+require_trusted_mvp1_toolchain() {
+  local resolved_python=""
+  local resolved_xcodebuild=""
+  local resolved_xcresulttool=""
+  local tool=""
+
+  for tool in /usr/bin/env /usr/bin/xcrun /usr/bin/python3 /usr/bin/codesign /usr/bin/git /usr/bin/sips; do
+    if [[ ! -f "$tool" || -L "$tool" || ! -x "$tool" ]]; then
+      echo "error: trusted MVP.1 task evidence tool is unavailable or not a regular executable: $tool" >&2
+      return 2
+    fi
+  done
+  resolved_xcodebuild="$(/usr/bin/xcrun --find xcodebuild 2>/dev/null || true)"
+  resolved_xcresulttool="$(/usr/bin/xcrun --find xcresulttool 2>/dev/null || true)"
+  resolved_python="$(/usr/bin/xcrun --find python3 2>/dev/null || true)"
+  if [[ "$resolved_python" != "$("$python_tool" -I -S -c 'import sys; print(sys.executable)')" ]]; then
+    echo "error: trusted system Python launcher did not execute the xcrun-resolved Python runtime." >&2
+    return 2
+  fi
+  for tool in "$resolved_xcodebuild" "$resolved_xcresulttool" "$resolved_python"; do
+    if [[ "$tool" != /* || ! -f "$tool" || ! -x "$tool" ]]; then
+      echo "error: trusted xcrun did not resolve an absolute executable Xcode tool: ${tool:-missing}" >&2
+      return 2
+    fi
+  done
+
+  if [[ -n "${MA_NATIVE_APP_XCODEBUILD_TOOL:-}" && "$MA_NATIVE_APP_XCODEBUILD_TOOL" != "$resolved_xcodebuild" ]]; then
+    echo "error: trusted MVP.1 task evidence rejects MA_NATIVE_APP_XCODEBUILD_TOOL override: $MA_NATIVE_APP_XCODEBUILD_TOOL" >&2
+    return 2
+  fi
+  if [[ -n "${MA_NATIVE_APP_XCRESULTTOOL:-}" && "$MA_NATIVE_APP_XCRESULTTOOL" != "$resolved_xcresulttool" ]]; then
+    echo "error: trusted MVP.1 task evidence rejects MA_NATIVE_APP_XCRESULTTOOL override: $MA_NATIVE_APP_XCRESULTTOOL" >&2
+    return 2
+  fi
+  if [[ -n "${MA_NATIVE_APP_CODESIGN_TOOL:-}" && "$MA_NATIVE_APP_CODESIGN_TOOL" != "/usr/bin/codesign" ]]; then
+    echo "error: trusted MVP.1 task evidence rejects MA_NATIVE_APP_CODESIGN_TOOL override: $MA_NATIVE_APP_CODESIGN_TOOL" >&2
+    return 2
+  fi
+  if [[ -n "${MA_NATIVE_APP_GIT_TOOL:-}" && "$MA_NATIVE_APP_GIT_TOOL" != "/usr/bin/git" ]]; then
+    echo "error: trusted MVP.1 task evidence rejects MA_NATIVE_APP_GIT_TOOL override: $MA_NATIVE_APP_GIT_TOOL" >&2
+    return 2
+  fi
+  if [[ -n "${MA_NATIVE_APP_IMAGE_DECODE_TOOL:-}" && "$MA_NATIVE_APP_IMAGE_DECODE_TOOL" != "/usr/bin/sips" ]]; then
+    echo "error: trusted MVP.1 task evidence rejects MA_NATIVE_APP_IMAGE_DECODE_TOOL override: $MA_NATIVE_APP_IMAGE_DECODE_TOOL" >&2
+    return 2
+  fi
+
+  for tool in \
+    /usr/bin/env \
+    /usr/bin/xcrun \
+    /usr/bin/python3 \
+    /usr/bin/codesign \
+    /usr/bin/git \
+    /usr/bin/sips \
+    "$resolved_xcodebuild" \
+    "$resolved_xcresulttool" \
+    "$resolved_python"
+  do
+    if ! /usr/bin/codesign \
+      --verify \
+      --strict \
+      --test-requirement '=anchor apple' \
+      "$tool" >/dev/null 2>&1; then
+      echo "error: trusted MVP.1 task evidence tool is not Apple-anchor verified: $tool" >&2
+      return 2
+    fi
+  done
+
+  xcodebuild_tool="$resolved_xcodebuild"
+  xcresulttool="$resolved_xcresulttool"
+  codesign_tool="/usr/bin/codesign"
+  git_tool="/usr/bin/git"
+  image_decode_tool="/usr/bin/sips"
+}
+
+if ! [[ "$xcresult_run_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  echo "error: MA_NATIVE_APP_XCRESULT_RUN_ID must contain only letters, numbers, dot, underscore, or hyphen and must start with a letter or number." >&2
+  exit 2
+fi
+
 find_xctestrun_path() {
   find "$derived_data_path/Build/Products" -maxdepth 1 -name "*.xctestrun" -print -quit 2>/dev/null || true
 }
@@ -79,14 +258,14 @@ compute_xctestrun_input_fingerprint() {
   local relative_path
 
   root_dir="$(cd "$component_dir/../.." && pwd)"
-  if ! command -v git >/dev/null 2>&1 || ! command -v shasum >/dev/null 2>&1; then
+  if [[ ! -x "$git_tool" || ! -x "$python_tool" ]]; then
     return 1
   fi
 
   (
     printf 'destination=%s\n' "$destination"
-    xcodebuild -version 2>/dev/null | sed 's/^/xcodebuild=/' || true
-    git -C "$root_dir" ls-files -z -- \
+    "$xcodebuild_tool" -version 2>/dev/null | sed 's/^/xcodebuild=/' || true
+    run_clean_git "$root_dir" ls-files -z --cached --others --exclude-standard -- \
       "platform/native-app/App" \
       "platform/native-app/Sources" \
       "platform/native-app/UITests" \
@@ -94,9 +273,11 @@ compute_xctestrun_input_fingerprint() {
       "platform/native-app/MeetingAssistantNative.xcodeproj/xcshareddata" \
       | while IFS= read -r -d '' relative_path; do
           printf 'path=%s\n' "$relative_path"
-          shasum -a 256 "$root_dir/$relative_path"
+          printf '%s  %s\n' \
+            "$(sha256_path "$root_dir/$relative_path")" \
+            "$root_dir/$relative_path"
         done
-  ) | shasum -a 256 | awk '{print $1}'
+  ) | sha256_stream
 }
 
 prepare_xctestrun() {
@@ -138,7 +319,7 @@ prepare_xctestrun() {
     exit 2
   fi
 
-  xcodebuild build-for-testing \
+  "$xcodebuild_tool" build-for-testing \
     -project "$component_dir/MeetingAssistantNative.xcodeproj" \
     -scheme "MeetingAssistantNative" \
     -destination "$destination" \
@@ -153,6 +334,136 @@ prepare_xctestrun() {
   if [[ -n "$current_fingerprint" ]]; then
     printf '%s\n' "$current_fingerprint" >"$xctestrun_fingerprint_path"
   fi
+}
+
+require_current_xctestrun_fingerprint_for_task_evidence() {
+  local current_fingerprint=""
+  local current_wrapper_sha256=""
+  local committed_wrapper_sha256=""
+  local saved_fingerprint=""
+
+  current_fingerprint="$(compute_xctestrun_input_fingerprint || true)"
+  if [[ -z "$current_fingerprint" ]]; then
+    echo "error: MVP.1 task evidence could not compute the current app/test input fingerprint." >&2
+    return 1
+  fi
+  if [[ ! -f "$xctestrun_fingerprint_path" ]]; then
+    echo "error: MVP.1 task evidence is missing its prepared input fingerprint: $xctestrun_fingerprint_path" >&2
+    return 1
+  fi
+  saved_fingerprint="$(<"$xctestrun_fingerprint_path")"
+  if [[ "$saved_fingerprint" != "$current_fingerprint" ]]; then
+    echo "error: MVP.1 task evidence refuses an xctestrun whose app/test input fingerprint differs from the current checkout." >&2
+    echo "Rebuild with MA_NATIVE_APP_REUSE_XCTESTRUN=0 or use the default auto mode before collecting evidence." >&2
+    return 1
+  fi
+  validated_task_input_fingerprint="$current_fingerprint"
+  validated_task_subject_commit="$(run_clean_git "$repo_root" rev-parse HEAD 2>/dev/null || true)"
+  if ! [[ "$validated_task_subject_commit" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "error: MVP.1 task evidence could not bind the prepared subject to current Git HEAD." >&2
+    return 1
+  fi
+  if ! is_truthy "$prepare_only"; then
+    current_wrapper_sha256="$(sha256_path "$component_dir/scripts/test-app-bundle.sh")"
+    committed_wrapper_sha256="$(
+      run_clean_git "$repo_root" show \
+        "$validated_task_subject_commit:platform/native-app/scripts/test-app-bundle.sh" \
+        | sha256_stream
+    )"
+    if [[ "$current_wrapper_sha256" != "$committed_wrapper_sha256" ]]; then
+      echo "error: MVP.1 task evidence wrapper must match the exact file committed at current HEAD." >&2
+      return 1
+    fi
+  fi
+}
+
+freeze_task_xcresult_verifier() {
+  local result_run_dir="$1"
+  local committed_sha256=""
+  local frozen_dir="$result_run_dir/frozen"
+  local frozen_path="$frozen_dir/mvp1-task-xcresult.py"
+  local frozen_sha256=""
+
+  if [[ ! -f "$task_xcresult_verifier" || -L "$task_xcresult_verifier" ]]; then
+    echo "error: canonical MVP.1 task verifier must be a regular non-symlink file: $task_xcresult_verifier" >&2
+    return 1
+  fi
+  mkdir -m 0700 "$frozen_dir"
+  frozen_sha256="$("$python_tool" -I -S - "$task_xcresult_verifier" "$frozen_path" <<'PY'
+import hashlib
+import os
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1])
+destination = Path(sys.argv[2])
+payload = source.read_bytes()
+descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400)
+try:
+    view = memoryview(payload)
+    while view:
+        written = os.write(descriptor, view)
+        view = view[written:]
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+os.chmod(destination, 0o400)
+print(hashlib.sha256(payload).hexdigest())
+PY
+)"
+  if ! [[ "$frozen_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "error: MVP.1 task verifier snapshot did not produce a valid SHA-256." >&2
+    return 1
+  fi
+  committed_sha256="$(
+    run_clean_git "$repo_root" show "$validated_task_subject_commit:scripts/mvp1-task-xcresult.py" \
+      | sha256_stream
+  )"
+  if [[ "$frozen_sha256" != "$committed_sha256" ]]; then
+    echo "error: frozen MVP.1 task verifier does not match the exact file committed at current HEAD." >&2
+    return 1
+  fi
+  last_task_frozen_verifier_path="$frozen_path"
+  last_task_frozen_verifier_sha256="$frozen_sha256"
+}
+
+run_frozen_task_xcresult_verifier() {
+  local snapshot_path="$1"
+  local expected_sha256="$2"
+  shift 2
+  "$python_tool" -I -S - "$snapshot_path" "$expected_sha256" "$@" <<'PY'
+import hashlib
+import os
+import sys
+from pathlib import Path
+
+snapshot_path = Path(sys.argv[1])
+expected_sha256 = sys.argv[2]
+arguments = sys.argv[3:]
+try:
+    payload = snapshot_path.read_bytes()
+except OSError as error:
+    print(f"error: could not read frozen MVP.1 task verifier: {error}", file=sys.stderr)
+    raise SystemExit(2)
+observed_sha256 = hashlib.sha256(payload).hexdigest()
+if observed_sha256 != expected_sha256:
+    print(
+        "error: frozen MVP.1 task verifier SHA-256 changed before execution: "
+        f"expected {expected_sha256}, observed {observed_sha256}",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+os.environ["MA_MVP1_EXECUTED_VERIFIER_SHA256"] = observed_sha256
+sys.argv = [str(snapshot_path), *arguments]
+namespace = {
+    "__name__": "__main__",
+    "__file__": str(snapshot_path),
+    "__package__": None,
+    "__cached__": None,
+    "__spec__": None,
+}
+exec(compile(payload, str(snapshot_path), "exec"), namespace, namespace)
+PY
 }
 
 set_xctestrun_env() {
@@ -302,7 +613,7 @@ collect_matching_app_bundle_paths() {
     return 0
   fi
 
-  python3 - "$bundle_id" "$app_bundle_path" "$component_dir" <<'PY'
+  "$python_tool" -I -S - "$bundle_id" "$app_bundle_path" "$component_dir" <<'PY'
 import os
 import plistlib
 import sys
@@ -430,7 +741,7 @@ handle_foreign_meeting_assistant_instances() {
     return 0
   fi
 
-  python3 - "$expected_executable" "$smoke_name" "$policy" <<'PY'
+  "$python_tool" -I -S - "$expected_executable" "$smoke_name" "$policy" <<'PY'
 import os
 import signal
 import subprocess
@@ -677,12 +988,30 @@ run_app_bundle_test_without_building() {
   local attempt_log
   local test_status
   local foreign_instance_status
+  local smoke_slug
+  local result_run_dir
+  local result_bundle_path
+  local final_attempt_record
+  local runner_bundle_path
+  local task_artifact_capture_output=""
+  local task_artifact_capture_sha256=""
 
   if ! [[ "$retry_attempts" =~ ^[0-9]+$ ]]; then
     echo "error: MA_NATIVE_APP_UI_AUTOMATION_RETRY_ATTEMPTS must be a non-negative integer" >&2
     return 2
   fi
   max_attempts=$((retry_attempts + 1))
+
+  smoke_slug="$(printf '%s' "$smoke_name" | tr -cs 'A-Za-z0-9._-' '-')"
+  smoke_slug="${smoke_slug#-}"
+  smoke_slug="${smoke_slug%-}"
+  result_run_dir="$derived_data_path/reports/xcresult/${smoke_slug:-suite}/$xcresult_run_id"
+  if [[ -e "$result_run_dir" ]]; then
+    echo "error: refusing to overwrite existing app-bundle XCUITest result run directory: $result_run_dir" >&2
+    return 2
+  fi
+  mkdir -m 0700 -p "$result_run_dir"
+  final_attempt_record="$result_run_dir/final-attempt-path.txt"
 
   app_bundle_path="$(find_app_bundle_under_test)"
   handle_foreign_meeting_assistant_instances "$app_bundle_path" "$smoke_name"
@@ -694,24 +1023,74 @@ run_app_bundle_test_without_building() {
     print_app_bundle_tcc_identity_diagnostics "$app_bundle_path" "$smoke_name"
   fi
 
+  if is_truthy "$task_xcuitest" && [[ "$smoke_name" == "task workflow" ]]; then
+    if ! freeze_task_xcresult_verifier "$result_run_dir"; then
+      return 1
+    fi
+    runner_bundle_path="$(find_ui_test_runner_bundle)"
+    if ! validate_prepared_app_bundle_artifacts "$app_bundle_path" "$runner_bundle_path"; then
+      return 1
+    fi
+    last_task_artifact_binding_path="$result_run_dir/frozen/task-artifacts-before-test.json"
+    if ! task_artifact_capture_output="$(
+      run_frozen_task_xcresult_verifier \
+        "$last_task_frozen_verifier_path" \
+        "$last_task_frozen_verifier_sha256" \
+        capture \
+        --derived-data-root "$derived_data_path" \
+        --xctestrun "$xctestrun_path" \
+        --app "$app_bundle_path" \
+        --runner "$runner_bundle_path" \
+        --output "$last_task_artifact_binding_path" \
+        --xcresulttool "$xcresulttool" \
+        --codesign-tool "$codesign_tool" \
+        --git-tool "$git_tool" \
+        --xcodebuild-tool "$xcodebuild_tool" \
+        --image-decode-tool "$image_decode_tool"
+    )"; then
+      echo "error: MVP.1 task workflow could not bind prepared artifacts before XCUITest." >&2
+      return 1
+    fi
+    printf '%s\n' "$task_artifact_capture_output"
+    task_artifact_capture_sha256="$(
+      printf '%s\n' "$task_artifact_capture_output" \
+        | sed -n 's/^MVP1_ARTIFACT_BINDING_SHA256=\([0-9a-f]\{64\}\)$/\1/p'
+    )"
+    if ! [[ "$task_artifact_capture_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+      echo "error: MVP.1 task artifact binding did not produce exactly one valid serialized SHA-256." >&2
+      return 1
+    fi
+    last_task_artifact_binding_sha256="$task_artifact_capture_sha256"
+  fi
+
   : > "$log_path"
 
   while [[ "$attempt" -le "$max_attempts" ]]; do
     attempt_log="$log_path.attempt-$attempt.tmp"
+    result_bundle_path="$result_run_dir/attempt-$attempt.xcresult"
+    if [[ -e "$result_bundle_path" ]]; then
+      echo "error: refusing to overwrite existing app-bundle XCUITest result bundle: $result_bundle_path" >&2
+      return 2
+    fi
+    last_result_bundle_path="$result_bundle_path"
+    last_result_evidence_dir="$result_run_dir/attempt-$attempt-evidence"
     {
       echo "== native-app $smoke_name app-bundle XCUITest attempt $attempt/$max_attempts =="
+      echo "xcresult attempt path: $result_bundle_path"
     } >>"$log_path"
 
     set +e
     if [[ -n "$test_identifier" ]]; then
-      xcodebuild test-without-building \
+      "$xcodebuild_tool" test-without-building \
         -xctestrun "$xctestrun_path" \
         -destination "$destination" \
+        -resultBundlePath "$result_bundle_path" \
         "-only-testing:$test_identifier"
     else
-      xcodebuild test-without-building \
+      "$xcodebuild_tool" test-without-building \
         -xctestrun "$xctestrun_path" \
-        -destination "$destination"
+        -destination "$destination" \
+        -resultBundlePath "$result_bundle_path"
     fi 2>&1 | tee "$attempt_log"
     test_status=${PIPESTATUS[0]}
     set +e
@@ -720,17 +1099,23 @@ run_app_bundle_test_without_building() {
 
     if [[ "$test_status" -eq 0 ]]; then
       rm -f "$attempt_log"
+      printf '%s\n' "$result_bundle_path" >"$final_attempt_record"
+      echo "Final xcresult attempt: $result_bundle_path" | tee -a "$log_path" >&2
       return 0
     fi
 
     if ! is_ui_testing_automation_blocked "$attempt_log"; then
       rm -f "$attempt_log"
+      printf '%s\n' "$result_bundle_path" >"$final_attempt_record"
+      echo "Final xcresult attempt: $result_bundle_path" | tee -a "$log_path" >&2
       return "$test_status"
     fi
 
     rm -f "$attempt_log"
 
     if [[ "$attempt" -ge "$max_attempts" ]]; then
+      printf '%s\n' "$result_bundle_path" >"$final_attempt_record"
+      echo "Final xcresult attempt: $result_bundle_path" | tee -a "$log_path" >&2
       return "$test_status"
     fi
 
@@ -738,6 +1123,58 @@ run_app_bundle_test_without_building() {
     sleep "$ui_automation_retry_delay_seconds"
     attempt=$((attempt + 1))
   done
+}
+
+verify_mvp1_task_xcresult() {
+  local result_bundle_path="$1"
+  local evidence_dir="$2"
+  local upstream_test_status="${3:-0}"
+  local app_bundle_path
+  local runner_bundle_path
+
+  if [[ -z "$result_bundle_path" || ! -d "$result_bundle_path" ]]; then
+    echo "error: MVP.1 task XCUITest did not produce a result bundle to verify: ${result_bundle_path:-not recorded}" >&2
+    return 1
+  fi
+  app_bundle_path="$(find_app_bundle_under_test)"
+  runner_bundle_path="$(find_ui_test_runner_bundle)"
+  if ! validate_prepared_app_bundle_artifacts "$app_bundle_path" "$runner_bundle_path"; then
+    return 1
+  fi
+  if [[ ! -f "$last_task_frozen_verifier_path" || -z "$last_task_frozen_verifier_sha256" ]]; then
+    echo "error: frozen MVP.1 task xcresult verifier is missing." >&2
+    return 1
+  fi
+  if [[ ! -f "$last_task_artifact_binding_path" || -z "$last_task_artifact_binding_sha256" ]]; then
+    echo "error: frozen MVP.1 task artifact binding is missing." >&2
+    return 1
+  fi
+
+  run_frozen_task_xcresult_verifier \
+    "$last_task_frozen_verifier_path" \
+    "$last_task_frozen_verifier_sha256" \
+    --xcresult "$result_bundle_path" \
+    --derived-data-root "$derived_data_path" \
+    --xctestrun "$xctestrun_path" \
+    --input-fingerprint-file "$xctestrun_fingerprint_path" \
+    --expected-input-fingerprint "$validated_task_input_fingerprint" \
+    --expected-subject-commit "$validated_task_subject_commit" \
+    --destination "$destination" \
+    --test-source "$task_xcuitest_source" \
+    --output-dir "$evidence_dir" \
+    --app "$app_bundle_path" \
+    --runner "$runner_bundle_path" \
+    --artifact-binding-file "$last_task_artifact_binding_path" \
+    --expected-artifact-binding-sha256 "$last_task_artifact_binding_sha256" \
+    --verifier-source "$task_xcresult_verifier" \
+    --expected-verifier-sha256 "$last_task_frozen_verifier_sha256" \
+    --repo-root "$repo_root" \
+    --upstream-test-status "$upstream_test_status" \
+    --xcresulttool "$xcresulttool" \
+    --codesign-tool "$codesign_tool" \
+    --git-tool "$git_tool" \
+    --xcodebuild-tool "$xcodebuild_tool" \
+    --image-decode-tool "$image_decode_tool"
 }
 
 write_ui_testing_automation_blocker_report() {
@@ -748,7 +1185,7 @@ write_ui_testing_automation_blocker_report() {
   local root_dir
 
   root_dir="$(cd "$component_dir/../.." && pwd)"
-  python3 "$root_dir/platform/e2e/native_app_bundle_ui_automation_report.py" \
+  "$python_tool" -I -S "$root_dir/platform/e2e/native_app_bundle_ui_automation_report.py" \
     --smoke-name "$smoke_name" \
     --log "$log_path" \
     --report "$report_path" \
@@ -794,7 +1231,11 @@ if is_truthy "$prepare_only" && ! is_truthy "$task_xcuitest"; then
 fi
 
 if is_truthy "$task_xcuitest"; then
+  if ! is_truthy "$prepare_only"; then
+    require_trusted_mvp1_toolchain
+  fi
   prepare_xctestrun "task workflow"
+  require_current_xctestrun_fingerprint_for_task_evidence
 
   if is_truthy "$prepare_only"; then
     app_bundle_path="$(find_app_bundle_under_test)"
@@ -825,6 +1266,11 @@ if is_truthy "$task_xcuitest"; then
   set -e
 
   if [[ "$test_status" -ne 0 ]]; then
+    if [[ -n "$last_result_bundle_path" && -d "$last_result_bundle_path" ]]; then
+      set +e
+      verify_mvp1_task_xcresult "$last_result_bundle_path" "$last_result_evidence_dir" "$test_status"
+      set -e
+    fi
     echo "native-app task workflow app-bundle XCUITest failed. Captured xcodebuild log: $task_xcuitest_log" >&2
     if is_ui_testing_automation_blocked "$task_xcuitest_log"; then
       print_ui_testing_automation_help "task workflow" "$task_xcuitest_log"
@@ -832,6 +1278,15 @@ if is_truthy "$task_xcuitest"; then
       print_ui_testing_automation_log_excerpt
     fi
     exit "$test_status"
+  fi
+
+  set +e
+  verify_mvp1_task_xcresult "$last_result_bundle_path" "$last_result_evidence_dir" 0
+  evidence_status=$?
+  set -e
+  if [[ "$evidence_status" -ne 0 ]]; then
+    echo "native-app task workflow app-bundle XCUITest passed xcodebuild but failed offline xcresult verification." >&2
+    exit "$evidence_status"
   fi
 
   echo "native-app task workflow app-bundle XCUITest passed."

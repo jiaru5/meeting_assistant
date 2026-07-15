@@ -1,12 +1,15 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S /usr/bin/python3 -I -S
 from __future__ import annotations
 
 import argparse
 import json
 import math
+import os
 import re
+import stat
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from statistics import median
@@ -22,8 +25,10 @@ TASK_OUTCOMES = ("completed", "partial", "not_completed")
 STATE_UNDERSTANDING_VALUES = ("clear", "partial", "unclear")
 FINDING_SEVERITIES = ("P0", "P1", "P2", "P3")
 FINDING_STATUSES = ("open", "closed")
+RETEST_RESULTS = ("passed", "failed")
 PARTICIPANT_ID_PATTERN = re.compile(r"^P[0-9]{2,3}$")
 COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+_CURRENT_COMMIT_UNSET = object()
 ATTESTATION_STATEMENT = (
     "I manually observed a real human participant perform these tasks; no agent, "
     "automation, screenshot, or XCUITest result is being counted as this participant."
@@ -58,12 +63,16 @@ def repo_root_from_script() -> Path:
 
 def current_commit(root: Path | None = None) -> str | None:
     repository = root if root is not None else repo_root_from_script()
-    completed = subprocess.run(
-        ["git", "-C", str(repository), "rev-parse", "HEAD"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(repository), "rev-parse", "HEAD"],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
     if completed.returncode != 0:
         return None
     value = completed.stdout.strip()
@@ -348,6 +357,7 @@ def _validate_findings(
     *,
     participant_ids: set[str],
     errors: list[str],
+    closure_errors: list[str],
 ) -> list[dict[str, str]]:
     if not isinstance(value, list):
         errors.append("findings must be an array")
@@ -370,7 +380,7 @@ def _validate_findings(
                 "task_id",
                 "participant_ids",
             },
-            optional={"resolution"},
+            optional={"resolution", "retested", "retest_result"},
             path=path,
             errors=errors,
         )
@@ -412,6 +422,28 @@ def _validate_findings(
 
         if "resolution" in finding and not isinstance(finding["resolution"], str):
             errors.append(f"{path}.resolution must be a string when present")
+        if "retested" in finding and not isinstance(finding["retested"], bool):
+            errors.append(f"{path}.retested must be a boolean when present")
+        if "retest_result" in finding and finding["retest_result"] not in RETEST_RESULTS:
+            errors.append(
+                f"{path}.retest_result must be one of {', '.join(RETEST_RESULTS)} when present"
+            )
+
+        if severity in ("P0", "P1") and status == "closed":
+            if not _is_nonempty_string(finding.get("resolution")):
+                closure_errors.append(
+                    f"{path}.resolution must be non-empty before a {severity} finding is closed"
+                )
+            if finding.get("retested") is not True:
+                closure_errors.append(
+                    f"{path}.retested must be true after a manual human retest before a "
+                    f"{severity} finding is closed"
+                )
+            if finding.get("retest_result") != "passed":
+                closure_errors.append(
+                    f"{path}.retest_result must be 'passed' after a manual human retest before a "
+                    f"{severity} finding is closed"
+                )
         if severity in ("P0", "P1") and status == "open":
             open_p0_p1.append(
                 {
@@ -423,10 +455,17 @@ def _validate_findings(
     return open_p0_p1
 
 
-def validate_study(study: Any) -> dict[str, Any]:
+def validate_study(
+    study: Any,
+    *,
+    require_current_commit: bool = False,
+    expected_current_commit: str | None | object = _CURRENT_COMMIT_UNSET,
+) -> dict[str, Any]:
     schema_errors: list[str] = []
     participant_count_errors: list[str] = []
     attestation_errors: list[str] = []
+    commit_errors: list[str] = []
+    closure_errors: list[str] = []
     blocker_errors: list[str] = []
 
     if not isinstance(study, dict):
@@ -458,6 +497,25 @@ def validate_study(study: Any) -> dict[str, Any]:
     subject_commit = study.get("subject_commit")
     if not isinstance(subject_commit, str) or not COMMIT_PATTERN.fullmatch(subject_commit):
         schema_errors.append("subject_commit must be a 40-character lowercase Git commit hash")
+    subject_commit_matches_current: bool | None = None
+    if require_current_commit:
+        head_commit = (
+            current_commit()
+            if expected_current_commit is _CURRENT_COMMIT_UNSET
+            else expected_current_commit
+        )
+        if not isinstance(head_commit, str) or not COMMIT_PATTERN.fullmatch(head_commit):
+            commit_errors.append(
+                "current Git HEAD could not be read; --require-current-commit fails closed"
+            )
+            subject_commit_matches_current = False
+        elif subject_commit != head_commit:
+            commit_errors.append(
+                f"subject_commit {subject_commit!r} does not match current Git HEAD {head_commit!r}"
+            )
+            subject_commit_matches_current = False
+        else:
+            subject_commit_matches_current = True
 
     _validate_evidence_policy(study.get("evidence_policy"), schema_errors)
     participant_count, attested_count, participant_ids = _validate_participants(
@@ -470,6 +528,7 @@ def validate_study(study: Any) -> dict[str, Any]:
         study.get("findings"),
         participant_ids=participant_ids,
         errors=schema_errors,
+        closure_errors=closure_errors,
     )
     for finding in open_p0_p1:
         blocker_errors.append(
@@ -484,13 +543,23 @@ def validate_study(study: Any) -> dict[str, Any]:
         and not attestation_errors
     )
     no_open_p0_p1 = not open_p0_p1
+    high_severity_closures_valid = not closure_errors
     ready_for_review = (
         structure_valid
         and participant_count_valid
         and human_attestation_valid
         and no_open_p0_p1
+        and high_severity_closures_valid
+        and not commit_errors
     )
-    errors = schema_errors + participant_count_errors + attestation_errors + blocker_errors
+    errors = (
+        schema_errors
+        + participant_count_errors
+        + attestation_errors
+        + commit_errors
+        + closure_errors
+        + blocker_errors
+    )
     return {
         "ready_for_review": ready_for_review,
         "checks": {
@@ -498,6 +567,9 @@ def validate_study(study: Any) -> dict[str, Any]:
             "participant_count_valid": participant_count_valid,
             "manual_human_attestation_valid": human_attestation_valid,
             "no_open_p0_p1_findings": no_open_p0_p1,
+            "closed_p0_p1_manual_retest_valid": high_severity_closures_valid,
+            "current_commit_required": require_current_commit,
+            "subject_commit_matches_current_commit": subject_commit_matches_current,
             "metric_thresholds_applied": False,
         },
         "participant_count": participant_count,
@@ -563,8 +635,18 @@ def _aggregate_metrics(study: Any) -> dict[str, Any]:
     return task_metrics
 
 
-def build_report(study: Any, *, source: str | None = None) -> dict[str, Any]:
-    validation = validate_study(study)
+def build_report(
+    study: Any,
+    *,
+    source: str | None = None,
+    require_current_commit: bool = False,
+    expected_current_commit: str | None | object = _CURRENT_COMMIT_UNSET,
+) -> dict[str, Any]:
+    validation = validate_study(
+        study,
+        require_current_commit=require_current_commit,
+        expected_current_commit=expected_current_commit,
+    )
     study_object = study if isinstance(study, dict) else {}
     findings = study_object.get("findings", [])
     if not isinstance(findings, list):
@@ -611,7 +693,12 @@ def render_text(report: dict[str, Any]) -> str:
         ),
         f"Structure valid: {str(checks['structure_valid']).lower()}",
         f"Open P0/P1 findings: {len(report['open_p0_p1_findings'])}",
+        (
+            "Closed P0/P1 manual retest valid: "
+            f"{str(checks['closed_p0_p1_manual_retest_valid']).lower()}"
+        ),
         "Metric thresholds applied: false (none are defined at this stage)",
+        "READY FOR REVIEW is not product acceptance or release readiness.",
         (
             "Evidence boundary: agent, automation, screenshots, and XCUITest do not count "
             "as human participants; attestation is a manual declaration, not independent identity proof."
@@ -642,7 +729,12 @@ def render_markdown(report: dict[str, Any]) -> str:
         ),
         f"- 结构有效：{str(checks['structure_valid']).lower()}",
         f"- Open P0/P1：{len(report['open_p0_p1_findings'])}",
+        (
+            "- Closed P0/P1 人工复测有效："
+            f"{str(checks['closed_p0_p1_manual_retest_valid']).lower()}"
+        ),
         "- 指标通过阈值：未定义、未应用",
+        "- `ready_for_review` 只表示证据可进入人工评审，不等于产品验收或发布就绪。",
         "",
         "## 任务观察汇总",
         "",
@@ -685,8 +777,8 @@ def render_markdown(report: dict[str, Any]) -> str:
     if findings:
         lines.extend(
             [
-                "| ID | Severity | Status | Task | Summary |",
-                "|---|---|---|---|---|",
+                "| ID | Severity | Status | Task | Summary | Resolution | Human retested | Retest result |",
+                "|---|---|---|---|---|---|---|---|",
             ]
         )
         for finding in findings:
@@ -695,7 +787,10 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"{_markdown_escape(finding.get('severity', '-'))} | "
                 f"{_markdown_escape(finding.get('status', '-'))} | "
                 f"{_markdown_escape(finding.get('task_id', '-'))} | "
-                f"{_markdown_escape(finding.get('summary', '-'))} |"
+                f"{_markdown_escape(finding.get('summary', '-'))} | "
+                f"{_markdown_escape(finding.get('resolution', '-'))} | "
+                f"{_markdown_escape(finding.get('retested', '-'))} | "
+                f"{_markdown_escape(finding.get('retest_result', '-'))} |"
             )
     else:
         lines.append("没有记录 finding。")
@@ -739,15 +834,28 @@ def load_study(path: Path) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise StudyToolError(f"study file not found: {path}") from exc
+    except (OSError, UnicodeError) as exc:
+        raise StudyToolError(f"study file could not be read safely: {path}: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise StudyToolError(
             f"study file is not valid JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}"
         ) from exc
 
 
-def error_report(message: str, *, source: str | None = None) -> dict[str, Any]:
-    report = build_report({}, source=source)
-    report["errors"] = [message]
+def error_report(
+    message: str,
+    *,
+    source: str | None = None,
+    require_current_commit: bool = False,
+    expected_current_commit: str | None | object = _CURRENT_COMMIT_UNSET,
+) -> dict[str, Any]:
+    report = build_report(
+        {},
+        source=source,
+        require_current_commit=require_current_commit,
+        expected_current_commit=expected_current_commit,
+    )
+    report["errors"] = [message, *report["errors"]]
     report["checks"]["structure_valid"] = False
     report["checks"]["participant_count_valid"] = False
     report["checks"]["manual_human_attestation_valid"] = False
@@ -756,30 +864,268 @@ def error_report(message: str, *, source: str | None = None) -> dict[str, Any]:
     return report
 
 
-def write_json(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+def _path_lexists(path: Path) -> bool:
+    return os.path.lexists(os.fspath(path))
 
 
-def write_text(path: Path, value: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(value, encoding="utf-8")
+def _require_regular_output_target(path: Path, *, label: str) -> None:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise StudyToolError(f"cannot inspect existing {label} output safely: {path}: {exc}") from exc
+    if not stat.S_ISREG(metadata.st_mode):
+        raise StudyToolError(
+            f"existing {label} output must be a regular file, not a directory, symlink, or special file: {path}"
+        )
+
+
+def _comparison_path(path: Path) -> Path:
+    try:
+        return path.resolve(strict=False)
+    except (OSError, RuntimeError) as exc:
+        raise StudyToolError(f"cannot resolve path safely: {path}: {exc}") from exc
+
+
+def _paths_conflict(first: Path, second: Path) -> bool:
+    if _comparison_path(first) == _comparison_path(second):
+        return True
+    if _path_lexists(first) and _path_lexists(second):
+        try:
+            return os.path.samefile(first, second)
+        except OSError as exc:
+            raise StudyToolError(
+                f"cannot compare output paths safely: {first} and {second}: {exc}"
+            ) from exc
+    return False
+
+
+def validate_output_paths(
+    *,
+    input_path: Path | None,
+    outputs: list[tuple[str, Path]],
+    force: bool,
+) -> None:
+    for label, output_path in outputs:
+        if input_path is not None and _paths_conflict(input_path, output_path):
+            raise StudyToolError(
+                f"{label} output must not conflict with study input: {output_path}"
+            )
+    for index, (label, output_path) in enumerate(outputs):
+        for other_label, other_path in outputs[index + 1 :]:
+            if _paths_conflict(output_path, other_path):
+                raise StudyToolError(
+                    f"{label} output must not conflict with {other_label} output: {output_path}"
+                )
+        _require_regular_output_target(output_path, label=label)
+        if _path_lexists(output_path) and not force:
+            raise StudyToolError(
+                f"refused to overwrite existing {label} output without --force: {output_path}"
+            )
+
+
+def _prepare_atomic_file(path: Path, value: str) -> tuple[Path, int, int]:
+    temporary_path: Path | None = None
+    descriptor: int | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=path.parent,
+        )
+        temporary_path = Path(temporary_name)
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+            descriptor = None
+            handle.write(value)
+            handle.flush()
+            os.fsync(handle.fileno())
+        metadata = temporary_path.stat()
+        if stat.S_IMODE(metadata.st_mode) != 0o600:
+            raise StudyToolError(
+                f"temporary output permissions must be 0600: {temporary_path}"
+            )
+        prepared = temporary_path
+        temporary_path = None
+        return prepared, metadata.st_dev, metadata.st_ino
+    except StudyToolError:
+        raise
+    except OSError as exc:
+        raise StudyToolError(f"could not prepare output {path}: {exc}") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def _reserved_backup_path(path: Path) -> Path:
+    descriptor: int | None = None
+    backup: Path | None = None
+    try:
+        descriptor, name = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            suffix=".bak",
+            dir=path.parent,
+        )
+        backup = Path(name)
+        os.fchmod(descriptor, 0o600)
+        return backup
+    except OSError as exc:
+        if backup is not None:
+            backup.unlink(missing_ok=True)
+        raise StudyToolError(f"could not reserve backup for output {path}: {exc}") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _same_file_identity(path: Path, device: int, inode: int) -> bool:
+    try:
+        metadata = path.stat()
+    except FileNotFoundError:
+        return False
+    return metadata.st_dev == device and metadata.st_ino == inode
+
+
+def write_outputs(
+    outputs: list[tuple[Path, str]],
+    *,
+    force: bool,
+) -> None:
+    """Publish every output or restore the pre-call state after a handled failure."""
+    if not outputs:
+        return
+
+    prepared: list[tuple[Path, Path, int, int]] = []
+    backups: list[tuple[Path, Path]] = []
+    published: list[tuple[Path, int, int]] = []
+    try:
+        for path, _ in outputs:
+            _require_regular_output_target(path, label="batch")
+            if _path_lexists(path) and not force:
+                raise StudyToolError(
+                    f"refused to overwrite existing output without --force: {path}"
+                )
+        for path, value in outputs:
+            temporary, device, inode = _prepare_atomic_file(path, value)
+            prepared.append((path, temporary, device, inode))
+
+        if force:
+            for path, _, _, _ in prepared:
+                if not _path_lexists(path):
+                    continue
+                _require_regular_output_target(path, label="batch")
+                backup = _reserved_backup_path(path)
+                try:
+                    os.replace(path, backup)
+                except OSError as exc:
+                    try:
+                        backup.unlink()
+                    except OSError as cleanup_exc:
+                        raise StudyToolError(
+                            f"could not back up output {path}: {exc}; "
+                            f"could not remove reserved backup {backup}: {cleanup_exc}"
+                        ) from exc
+                    raise StudyToolError(f"could not back up output {path}: {exc}") from exc
+                backups.append((path, backup))
+
+        for path, temporary, device, inode in prepared:
+            if force:
+                os.replace(temporary, path)
+            else:
+                try:
+                    os.link(temporary, path)
+                except FileExistsError as exc:
+                    raise StudyToolError(
+                        f"refused to overwrite existing output without --force: {path}"
+                    ) from exc
+            published.append((path, device, inode))
+            if not _same_file_identity(path, device, inode):
+                raise StudyToolError(f"published output identity changed unexpectedly: {path}")
+            if stat.S_IMODE(path.stat().st_mode) != 0o600:
+                raise StudyToolError(f"output permissions must be 0600: {path}")
+    except Exception as exc:
+        rollback_errors: list[str] = []
+        for path, device, inode in reversed(published):
+            try:
+                if _same_file_identity(path, device, inode):
+                    path.unlink()
+            except OSError as rollback_exc:
+                rollback_errors.append(f"could not remove new output {path}: {rollback_exc}")
+        for path, backup in reversed(backups):
+            try:
+                if _path_lexists(path):
+                    rollback_errors.append(
+                        f"could not restore original output because destination is occupied: {path}"
+                    )
+                    continue
+                os.replace(backup, path)
+            except OSError as rollback_exc:
+                rollback_errors.append(f"could not restore original output {path}: {rollback_exc}")
+        detail = f"; rollback incomplete: {'; '.join(rollback_errors)}" if rollback_errors else ""
+        if isinstance(exc, StudyToolError):
+            raise StudyToolError(f"{exc}{detail}") from exc
+        raise StudyToolError(f"could not publish output batch: {exc}{detail}") from exc
+    finally:
+        for _, temporary, _, _ in prepared:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+
+    backup_cleanup_errors: list[str] = []
+    retained_backups: list[str] = []
+    for _, backup in backups:
+        try:
+            backup.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            backup_cleanup_errors.append(f"{backup}: {exc}")
+            retained_backups.append(str(backup))
+    if backup_cleanup_errors:
+        raise StudyToolError(
+            "outputs were published, but backup cleanup was incomplete; "
+            "the new outputs remain active and old bytes are retained at "
+            f"{', '.join(retained_backups)}; cleanup errors: {'; '.join(backup_cleanup_errors)}"
+        )
+
+
+def json_text(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 
 def _resolve_path(value: str) -> Path:
-    return Path(value).expanduser().resolve()
+    return Path(os.path.abspath(os.path.expanduser(value)))
 
 
-def _load_report(path_value: str) -> dict[str, Any]:
-    path = _resolve_path(path_value)
+def _load_report(
+    path: Path,
+    *,
+    require_current_commit: bool = False,
+    expected_current_commit: str | None | object = _CURRENT_COMMIT_UNSET,
+) -> dict[str, Any]:
     try:
         study = load_study(path)
     except StudyToolError as exc:
-        return error_report(str(exc), source=str(path))
-    return build_report(study, source=str(path))
+        return error_report(
+            str(exc),
+            source=str(path),
+            require_current_commit=require_current_commit,
+            expected_current_commit=expected_current_commit,
+        )
+    return build_report(
+        study,
+        source=str(path),
+        require_current_commit=require_current_commit,
+        expected_current_commit=expected_current_commit,
+    )
 
 
 def _print_format(report: dict[str, Any], output_format: str) -> None:
@@ -810,12 +1156,23 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     init_parser.add_argument("--participants", type=int, default=MIN_PARTICIPANTS)
     init_parser.add_argument("--study-id", default="mvp1-experience-study")
     init_parser.add_argument("--subject-commit")
-    init_parser.add_argument("--force", action="store_true")
 
     validate_parser = subparsers.add_parser("validate", help="Validate study evidence.")
     validate_parser.add_argument("study")
     validate_parser.add_argument("--format", choices=("text", "json"), default="text")
     validate_parser.add_argument("--json-output")
+    validate_parser.add_argument("--force", action="store_true")
+    validate_commit_group = validate_parser.add_mutually_exclusive_group()
+    validate_commit_group.add_argument(
+        "--require-current-commit",
+        action="store_true",
+        help="Require the study subject to match current HEAD (the default).",
+    )
+    validate_commit_group.add_argument(
+        "--allow-historical-subject",
+        action="store_true",
+        help="Render historical evidence without requiring its subject commit to match current HEAD.",
+    )
 
     report_parser = subparsers.add_parser("report", help="Render a concise study report.")
     report_parser.add_argument("study")
@@ -826,6 +1183,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     report_parser.add_argument("--json-output")
     report_parser.add_argument("--markdown-output")
+    report_parser.add_argument("--force", action="store_true")
+    report_commit_group = report_parser.add_mutually_exclusive_group()
+    report_commit_group.add_argument(
+        "--require-current-commit",
+        action="store_true",
+        help="Require the study subject to match current HEAD (the default).",
+    )
+    report_commit_group.add_argument(
+        "--allow-historical-subject",
+        action="store_true",
+        help="Render historical evidence without requiring its subject commit to match current HEAD.",
+    )
     return parser.parse_args(argv)
 
 
@@ -845,24 +1214,59 @@ def main(argv: list[str]) -> int:
             print(json.dumps(template, ensure_ascii=False, indent=2, sort_keys=True))
             return 0
         output_path = _resolve_path(args.output)
-        if output_path.exists() and not args.force:
-            print(
-                f"mvp1 experience study init refused to overwrite existing file: {output_path}",
-                file=sys.stderr,
+        try:
+            validate_output_paths(
+                input_path=None,
+                outputs=[("init", output_path)],
+                force=False,
             )
+            write_outputs([(output_path, json_text(template))], force=False)
+        except StudyToolError as exc:
+            print(f"mvp1 experience study init failed: {exc}", file=sys.stderr)
             return 2
-        write_json(output_path, template)
         print(f"unattested MVP.1 experience study template: {output_path}")
         print(
             "No human evidence has been recorded yet; complete tasks and manual attestations before validation."
         )
         return 0
 
-    report = _load_report(args.study)
+    study_path = _resolve_path(args.study)
+    outputs: list[tuple[str, Path]] = []
     if args.json_output:
-        write_json(_resolve_path(args.json_output), report)
+        outputs.append(("JSON", _resolve_path(args.json_output)))
     if args.command == "report" and args.markdown_output:
-        write_text(_resolve_path(args.markdown_output), render_markdown(report))
+        outputs.append(("Markdown", _resolve_path(args.markdown_output)))
+    try:
+        validate_output_paths(
+            input_path=study_path,
+            outputs=outputs,
+            force=args.force,
+        )
+    except StudyToolError as exc:
+        print(f"mvp1 experience study {args.command} failed: {exc}", file=sys.stderr)
+        return 2
+
+    require_current_commit = not args.allow_historical_subject
+    expected_current_commit: str | None | object = _CURRENT_COMMIT_UNSET
+    if require_current_commit:
+        expected_current_commit = current_commit()
+    report = _load_report(
+        study_path,
+        require_current_commit=require_current_commit,
+        expected_current_commit=expected_current_commit,
+    )
+    rendered_outputs: list[tuple[Path, str]] = []
+    if args.json_output:
+        json_path = next(path for label, path in outputs if label == "JSON")
+        rendered_outputs.append((json_path, json_text(report)))
+    if args.command == "report" and args.markdown_output:
+        markdown_path = next(path for label, path in outputs if label == "Markdown")
+        rendered_outputs.append((markdown_path, render_markdown(report)))
+    try:
+        write_outputs(rendered_outputs, force=args.force)
+    except StudyToolError as exc:
+        print(f"mvp1 experience study {args.command} failed: {exc}", file=sys.stderr)
+        return 2
     _print_format(report, args.format)
     return 0 if report["ready_for_review"] else 1
 

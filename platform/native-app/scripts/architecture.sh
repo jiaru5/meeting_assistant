@@ -99,6 +99,9 @@ test -f tests/MeetingAssistantNativeTests/MeetingWorkspaceCoordinatorTests.swift
 test -f UITests/MeetingAssistantNativeUITests/NativeControlPlaneSmokeTests.swift
 test -f UITests/MeetingAssistantNativeAppUITests/AppBundleLocatorSmokeTests.swift
 test -f UITests/MeetingAssistantNativeAppUITests/DesignedNativeShellAppBundleTests.swift
+test -x ../../scripts/mvp1-task-xcresult.py
+test -x ../../scripts/mvp1-accessibility-walkthrough.py
+test -x ../../scripts/mvp1-experience-study.py
 
 grep -R -q "check_dependencies" Sources tests App
 grep -R -q "ma.permissionDependency" Sources tests App UITests
@@ -177,6 +180,48 @@ grep -q "MA_NATIVE_APP_MVP_FULL_STACK_SMOKE" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_REUSE_XCTESTRUN" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_REUSE_XCTESTRUN:-auto" scripts/test-app-bundle.sh
 grep -q "MA_NATIVE_APP_PREPARE_ONLY" scripts/test-app-bundle.sh
+grep -q -- "-resultBundlePath" scripts/test-app-bundle.sh
+grep -q "final-attempt-path.txt" scripts/test-app-bundle.sh
+grep -q "verify_mvp1_task_xcresult" scripts/test-app-bundle.sh
+grep -q "mvp1-task-xcresult.py" scripts/test-app-bundle.sh
+grep -q "require_current_xctestrun_fingerprint_for_task_evidence" scripts/test-app-bundle.sh
+grep -q "task-artifacts-before-test.json" scripts/test-app-bundle.sh
+grep -q "app_bundle_lock_path" scripts/test-app-bundle.sh
+grep -q "run_frozen_task_xcresult_verifier" scripts/test-app-bundle.sh
+grep -q "require_trusted_mvp1_toolchain" scripts/test-app-bundle.sh
+grep -q "anchor apple" scripts/test-app-bundle.sh
+grep -q 'python_tool="/usr/bin/python3"' scripts/test-app-bundle.sh
+test "$(grep -c '"$python_tool" -I -S' scripts/test-app-bundle.sh)" -eq 9
+grep -Fqx '#!/usr/bin/env -S /usr/bin/python3 -I -S' ../../scripts/mvp1-task-xcresult.py
+grep -Fqx '#!/usr/bin/env -S /usr/bin/python3 -I -S' ../../scripts/mvp1-accessibility-walkthrough.py
+grep -Fqx '#!/usr/bin/env -S /usr/bin/python3 -I -S' ../../scripts/mvp1-experience-study.py
+grep -q "run_clean_git" scripts/test-app-bundle.sh
+grep -q "/usr/bin/env -i" scripts/test-app-bundle.sh
+! grep -q "shasum" scripts/test-app-bundle.sh
+grep -q "MVP1_ARTIFACT_BINDING_SHA256" scripts/test-app-bundle.sh
+grep -q -- "--expected-verifier-sha256" scripts/test-app-bundle.sh
+grep -q -- "--expected-artifact-binding-sha256" scripts/test-app-bundle.sh
+grep -q -- "--xcodebuild-tool" scripts/test-app-bundle.sh
+grep -q -- "--xctestrun" ../../scripts/mvp1-task-xcresult.py
+grep -q -- "--upstream-test-status" ../../scripts/mvp1-task-xcresult.py
+grep -q -- "--artifact-binding-file" ../../scripts/mvp1-task-xcresult.py
+grep -q "strict code-signature verification" ../../scripts/mvp1-task-xcresult.py
+grep -q "directory_manifest" ../../scripts/mvp1-task-xcresult.py
+grep -q "full image decode" ../../scripts/mvp1-task-xcresult.py
+grep -q "read_xctestrun_binding" ../../scripts/mvp1-task-xcresult.py
+grep -q "captured_by_verifier_sha256" ../../scripts/mvp1-task-xcresult.py
+grep -q "expected_artifact_binding_sha256" ../../scripts/mvp1-task-xcresult.py
+grep -q "verifier_snapshot" ../../scripts/mvp1-task-xcresult.py
+grep -q "validated_toolchain" ../../scripts/mvp1-task-xcresult.py
+grep -q "clean_git_environment" ../../scripts/mvp1-task-xcresult.py
+grep -q "fixture_checks_passed" ../../scripts/mvp1-task-xcresult.py
+grep -q "screenshot_visual_review" ../../scripts/mvp1-task-xcresult.py
+grep -q "EXPECTED_TEST_COUNT = 17" ../../scripts/mvp1-task-xcresult.py
+grep -q "00-meetings-recent" ../../scripts/mvp1-task-xcresult.py
+grep -q "07-diagnostics" ../../scripts/mvp1-task-xcresult.py
+grep -q "passed_task_xcresult_provenance_required" ../../scripts/mvp1-accessibility-walkthrough.py
+grep -q "current_trusted_task_toolchain" ../../scripts/mvp1-accessibility-walkthrough.py
+grep -q "PRIVACY_ATTESTATION_STATEMENT" ../../scripts/mvp1-accessibility-walkthrough.py
 grep -q "MA_NATIVE_APP_FOREIGN_INSTANCE_POLICY:-fail" scripts/test-app-bundle.sh
 grep -Fq 'Test Case (' scripts/test-app-bundle.sh
 grep -q ".meeting-assistant-xctestrun-inputs.sha256" scripts/test-app-bundle.sh

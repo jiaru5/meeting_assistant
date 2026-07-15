@@ -31,6 +31,18 @@ def load_adoption_runtime():
     return module
 
 
+def load_task_xcresult_verifier():
+    spec = importlib.util.spec_from_file_location(
+        "mvp1_task_xcresult",
+        ROOT / "scripts/mvp1-task-xcresult.py",
+    )
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 class HarnessValidationTests(unittest.TestCase):
     def create_native_app_bundle_xctestrun_fixture(
         self,
@@ -38,6 +50,7 @@ class HarnessValidationTests(unittest.TestCase):
         *,
         include_app: bool = True,
         include_runner: bool = True,
+        include_fingerprint: bool = False,
     ) -> None:
         products = derived_data / "Build/Products"
         products.mkdir(parents=True, exist_ok=True)
@@ -64,6 +77,19 @@ class HarnessValidationTests(unittest.TestCase):
             runner.parent.mkdir(parents=True, exist_ok=True)
             runner.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             runner.chmod(0o755)
+
+        if include_fingerprint:
+            verifier = load_task_xcresult_verifier()
+            fingerprint = verifier.compute_current_input_fingerprint(
+                repo_root=ROOT,
+                destination="platform=macOS",
+                git_tool="/usr/bin/git",
+                xcodebuild_tool="/usr/bin/xcodebuild",
+            )
+            (derived_data / ".meeting-assistant-xctestrun-inputs.sha256").write_text(
+                fingerprint + "\n",
+                encoding="utf-8",
+            )
 
     def run_native_app_bundle_script(
         self,
@@ -1209,6 +1235,7 @@ class HarnessValidationTests(unittest.TestCase):
                 missing_both,
                 include_app=False,
                 include_runner=False,
+                include_fingerprint=True,
             )
             missing_both_result = self.run_native_app_bundle_script(
                 missing_both,
@@ -1230,6 +1257,7 @@ class HarnessValidationTests(unittest.TestCase):
                 missing_runner,
                 include_app=True,
                 include_runner=False,
+                include_fingerprint=True,
             )
             missing_runner_result = self.run_native_app_bundle_script(
                 missing_runner,
@@ -1265,7 +1293,10 @@ class HarnessValidationTests(unittest.TestCase):
     def test_app_bundle_prepare_only_reports_target_and_runner_identity_without_testing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             derived_data = Path(temp_dir) / "derived-data"
-            self.create_native_app_bundle_xctestrun_fixture(derived_data)
+            self.create_native_app_bundle_xctestrun_fixture(
+                derived_data,
+                include_fingerprint=True,
+            )
 
             result = self.run_native_app_bundle_script(
                 derived_data,
