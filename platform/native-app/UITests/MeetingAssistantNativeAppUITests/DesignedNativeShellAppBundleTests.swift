@@ -521,9 +521,16 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         )
     }
 
-    func testProcessingFailureKeepsRecordingSafeAndRetriesThroughStableControl() {
-        let app = launchApp(fixture: "processing-failure")
+    func testProcessingFailureKeepsRecordingSafeAndRetriesThroughStableControl() throws {
+        let processingFixture = try AppProcessingProcessFixture(mode: "transcript-failure")
+        defer { processingFixture.cleanup() }
+        let app = launchApp(fixture: "processing-failure", processingFixture: processingFixture)
         let sessionID = "session-app-ui-processing"
+        let transcriptInvocation = [
+            ["generate", "transcript"].joined(separator: "_"),
+            "--session-id",
+            sessionID,
+        ].joined(separator: " ")
 
         tapButton(ID.meetingRow(sessionID), in: app)
         tapButton(ID.generateTranscript, in: app)
@@ -531,10 +538,26 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertText("The transcript could not be created", in: app)
         assertText("The original recording is unchanged and safe to retry", in: app)
         assertDoesNotExist(ID.audioSourcePicker, in: app)
-        assertOnlyPrimaryTaskActions([ID.retryProcessing], in: app)
+        XCTAssertEqual(try processingFixture.invocationLines(), [transcriptInvocation])
+
+        // XCTest can occasionally report this visibly enabled recovery control as
+        // non-hittable. Limit the mouse-coordinate fallback to this known state;
+        // the invocation assertion below proves that the retry reached processing.
+        assertOnlyPrimaryTaskActions(
+            [ID.retryProcessing],
+            allowedVisibleEnabledFallback: [ID.retryProcessing],
+            in: app
+        )
         XCTAssertTrue(button(ID.retryProcessing, in: app).label.contains("Retry transcript"))
 
-        tapButton(ID.retryProcessing, in: app)
+        tapButton(ID.retryProcessing, in: app, allowVisibleEnabledFallback: true)
+        let retryRequest = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                (try? processingFixture.invocationLines()) == [transcriptInvocation, transcriptInvocation]
+            },
+            object: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [retryRequest], timeout: 8), .completed)
         assertText("The transcript could not be created", in: app)
         assertOnlyPrimaryTaskActions([ID.retryProcessing], in: app)
     }
@@ -1063,7 +1086,11 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         return existingMatches.first { $0.isHittable } ?? element
     }
 
-    private func tapButton(_ identifier: String, in app: XCUIApplication) {
+    private func tapButton(
+        _ identifier: String,
+        in app: XCUIApplication,
+        allowVisibleEnabledFallback: Bool = false
+    ) {
         app.activate()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5), "Expected app to be foreground before tapping \(identifier).")
         let control = button(identifier, in: app)
@@ -1072,13 +1099,23 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
                 control.click()
                 return
             }
+            if allowVisibleEnabledFallback && isVisibleEnabled(control, in: app) {
+                control.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+                return
+            }
             scrollTowardElement(identifier, in: app)
         }
+        let isHittable = waitUntilHittable(control, timeout: 5)
+        let mayUseVisibleEnabledFallback = allowVisibleEnabledFallback && isVisibleEnabled(control, in: app)
         XCTAssertTrue(
-            waitUntilHittable(control, timeout: 5),
+            isHittable || mayUseVisibleEnabledFallback,
             "Expected button \(identifier) to be hittable."
         )
-        control.click()
+        if isHittable {
+            control.click()
+        } else {
+            control.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+        }
     }
 
     private func setToggle(_ identifier: String, to isOn: Bool, in app: XCUIApplication) {
@@ -1175,6 +1212,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
     private func assertOnlyPrimaryTaskActions(
         _ expectedIdentifiers: [String],
         disabled disabledIdentifiers: [String] = [],
+        allowedVisibleEnabledFallback: Set<String> = [],
         in app: XCUIApplication,
         file: StaticString = #filePath,
         line: UInt = #line
@@ -1184,7 +1222,9 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         for identifier in ID.primaryTaskActions {
             var candidate = app.descendants(matching: .button).matching(identifier: identifier).firstMatch
             if expected.contains(identifier) {
-                if !waitUntilHittable(candidate, timeout: 1) {
+                let mayUseVisibleEnabledFallback = allowedVisibleEnabledFallback.contains(identifier)
+                if !waitUntilHittable(candidate, timeout: 1)
+                    && !(mayUseVisibleEnabledFallback && isVisibleEnabled(candidate, in: app)) {
                     scrollTowardElement(identifier, in: app)
                     candidate = app.descendants(matching: .button).matching(identifier: identifier).firstMatch
                 }
@@ -1196,8 +1236,9 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
                 )
                 XCTAssertTrue(candidate.isEnabled, "Expected \(identifier) to be enabled.", file: file, line: line)
                 XCTAssertTrue(
-                    waitUntilHittable(candidate, timeout: 5),
-                    "Expected \(identifier) to be hittable.",
+                    waitUntilHittable(candidate, timeout: 5)
+                        || (mayUseVisibleEnabledFallback && isVisibleEnabled(candidate, in: app)),
+                    "Expected \(identifier) to be reachable in the current task state.",
                     file: file,
                     line: line
                 )
@@ -1240,6 +1281,18 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         } while Date() < deadline
         return element.exists && element.isEnabled && element.isHittable
+    }
+
+    private func isVisibleEnabled(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
+        guard element.exists && element.isEnabled && !element.frame.isEmpty else {
+            return false
+        }
+        let window = app.windows.firstMatch
+        guard window.exists && !window.frame.isEmpty else {
+            return false
+        }
+        let center = CGPoint(x: element.frame.midX, y: element.frame.midY)
+        return window.frame.insetBy(dx: 4, dy: 4).contains(center)
     }
 
     private func assertExists(
