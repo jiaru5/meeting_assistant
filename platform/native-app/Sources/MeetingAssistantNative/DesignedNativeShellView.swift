@@ -211,6 +211,27 @@ func historicalMeetingRecoveryStatus(_ status: String) -> String? {
     }
 }
 
+func historicalMeetingRecoveryMessage(
+    status: String,
+    hasProcessableAudio: Bool
+) -> String {
+    let explanation: String
+    switch status {
+    case "created":
+        explanation = "This meeting never reached a confirmed recording."
+    case "recording":
+        explanation = "This meeting was still marked as recording when it was reopened, so a completed recording could not be confirmed."
+    case "processing":
+        explanation = "The last transcript attempt was interrupted before it reached a confirmed result."
+    default:
+        explanation = "This meeting ended before it reached a usable result."
+    }
+    if status == "processing", hasProcessableAudio {
+        return "\(explanation) The original meeting audio is still safe. Confirm the audio source, then retry the transcript."
+    }
+    return "\(explanation) Existing meeting files were not changed. Start a new recording or delete this incomplete meeting."
+}
+
 func meetingUserStatus(
     _ status: String,
     hasTranscript: Bool,
@@ -1286,7 +1307,12 @@ public struct DesignedNativeShellView: View {
                     .font(.headline)
                     .foregroundStyle(.orange)
                     .accessibilityIdentifier(MeetingTaskAccessibilityID.recoveryStatus)
-                Text(historicalMeetingRecoveryMessage(status: status))
+                Text(
+                    historicalMeetingRecoveryMessage(
+                        status: status,
+                        hasProcessableAudio: currentSessionHasProcessableAudio
+                    )
+                )
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if status == "processing", currentSessionHasProcessableAudio {
@@ -1318,24 +1344,6 @@ public struct DesignedNativeShellView: View {
             secondaryMeetingActions
             technicalDetailsDisclosure
         }
-    }
-
-    private func historicalMeetingRecoveryMessage(status: String) -> String {
-        let explanation: String
-        switch status {
-        case "created":
-            explanation = "This meeting never reached a confirmed recording."
-        case "recording":
-            explanation = "This meeting was still marked as recording when it was reopened, so a completed recording could not be confirmed."
-        case "processing":
-            explanation = "Transcript creation did not reach a confirmed result."
-        default:
-            explanation = "This meeting ended before it reached a usable result."
-        }
-        if status == "processing", currentSessionHasProcessableAudio {
-            return "\(explanation) The original meeting audio is still safe. Confirm the audio source, then retry the transcript."
-        }
-        return "\(explanation) Existing meeting files were not changed. Start a new recording or delete this incomplete meeting."
     }
 
     private func transcriptLoadFailureView(_ message: String) -> some View {

@@ -197,6 +197,25 @@ struct DesignedNativeShellViewModelTests {
         #expect(meetingUserStatus("unexpected", hasTranscript: true) == "Needs attention")
     }
 
+    @Test
+    func historicalProcessingRecoveryStatesTheInterruptedAttemptAndSafeNextStep() {
+        let recoverable = historicalMeetingRecoveryMessage(
+            status: "processing",
+            hasProcessableAudio: true
+        )
+        let unavailable = historicalMeetingRecoveryMessage(
+            status: "processing",
+            hasProcessableAudio: false
+        )
+
+        #expect(recoverable.contains("last transcript attempt was interrupted"))
+        #expect(recoverable.contains("original meeting audio is still safe"))
+        #expect(recoverable.contains("Confirm the audio source"))
+        #expect(recoverable.contains("retry the transcript"))
+        #expect(unavailable.contains("last transcript attempt was interrupted"))
+        #expect(unavailable.contains("Start a new recording or delete this incomplete meeting"))
+    }
+
     private func readyArtifact(id: String, type: String) -> RecordingCommandArtifact {
         RecordingCommandArtifact(
             id: id,

@@ -403,6 +403,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         tapButton(ID.meetingRow(sessionID), in: app)
 
         assertElement(ID.recoveryStatus, in: app, contains: "Meeting needs attention")
+        assertText("The last transcript attempt was interrupted", in: app)
         assertText("The original meeting audio is still safe", in: app)
         assertText("Confirm the audio source", in: app)
         assertExists(ID.audioSourcePicker, in: app)
