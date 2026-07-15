@@ -571,7 +571,8 @@ struct TranscriptReviewActionsViewModelTests {
 
         #expect(viewModel.state.statusText == "Copy failed.")
         #expect(viewModel.state.failureSummary?.contains("Transcript action command failed before returning a contract response.") == true)
-        #expect(viewModel.state.failureSummary?.contains("path_conflict") == true)
+        #expect(viewModel.state.failureSummary?.contains("path_conflict") == false)
+        #expect(viewModel.state.technicalDetails == ["Error code: path_conflict"])
         #expect(viewModel.state.failureSummary?.contains("/Users/jerry") == false)
         #expect(viewModel.state.failureSummary?.contains("sk-actionrawvalue") == false)
     }
@@ -893,6 +894,7 @@ struct TranscriptReviewActionsViewModelTests {
         #expect(TranscriptActionAccessibilityID.successSummary == "ma.transcriptAction.success")
         #expect(TranscriptActionAccessibilityID.errorSummary == "ma.transcriptAction.error")
         #expect(TranscriptActionAccessibilityID.deletePrompt == "ma.transcriptAction.deletePrompt")
+        #expect(TranscriptActionAccessibilityID.deletePromptHeading == "ma.transcriptAction.deletePromptHeading")
         #expect(TranscriptActionAccessibilityID.deletePromptText == "ma.transcriptAction.deletePromptText")
         #expect(TranscriptActionAccessibilityID.deleteConfirmButton == "ma.transcriptAction.deleteConfirmButton")
         #expect(TranscriptActionAccessibilityID.deleteCancelButton == "ma.transcriptAction.deleteCancelButton")

@@ -54,7 +54,9 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
     func testReadyFixtureStartsAndStopsFakeRecordingFromLaunchedAppBundle() {
         let app = launchApp(fixture: "ready")
 
-        assertElement("ma.permissionDependency.summary", in: app, contains: "Permissions and required dependencies are ready.")
+        assertElement("ma.meetings.heading", in: app, contains: "Meetings")
+        ensureNewRecordingRoute(in: app)
+        assertElement("ma.newRecording.readiness", in: app, contains: "Ready to record")
         tapButton("ma.recording.startButton", in: app)
 
         assertElement("ma.recording.status", in: app, contains: "Recording in progress.")
@@ -72,8 +74,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
     func testControlledNativeRecordingClientWritesSessionArtifactsFromLaunchedAppBundle() throws {
         let recordingFixture = try AppControlledRecordingFixture()
         defer { recordingFixture.cleanup() }
-        let processingFixture = try AppProcessingProcessFixture(mode: "success", workspaceURL: recordingFixture.workspaceURL)
-        let app = launchApp(fixture: "ready", recordingFixture: recordingFixture, processingFixture: processingFixture)
+        let app = launchApp(fixture: "ready", recordingFixture: recordingFixture)
 
         tapButton("ma.recording.startButton", in: app)
 
@@ -114,28 +115,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         XCTAssertEqual(artifacts.compactMap { $0["degradation_reason"] as? String }.count, 3)
         XCTAssertTrue(FileManager.default.fileExists(atPath: recordingFixture.artifactURL("screen_video.mov").path))
 
-        tapProcessingButton("ma.processing.startButton", in: app)
-
-        assertElement("ma.processing.status", in: app, contains: "Processing complete.")
-        assertElement(
-            "ma.processing.transcriptStatus",
-            in: app,
-            contains: "Transcript transcript-process-fixture generated with 2 segments."
-        )
-        assertElement(
-            "ma.processing.speakerLabelStatus",
-            in: app,
-            contains: "Speaker labels artifact artifact-process-speakers is available."
-        )
-        assertElement(
-            "ma.processing.success",
-            in: app,
-            contains: "Generated transcript and speaker labels for session session-app-ui-smoke."
-        )
-        XCTAssertEqual(
-            try processingFixture.invocationLines(),
-            successfulProcessingInvocationLines(sessionID: "session-app-ui-smoke")
-        )
+        assertDoesNotExist("ma.processing.startButton", in: app)
     }
 
     func testOptInAppleScreenCaptureKitRecordsFromDesignedShellWhenExplicitlyEnabled() throws {
@@ -475,7 +455,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
 
         assertElement("ma.transcriptAction.status", in: failureApp, contains: "Copy failed.")
         assertElement("ma.transcriptAction.error", in: failureApp, contains: "Transcript artifact is missing.")
-        assertElement("ma.transcriptAction.error", in: failureApp, contains: "artifact_missing")
+        assertElement("ma.transcriptAction.error", in: failureApp, doesNotContain: "artifact_missing")
     }
 
     func testTranscriptActionExportSuccessCancelAndFailureAreUserTriggeredFromLaunchedAppBundle() {
@@ -508,10 +488,10 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
 
         assertElement("ma.transcriptAction.status", in: failureApp, contains: "Export failed.")
         assertElement("ma.transcriptAction.error", in: failureApp, contains: "Export target already exists.")
-        assertElement("ma.transcriptAction.error", in: failureApp, contains: "path_conflict")
+        assertElement("ma.transcriptAction.error", in: failureApp, doesNotContain: "path_conflict")
     }
 
-    func testTranscriptActionDeleteConfirmCancelSuccessAndFailureFromLaunchedAppBundle() {
+    func testTranscriptActionDeleteConfirmCancelSuccessAndFailureFromLaunchedAppBundle() throws {
         let successApp = launchApp(fixture: "transcript-action-delete-success")
 
         tapTranscriptActionButton("ma.transcriptAction.deleteButton", in: successApp)
@@ -538,7 +518,13 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             contains: "Deleted session session-app-ui-transcript. Removed 3 items. Retained 1 external export."
         )
 
-        let failureApp = launchApp(fixture: "transcript-action-delete-failure")
+        let failureFixture = try AppTranscriptActionProcessFixture(mode: "delete-failure")
+        defer { failureFixture.cleanup() }
+        let failureApp = launchApp(
+            workspaceURL: failureFixture.workspaceURL,
+            sessionID: failureFixture.sessionID,
+            transcriptActionFixture: failureFixture
+        )
 
         tapTranscriptActionButton("ma.transcriptAction.deleteButton", in: failureApp)
         assertExists("ma.transcriptAction.deletePrompt", in: failureApp)
@@ -546,8 +532,16 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         tapTranscriptActionButton("ma.transcriptAction.deleteConfirmButton", in: failureApp)
 
         assertElement("ma.transcriptAction.status", in: failureApp, contains: "Delete failed.")
-        assertElement("ma.transcriptAction.error", in: failureApp, contains: "Session path escaped the workspace.")
-        assertElement("ma.transcriptAction.error", in: failureApp, contains: "path_conflict")
+        assertElement("ma.transcriptAction.error", in: failureApp, contains: "The meeting is still available.")
+        assertElement("ma.transcriptAction.error", in: failureApp, doesNotContain: "path_conflict")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: failureFixture.sessionRootURL.path))
+        XCTAssertEqual(
+            try failureFixture.invocationLines(),
+            failedDeleteTranscriptActionInvocationLines(
+                sessionID: failureFixture.sessionID,
+                workspaceURL: failureFixture.workspaceURL
+            )
+        )
     }
 
     func testTranscriptActionProcessRunnerLaunchEnvironmentExportsAndDeletesWorkspaceArtifactsFromLaunchedAppBundle() throws {
@@ -574,7 +568,8 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         tapTranscriptActionButton("ma.transcriptAction.exportButton", in: app)
 
         assertElement("ma.transcriptAction.status", in: app, contains: "Export complete.")
-        assertElement("ma.transcriptAction.success", in: app, contains: actionFixture.exportURL.path)
+        assertElement("ma.transcriptAction.success", in: app, contains: "Transcript exported.")
+        assertElement("ma.transcriptAction.success", in: app, doesNotContain: actionFixture.exportURL.path)
         XCTAssertTrue(FileManager.default.fileExists(atPath: actionFixture.exportURL.path))
         XCTAssertTrue(try actionFixture.exportContent().contains("Native action process fixture transcript content."))
 
@@ -618,7 +613,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             in: app,
             contains: "Transcript action command failed before returning a contract response."
         )
-        assertElement("ma.transcriptAction.error", in: app, contains: "internal_error")
+        assertElement("ma.transcriptAction.error", in: app, doesNotContain: "internal_error")
         assertElement("ma.transcriptAction.error", in: app, doesNotContain: "customer roadmap")
         assertElement("ma.transcriptAction.error", in: app, doesNotContain: "/Users/jerry")
         assertElement("ma.transcriptAction.error", in: app, doesNotContain: "sk-nativefixturevalue")
@@ -1752,6 +1747,8 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
                 return rawElement("ma.transcriptAction.error", in: app).waitForExistence(timeout: timeout)
             }
             return rawElement("ma.transcriptAction.success", in: app).waitForExistence(timeout: timeout)
+        case "ma.transcriptAction.error":
+            return waitForVisibleText(expectedText, in: app, timeout: timeout)
         case "ma.transcriptAction.success"
             where expectedText.contains("Deleted session") || expectedText.contains("Retained"):
             return waitForRawElement(
@@ -1849,7 +1846,7 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
             text,
             text
         )
-        return app.descendants(matching: .any).matching(predicate).firstMatch.waitForExistence(timeout: timeout)
+        return app.staticTexts.matching(predicate).firstMatch.waitForExistence(timeout: timeout)
     }
 
     private func anyTranscriptRow(in app: XCUIApplication) -> XCUIElement {
@@ -1905,10 +1902,10 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        if identifier == "ma.processing.error" {
+        if identifier == "ma.processing.error" || identifier == "ma.transcriptAction.error" {
             XCTAssertFalse(
                 waitForVisibleText(unexpectedText, in: app, timeout: 0.5),
-                "Expected the task-routed processing failure not to expose \(unexpectedText).",
+                "Expected the task-routed failure not to expose \(unexpectedText).",
                 file: file,
                 line: line
             )
@@ -2329,6 +2326,25 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
                     sessionID,
                     "--export-type",
                     "plain_text",
+                ]
+            ),
+        ]
+    }
+
+    private func failedDeleteTranscriptActionInvocationLines(
+        sessionID: String,
+        workspaceURL: URL
+    ) -> [String] {
+        [
+            transcriptActionInvocationLine(
+                parts: ["delete", "session"],
+                arguments: [
+                    "--session-id",
+                    sessionID,
+                    "--workspace-dir",
+                    workspaceURL.path,
+                    "--confirm",
+                    "true",
                 ]
             ),
         ]

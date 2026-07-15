@@ -87,6 +87,12 @@ fi
 session_root="$workspace_dir/sessions/$session_id"
 retained_export_path="${MA_NATIVE_TRANSCRIPT_ACTION_RETAINED_EXPORT:-$workspace_dir/exports/$session_id.md}"
 
+if [ "${MA_NATIVE_TRANSCRIPT_ACTION_FIXTURE_MODE:-success}" = "delete-failure" ] \
+  && [ "$command" = "delete_session" ]; then
+  json_failure "delete_session" "path_conflict" \
+    "The meeting is still available. Review the workspace and try again." 3
+fi
+
 case "$command" in
   export_transcript)
     if [ ! -f "$session_root/artifacts/transcript.json" ]; then

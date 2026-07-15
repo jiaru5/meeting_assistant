@@ -1682,6 +1682,7 @@ public struct DesignedNativeShellView: View {
                         .font(.headline)
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityFocused($accessibilityFocus, equals: .deleteConfirmation)
+                        .accessibilityIdentifier(TranscriptActionAccessibilityID.deletePromptHeading)
                     Text("The meeting and its files inside the Meeting Assistant workspace will be removed. Exports saved elsewhere on this Mac will be kept.")
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1721,40 +1722,42 @@ public struct DesignedNativeShellView: View {
 
     private var technicalDetailsDisclosure: some View {
         DisclosureGroup("Technical details", isExpanded: $showTechnicalDetails) {
-            VStack(alignment: .leading, spacing: 8) {
-                if let session = coordinator.currentSession {
-                    technicalRow("Session ID", session.id)
-                    technicalRow("Status", session.status)
+            if showTechnicalDetails {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let session = coordinator.currentSession {
+                        technicalRow("Session ID", session.id)
+                        technicalRow("Status", session.status)
+                    }
+                    ForEach(recordingViewModel.state.artifacts) { artifact in
+                        technicalRow(
+                            artifact.artifactType,
+                            "\(artifact.captureStatus)\(artifact.path.map { " — \($0)" } ?? "")"
+                        )
+                    }
+                    if let code = recordingViewModel.state.errorCode?.rawValue {
+                        technicalRow("Recording error", code)
+                    }
+                    ForEach(Array(recordingViewModel.state.technicalDetails.enumerated()), id: \.offset) { _, detail in
+                        technicalRow("Recording detail", detail)
+                    }
+                    ForEach(Array(recordingViewModel.state.warnings.enumerated()), id: \.offset) { _, warning in
+                        technicalRow("Recording warning", warning)
+                    }
+                    if let code = processingViewModel.state.errorCode?.rawValue {
+                        technicalRow("Processing error", code)
+                    }
+                    ForEach(Array(processingViewModel.state.errorDetails.enumerated()), id: \.offset) { _, detail in
+                        technicalRow("Processing detail", detail)
+                    }
+                    if let detail = coordinator.transcriptTechnicalError {
+                        technicalRow("Transcript load detail", detail)
+                    }
+                    ForEach(Array(transcriptActionViewModel.state.technicalDetails.enumerated()), id: \.offset) { _, detail in
+                        technicalRow("Action detail", detail)
+                    }
                 }
-                ForEach(recordingViewModel.state.artifacts) { artifact in
-                    technicalRow(
-                        artifact.artifactType,
-                        "\(artifact.captureStatus)\(artifact.path.map { " — \($0)" } ?? "")"
-                    )
-                }
-                if let code = recordingViewModel.state.errorCode?.rawValue {
-                    technicalRow("Recording error", code)
-                }
-                ForEach(Array(recordingViewModel.state.technicalDetails.enumerated()), id: \.offset) { _, detail in
-                    technicalRow("Recording detail", detail)
-                }
-                ForEach(Array(recordingViewModel.state.warnings.enumerated()), id: \.offset) { _, warning in
-                    technicalRow("Recording warning", warning)
-                }
-                if let code = processingViewModel.state.errorCode?.rawValue {
-                    technicalRow("Processing error", code)
-                }
-                ForEach(Array(processingViewModel.state.errorDetails.enumerated()), id: \.offset) { _, detail in
-                    technicalRow("Processing detail", detail)
-                }
-                if let detail = coordinator.transcriptTechnicalError {
-                    technicalRow("Transcript load detail", detail)
-                }
-                ForEach(Array(transcriptActionViewModel.state.technicalDetails.enumerated()), id: \.offset) { _, detail in
-                    technicalRow("Action detail", detail)
-                }
+                .padding(.top, 10)
             }
-            .padding(.top, 10)
         }
         .font(.callout)
         .accessibilityIdentifier(MeetingTaskAccessibilityID.technicalDetails)

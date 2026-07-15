@@ -10,6 +10,7 @@ public enum TranscriptActionAccessibilityID {
     public static let errorSummary = "ma.transcriptAction.error"
     public static let warnings = "ma.transcriptAction.warnings"
     public static let deletePrompt = "ma.transcriptAction.deletePrompt"
+    public static let deletePromptHeading = "ma.transcriptAction.deletePromptHeading"
     public static let deletePromptText = "ma.transcriptAction.deletePromptText"
     public static let deleteConfirmButton = "ma.transcriptAction.deleteConfirmButton"
     public static let deleteCancelButton = "ma.transcriptAction.deleteCancelButton"

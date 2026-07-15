@@ -969,6 +969,12 @@ final class NativeControlPlaneSmokeTests: XCTestCase {
             line: line
         )
         XCTAssertEqual(
+            TranscriptActionAccessibilityID.deletePromptHeading,
+            "ma.transcriptAction.deletePromptHeading",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
             TranscriptActionAccessibilityID.deleteConfirmButton,
             "ma.transcriptAction.deleteConfirmButton",
             file: file,

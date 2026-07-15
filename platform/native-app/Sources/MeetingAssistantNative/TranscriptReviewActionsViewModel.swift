@@ -544,6 +544,9 @@ public final class TranscriptReviewActionsViewModel: ObservableObject {
         if let failure = error as? TranscriptActionCommandFailure {
             summary = "\(operation) failed: \(failure.message.processingSafeDisplayText(fallback: "The requested action could not be completed."))"
             technicalDetails = failure.code.map { ["Error code: \($0.rawValue)"] } ?? []
+        } else if let failure = error as? TranscriptActionBridgeError {
+            summary = "\(operation) failed: \(failure.safeMessage)"
+            technicalDetails = ["Error code: \(failure.code.rawValue)"]
         } else {
             summary = "\(operation) failed: \(error.localizedDescription.processingSafeDisplayText(fallback: "The requested action could not be completed."))"
             technicalDetails = []

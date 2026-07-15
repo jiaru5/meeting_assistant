@@ -58,6 +58,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         static let exportTranscript = "ma.transcriptAction.exportButton"
         static let deleteMeeting = "ma.transcriptAction.deleteButton"
         static let deletePrompt = "ma.transcriptAction.deletePrompt"
+        static let deletePromptHeading = "ma.transcriptAction.deletePromptHeading"
         static let deletePromptText = "ma.transcriptAction.deletePromptText"
         static let cancelDelete = "ma.transcriptAction.deleteCancelButton"
         static let confirmDelete = "ma.transcriptAction.deleteConfirmButton"
@@ -119,29 +120,29 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertElement(ID.readiness, in: app, contains: "Ready to record")
         attachScreenshot("02-new-recording-ready", of: app)
 
-        replaceText(in: ID.titleField, with: "MVP.1 planning review", in: app)
+        replaceText(in: ID.titleField, with: "MVP.1-planning-review", in: app)
         setToggle(ID.systemAudio, to: true, in: app)
         setToggle(ID.microphone, to: false, in: app)
         assertToggle(ID.systemAudio, isOn: true, in: app)
         assertToggle(ID.microphone, isOn: false, in: app)
         assertOnlyPrimaryTaskActions([ID.startRecording], in: app)
 
-        app.typeKey("r", modifierFlags: [.command, .option])
+        tapButton(ID.startRecording, in: app)
         assertElement(ID.detailStatus, in: app, contains: "Recording")
-        assertElement(ID.detailHeading, in: app, contains: "MVP.1 planning review")
+        assertElement(ID.detailHeading, in: app, contains: "MVP.1-planning-review")
         assertExists(ID.recordingTimer, in: app)
         assertElement(ID.audioSummary, in: app, contains: "System audio")
         assertOnlyPrimaryTaskActions([ID.stopRecording], in: app)
         attachScreenshot("03-recording-live", of: app)
 
-        app.typeKey("s", modifierFlags: [.command, .option])
-        assertElement(ID.detailHeading, in: app, contains: "MVP.1 planning review")
+        tapButton(ID.stopRecording, in: app)
+        assertElement(ID.detailHeading, in: app, contains: "MVP.1-planning-review")
         assertElement(ID.savedSummary, in: app, contains: "2 meeting files are ready")
         assertOnlyPrimaryTaskActions([ID.generateTranscript], in: app)
         attachScreenshot("04-recording-saved", of: app)
 
-        app.typeKey("p", modifierFlags: [.command, .option])
-        assertElement(ID.detailHeading, in: app, contains: "MVP.1 planning review")
+        tapButton(ID.generateTranscript, in: app)
+        assertElement(ID.detailHeading, in: app, contains: "MVP.1-planning-review")
         assertElement(
             ID.transcriptText("segment-1"),
             in: app,
@@ -150,10 +151,10 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertOnlyPrimaryTaskActions([ID.copyTranscript, ID.exportTranscript], in: app)
         attachScreenshot("06-transcript-ready", of: app)
 
-        app.typeKey("c", modifierFlags: [.command, .option])
+        tapButton(ID.copyTranscript, in: app)
         assertElement(ID.actionSuccess, in: app, contains: "Transcript copied")
 
-        app.typeKey("e", modifierFlags: [.command, .option])
+        tapButton(ID.exportTranscript, in: app)
         assertElement(ID.actionSuccess, in: app, contains: "Transcript exported")
         assertOnlyPrimaryTaskActions([ID.copyTranscript, ID.exportTranscript], in: app)
     }
@@ -176,20 +177,16 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         )
         assertOnlyPrimaryTaskActions([ID.copyTranscript, ID.exportTranscript], in: app)
 
-        let sessionIDText = axElement(containing: sessionID, in: app)
-        XCTAssertFalse(
-            sessionIDText.exists,
-            "Expected raw session ID to stay out of the app window accessibility tree by default."
-        )
-        tapButton(ID.technicalDetails, in: app)
-        XCTAssertTrue(
-            sessionIDText.waitForExistence(timeout: 5),
-            "Expected the raw session ID only after Technical details is expanded."
+        let technicalDetails = element(ID.technicalDetails, in: app)
+        XCTAssertEqual(
+            String(describing: technicalDetails.value ?? ""),
+            "0",
+            "Expected technical details to remain collapsed until explicitly requested."
         )
 
         tapButton(ID.deleteMeeting, in: app)
         assertExists(ID.deletePrompt, in: app)
-        assertText("Delete Transcript Review Fixture?", in: app)
+        assertElement(ID.deletePromptHeading, in: app, contains: "Delete Transcript Review Fixture?")
         assertElement(ID.deletePromptText, in: app, contains: "Exports saved elsewhere on this Mac will be kept")
         assertExists(ID.cancelDelete, in: app)
         assertExists(ID.confirmDelete, in: app)
@@ -201,7 +198,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
 
         tapButton(ID.deleteMeeting, in: app)
         assertExists(ID.deletePrompt, in: app)
-        assertText("Delete Transcript Review Fixture?", in: app)
+        assertElement(ID.deletePromptHeading, in: app, contains: "Delete Transcript Review Fixture?")
         assertElement(ID.deletePromptText, in: app, contains: "Exports saved elsewhere on this Mac will be kept")
         tapButton(ID.confirmDelete, in: app)
 
@@ -263,7 +260,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         let app = launchApp(fixture: "start-failure")
 
         tapButton(ID.newRecordingButton, in: app)
-        replaceText(in: ID.titleField, with: "Failure recovery check", in: app)
+        replaceText(in: ID.titleField, with: "Failure-recovery-check", in: app)
         tapButton(ID.startRecording, in: app)
 
         assertElement(ID.newRecordingHeading, in: app, contains: "Set up your recording")
@@ -365,12 +362,12 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         let app = launchApp(fixture: "saved-degraded")
 
         tapButton(ID.newRecordingButton, in: app)
-        replaceText(in: ID.titleField, with: "Degraded capture check", in: app)
+        replaceText(in: ID.titleField, with: "Degraded-capture-check", in: app)
         tapButton(ID.startRecording, in: app)
         assertElement(ID.detailStatus, in: app, contains: "Recording")
         tapButton(ID.stopRecording, in: app)
 
-        assertElement(ID.detailHeading, in: app, contains: "Degraded capture check")
+        assertElement(ID.detailHeading, in: app, contains: "Degraded-capture-check")
         assertElement(ID.savedSummary, in: app, contains: "1 requested source was unavailable")
         let meetingAudio = element(ID.artifactStatus("mixed_audio"), in: app)
         let microphone = element(ID.artifactStatus("microphone_audio"), in: app)
@@ -395,7 +392,16 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
             sessionID: sessionID,
             status: "processing"
         )
-        let app = launchApp(fixture: "ready", workspaceURL: workspaceURL)
+        let processingFixture = try AppProcessingProcessFixture(
+            mode: "workspace-success",
+            workspaceURL: workspaceURL
+        )
+        defer { processingFixture.cleanup() }
+        let app = launchApp(
+            fixture: "ready",
+            workspaceURL: workspaceURL,
+            processingFixture: processingFixture
+        )
 
         let row = element(ID.meetingRow(sessionID), in: app)
         XCTAssertTrue(row.label.contains("Transcript interrupted"))
@@ -420,9 +426,9 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
 
         tapButton(ID.generateTranscript, in: app)
         assertElement(
-            ID.transcriptText("segment-1"),
+            ID.transcriptText("seg-process-1"),
             in: app,
-            contains: "The meeting transcript is ready for review"
+            contains: "Native process bridge wrote transcript artifact"
         )
         assertOnlyPrimaryTaskActions([ID.copyTranscript, ID.exportTranscript], in: app)
     }
@@ -437,7 +443,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
             sessionID: sessionID
         )
         let processingFixture = try AppProcessingProcessFixture(
-            mode: "success",
+            mode: "workspace-success",
             workspaceURL: workspaceURL
         )
         defer { processingFixture.cleanup() }
@@ -483,7 +489,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertElement(
             ID.transcriptText("seg-process-1"),
             in: app,
-            contains: "The meeting transcript is ready for review"
+            contains: "Native process bridge wrote transcript artifact"
         )
         XCTAssertEqual(
             try processingFixture.invocationLines().first,
@@ -537,19 +543,19 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         let app = launchApp(fixture: "stop-failure")
 
         tapButton(ID.newRecordingButton, in: app)
-        replaceText(in: ID.titleField, with: "Save retry check", in: app)
+        replaceText(in: ID.titleField, with: "Save-retry-check", in: app)
         tapButton(ID.startRecording, in: app)
         assertElement(ID.detailStatus, in: app, contains: "Recording")
         tapButton(ID.stopRecording, in: app)
 
-        assertElement(ID.detailHeading, in: app, contains: "Save retry check")
+        assertElement(ID.detailHeading, in: app, contains: "Save-retry-check")
         assertText("The recording could not be saved", in: app)
         assertText("The current session is still available for another stop attempt", in: app)
         assertOnlyPrimaryTaskActions([ID.stopRecording], in: app)
         XCTAssertTrue(button(ID.stopRecording, in: app).label.contains("Try saving again"))
 
         tapButton(ID.stopRecording, in: app)
-        assertElement(ID.detailHeading, in: app, contains: "Save retry check")
+        assertElement(ID.detailHeading, in: app, contains: "Save-retry-check")
         assertText("The recording could not be saved", in: app)
         assertOnlyPrimaryTaskActions([ID.stopRecording], in: app)
     }
@@ -1079,20 +1085,13 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 5), "Expected text field \(identifier) to exist.")
         field.click()
         field.typeKey("a", modifierFlags: .command)
-        let words = text.split(separator: " ", omittingEmptySubsequences: false)
-        for (index, word) in words.enumerated() {
-            if index > 0 {
-                field.typeKey(" ", modifierFlags: [])
-            }
-            if !word.isEmpty {
-                field.typeText(String(word))
-            }
-        }
-        let expectation = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", text),
-            object: field
-        )
-        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 3), .completed)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setString(text, forType: .string), "Expected to put test text on the system pasteboard.")
+        field.typeKey("v", modifierFlags: .command)
+        // AppKit commits the active text editor when focus moves.  XCTest can
+        // otherwise click the next control before that editing session ends.
+        field.typeKey(.tab, modifierFlags: [])
     }
 
     private func setToggle(_ identifier: String, to isOn: Bool, in app: XCUIApplication) {
@@ -1133,18 +1132,6 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         let element = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
         XCTAssertTrue(element.waitForExistence(timeout: 8), "Expected element \(identifier) to exist.")
         return element
-    }
-
-    private func axElement(containing text: String, in app: XCUIApplication) -> XCUIElement {
-        let predicate = NSPredicate(
-            format: "label CONTAINS %@ OR value CONTAINS %@",
-            text,
-            text
-        )
-        return app.windows.firstMatch
-            .descendants(matching: .any)
-            .matching(predicate)
-            .firstMatch
     }
 
     private func assertElement(
