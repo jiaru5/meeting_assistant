@@ -220,6 +220,75 @@ struct MeetingSessionWorkspaceRepositoryTests {
     }
 
     @Test
+    func selectedSessionDetailRetainsSafeRecordingArtifactStatusesWithoutPaths() throws {
+        let workspace = try makeRepositoryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let sessionID = "session-detail-artifacts"
+        try writeRepositorySession(
+            workspace: workspace,
+            sessionID: sessionID,
+            title: "Artifact detail",
+            status: "recorded",
+            startedAt: "2026-07-12T10:00:00Z",
+            endedAt: "2026-07-12T10:05:00Z",
+            updatedAt: "2026-07-12T10:05:00Z",
+            artifacts: [
+                repositoryArtifact(
+                    id: "artifact-screen",
+                    sessionID: sessionID,
+                    type: "screen_video",
+                    path: "artifacts/screen.mov",
+                    status: "available"
+                ),
+                repositoryArtifact(
+                    id: "artifact-microphone",
+                    sessionID: sessionID,
+                    type: "microphone_audio",
+                    path: "artifacts/microphone.m4a",
+                    status: "missing",
+                    degradationReason: "Microphone access was not granted."
+                ),
+                repositoryArtifact(
+                    id: "artifact-mixed",
+                    sessionID: sessionID,
+                    type: "mixed_audio",
+                    path: "artifacts/meeting.wav",
+                    status: "degraded",
+                    degradationReason: "The recording continued after a brief audio interruption."
+                ),
+            ]
+        )
+
+        let selectedSession = try MeetingSessionWorkspaceRepository().loadSelectedSessionDetail(
+            workspaceURL: workspace,
+            sessionID: sessionID
+        )
+        let selected = try #require(selectedSession)
+
+        #expect(selected.summary.id == sessionID)
+        #expect(selected.recordingArtifacts == [
+            MeetingSessionArtifactDetail(
+                id: "artifact-screen",
+                artifactType: "screen_video",
+                captureStatus: "available",
+                degradationReason: nil
+            ),
+            MeetingSessionArtifactDetail(
+                id: "artifact-microphone",
+                artifactType: "microphone_audio",
+                captureStatus: "missing",
+                degradationReason: "Microphone access was not granted."
+            ),
+            MeetingSessionArtifactDetail(
+                id: "artifact-mixed",
+                artifactType: "mixed_audio",
+                captureStatus: "degraded",
+                degradationReason: "The recording continued after a brief audio interruption."
+            ),
+        ])
+    }
+
+    @Test
     func selectedSessionRequiresMatchingChecksumsAfterRecentProjectionDefersPayloadReads() throws {
         let workspace = try makeRepositoryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
@@ -294,6 +363,21 @@ struct MeetingSessionWorkspaceRepositoryTests {
         #expect(selected?.hasProcessableAudio == false)
         #expect(selected?.artifactCount == 0)
         #expect(selected?.processableAudioSources.isEmpty == true)
+
+        let selectedSessionDetail = try repository.loadSelectedSessionDetail(
+            workspaceURL: workspace,
+            sessionID: "session-transcript-drift"
+        )
+        let selectedDetail = try #require(selectedSessionDetail)
+        #expect(selectedDetail.recordingArtifacts == [
+            MeetingSessionArtifactDetail(
+                id: "artifact-audio-drift",
+                artifactType: "mixed_audio",
+                captureStatus: "failed",
+                degradationReason: "This saved file could not be verified, so it will not be used for transcript processing.",
+                verificationFailed: true
+            ),
+        ])
     }
 
     @Test
@@ -1016,9 +1100,10 @@ private func repositoryArtifact(
     sessionID: String,
     type: String,
     path: String,
-    status: String
+    status: String,
+    degradationReason: String? = nil
 ) -> [String: Any] {
-    [
+    var artifact: [String: Any] = [
         "id": id,
         "session_id": sessionID,
         "artifact_type": type,
@@ -1027,6 +1112,10 @@ private func repositoryArtifact(
         "capture_status": status,
         "created_at": "2026-07-12T10:00:00Z",
     ]
+    if let degradationReason {
+        artifact["degradation_reason"] = degradationReason
+    }
+    return artifact
 }
 
 private func writeRepositoryJSON(_ object: Any, to url: URL) throws {

@@ -444,6 +444,20 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         )
 
         tapButton(ID.meetingRow(sessionID), in: app)
+        let screenRecording = element(ID.artifactStatus("screen_video"), in: app)
+        let systemAudio = element(ID.artifactStatus("system_audio"), in: app)
+        let microphoneArtifact = element(ID.artifactStatus("microphone_audio"), in: app)
+        XCTAssertTrue(
+            screenRecording.label.contains(
+                "Screen recording, Not captured. Screen capture was not available for this meeting."
+            )
+        )
+        XCTAssertFalse(screenRecording.label.contains("screen_video"))
+        XCTAssertFalse(screenRecording.label.contains("capture_status"))
+        XCTAssertTrue(systemAudio.label.contains("System audio, Ready."))
+        XCTAssertFalse(systemAudio.label.contains("system_audio"))
+        XCTAssertTrue(microphoneArtifact.label.contains("Microphone, Ready."))
+        XCTAssertFalse(microphoneArtifact.label.contains("microphone_audio"))
         let picker = element(ID.audioSourcePicker, in: app)
         XCTAssertTrue(picker.isHittable)
         let defaultAudioSelected = XCTNSPredicateExpectation(
@@ -929,6 +943,14 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
                 "started_at": "2026-07-13T10:00:00Z",
                 "updated_at": "2026-07-13T10:05:00Z",
                 "artifacts": [
+                    [
+                        "id": "artifact-fallback-screen",
+                        "session_id": sessionID,
+                        "artifact_type": "screen_video",
+                        "path": "artifacts/screen-recording.mov",
+                        "capture_status": "missing",
+                        "degradation_reason": "Screen capture was not available for this meeting.",
+                    ],
                     [
                         "id": "artifact-fallback-system",
                         "session_id": sessionID,

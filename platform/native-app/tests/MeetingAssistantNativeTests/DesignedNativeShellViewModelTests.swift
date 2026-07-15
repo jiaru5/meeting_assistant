@@ -133,12 +133,47 @@ struct DesignedNativeShellViewModelTests {
         let degradedLabel = recordingArtifactAccessibilityLabel(degradedAudio)
         let missingLabel = recordingArtifactAccessibilityLabel(missingMicrophone)
 
-        #expect(degradedLabel == "Meeting audio, Saved with limited quality.")
+        #expect(
+            degradedLabel
+                == "Meeting audio, Saved with limited quality. Meeting audio was recovered with limited quality."
+        )
         #expect(missingLabel == "Microphone, Not captured. Microphone access was unavailable.")
         #expect(!degradedLabel.contains("mixed_audio"))
         #expect(!degradedLabel.contains("degraded"))
         #expect(!missingLabel.contains("microphone_audio"))
         #expect(!missingLabel.contains("missing"))
+    }
+
+    @Test
+    func selectedMeetingArtifactDetailUsesUserLanguageAndKeepsDegradationContext() {
+        let degradedAudio = MeetingSessionArtifactDetail(
+            id: "meeting-audio",
+            artifactType: "mixed_audio",
+            captureStatus: "degraded",
+            degradationReason: "The meeting app changed audio quality during capture."
+        )
+        let unverifiedAudio = MeetingSessionArtifactDetail(
+            id: "unverified-audio",
+            artifactType: "normalized_audio",
+            captureStatus: "failed",
+            degradationReason: "This saved file could not be verified, so it will not be used for transcript processing.",
+            verificationFailed: true
+        )
+
+        let degradedLabel = selectedSessionArtifactAccessibilityLabel(degradedAudio)
+        let unverifiedLabel = selectedSessionArtifactAccessibilityLabel(unverifiedAudio)
+
+        #expect(
+            degradedLabel
+                == "Meeting audio, Saved with limited quality. The meeting app changed audio quality during capture."
+        )
+        #expect(
+            unverifiedLabel
+                == "Prepared meeting audio, Could not be verified. This saved file could not be verified, so it will not be used for transcript processing."
+        )
+        #expect(!degradedLabel.contains("mixed_audio"))
+        #expect(!degradedLabel.contains("capture_status"))
+        #expect(!unverifiedLabel.contains("normalized_audio"))
     }
 
     @Test

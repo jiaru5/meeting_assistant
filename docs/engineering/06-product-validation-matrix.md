@@ -72,6 +72,10 @@
 
 历史 `processing` 会话的详情页现在明确说明“上一次 transcript 尝试被中断”、原始音频仍安全，以及下一步应确认同源音频并重试。`DesignedNativeShellViewModelTests.historicalProcessingRecoveryStatesTheInterruptedAttemptAndSafeNextStep` 与任务 app-bundle 历史恢复断言已同步，`./platform/native-app/scripts/test.sh` 通过。该代码级证据不替代真实 `.app` task test body、截图人工审查或真人/VoiceOver 走查，`PV-MA-014` 继续保持 `partial`。
 
+### 2026-07-15 PV-MA-014 已选中历史会话产物补记
+
+重开已保存的历史会话时，详情页现在从完成严格 checksum 校验的已选中会话读取仅内存的 recording-artifact detail projection，并逐项说明成功、降级、缺失或无法验证的安全原因；Recent 列表的 `MeetingSessionSummary` 字段、持久化 schema 与 API 均未扩展，路径、checksum 和命令元数据不会进入 UI。`MeetingSessionWorkspaceRepositoryTests`、`MeetingWorkspaceCoordinatorTests`、`DesignedNativeShellViewModelTests` 以及既有任务 app-bundle fallback-audio 测试共同回归该投影、清理和用户语言契约。该代码级证据不替代真实 `.app` task test body、截图人工审查或真人/VoiceOver 走查，`PV-MA-014` 继续保持 `partial`。
+
 ### 2026-07-13 MVP.1 跨行回归补充
 
 本轮不改变 `PV-MA-001`、`PV-MA-002`、`PV-MA-006`、`PV-MA-007` 的既有 `covered` 结论，只补充 `PV-MA-014` 体验改造对旧能力的回归证据：录制 readiness 只受平台、workspace、Screen Recording 和用户已开启的麦克风意图阻断，处理 runtime/model/FFmpeg 缺失不阻断安全录制；Screen Recording 与 Microphone 使用各自系统设置入口；Saved/历史恢复在后台校验 provider 全部 preflight 媒体的安全性、可读性和 checksum，已登记但无效的输入 fail closed，不投影虚假 fallback；`mixed_audio` 保持 provider 默认 source 语义，只有不存在已登记 preferred input 时才回退 normalized/raw source，normalized 生成后的 retry 保持同源；已登记但缺失、漂移或不可解码的 transcript 只提供 reload/repair/delete，不重新暴露 Generate；transcript workspace 读取移出 MainActor，长列表使用 `LazyVStack`，Copy/Export 工具栏固定在滚动区外。上述 Swift/hosted 证据已进入 13/13 hosted XCTest、244/244 Swift Testing 和 architecture gate；任务级实机 UI 证据仍受 `PV-MA-014 partial` 的解锁、VoiceOver、截图和真人研究缺口约束。

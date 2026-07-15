@@ -100,11 +100,21 @@ func recordingArtifactIsUsable(_ artifact: RecordingCommandArtifact) -> Bool {
 }
 
 func recordingArtifactWasNotRequested(_ artifact: RecordingCommandArtifact) -> Bool {
-    guard artifact.captureStatus == "missing",
-          let reason = artifact.degradationReason else {
+    recordingArtifactWasNotRequested(
+        captureStatus: artifact.captureStatus,
+        degradationReason: artifact.degradationReason
+    )
+}
+
+func recordingArtifactWasNotRequested(
+    captureStatus: String,
+    degradationReason: String?
+) -> Bool {
+    guard captureStatus == "missing",
+          let degradationReason else {
         return false
     }
-    return reason.localizedCaseInsensitiveContains(
+    return degradationReason.localizedCaseInsensitiveContains(
         "was not requested for this native capture session"
     )
 }
@@ -155,30 +165,60 @@ func recordingArtifactDisplayName(_ artifactType: String) -> String {
         return "Microphone"
     case "mixed_audio":
         return "Meeting audio"
+    case "normalized_audio":
+        return "Prepared meeting audio"
     default:
         return "Meeting file"
     }
 }
 
-func recordingArtifactUserStatus(_ artifact: RecordingCommandArtifact) -> String {
-    if recordingArtifactWasNotRequested(artifact) {
-        return "Not requested."
-    }
-    if recordingArtifactIsUsable(artifact) {
-        return artifact.captureStatus == "degraded" ? "Saved with limited quality." : "Ready."
-    }
-
-    let fallback = "This source was not saved."
-    let reason = artifact.degradationReason?.processingSafeDisplayText(fallback: fallback) ?? fallback
+func recordingArtifactSafeReason(
+    artifactType: String,
+    captureStatus: String,
+    degradationReason: String?,
+    fallback: String
+) -> String {
+    let reason = degradationReason?.processingSafeDisplayText(fallback: fallback) ?? fallback
     let rawContractMarkers = ["artifact_type", "artifact-type", "capture_status", "capture-status"]
-    let containsRawType = artifact.artifactType.contains("_")
-        && reason.localizedCaseInsensitiveContains(artifact.artifactType)
+    let containsRawType = artifactType.contains("_")
+        && reason.localizedCaseInsensitiveContains(artifactType)
     let containsRawContractMarker = rawContractMarkers.contains {
         reason.localizedCaseInsensitiveContains($0)
     }
-    let isRawStatusOnly = reason.caseInsensitiveCompare(artifact.captureStatus) == .orderedSame
-    let userReason = containsRawType || containsRawContractMarker || isRawStatusOnly ? fallback : reason
-    switch artifact.captureStatus {
+    let isRawStatusOnly = reason.caseInsensitiveCompare(captureStatus) == .orderedSame
+    return containsRawType || containsRawContractMarker || isRawStatusOnly ? fallback : reason
+}
+
+func recordingArtifactUserStatus(
+    artifactType: String,
+    captureStatus: String,
+    degradationReason: String?,
+    isUsable: Bool
+) -> String {
+    if recordingArtifactWasNotRequested(
+        captureStatus: captureStatus,
+        degradationReason: degradationReason
+    ) {
+        return "Not requested."
+    }
+
+    let fallback = "This source was not saved."
+    let userReason = recordingArtifactSafeReason(
+        artifactType: artifactType,
+        captureStatus: captureStatus,
+        degradationReason: degradationReason,
+        fallback: fallback
+    )
+    if isUsable {
+        guard captureStatus == "degraded" else {
+            return "Ready."
+        }
+        return userReason == fallback
+            ? "Saved with limited quality."
+            : "Saved with limited quality. \(userReason)"
+    }
+
+    switch captureStatus {
     case "missing":
         return "Not captured. \(userReason)"
     case "failed":
@@ -190,8 +230,40 @@ func recordingArtifactUserStatus(_ artifact: RecordingCommandArtifact) -> String
     }
 }
 
+func recordingArtifactUserStatus(_ artifact: RecordingCommandArtifact) -> String {
+    recordingArtifactUserStatus(
+        artifactType: artifact.artifactType,
+        captureStatus: artifact.captureStatus,
+        degradationReason: artifact.degradationReason,
+        isUsable: recordingArtifactIsUsable(artifact)
+    )
+}
+
 func recordingArtifactAccessibilityLabel(_ artifact: RecordingCommandArtifact) -> String {
     "\(recordingArtifactDisplayName(artifact.artifactType)), \(recordingArtifactUserStatus(artifact))"
+}
+
+func selectedSessionArtifactUserStatus(_ artifact: MeetingSessionArtifactDetail) -> String {
+    if artifact.verificationFailed {
+        let fallback = "This saved file could not be verified."
+        let userReason = recordingArtifactSafeReason(
+            artifactType: artifact.artifactType,
+            captureStatus: artifact.captureStatus,
+            degradationReason: artifact.degradationReason,
+            fallback: fallback
+        )
+        return "Could not be verified. \(userReason)"
+    }
+    return recordingArtifactUserStatus(
+        artifactType: artifact.artifactType,
+        captureStatus: artifact.captureStatus,
+        degradationReason: artifact.degradationReason,
+        isUsable: artifact.captureStatus == "available" || artifact.captureStatus == "degraded"
+    )
+}
+
+func selectedSessionArtifactAccessibilityLabel(_ artifact: MeetingSessionArtifactDetail) -> String {
+    "\(recordingArtifactDisplayName(artifact.artifactType)), \(selectedSessionArtifactUserStatus(artifact))"
 }
 
 func historicalMeetingRecoveryStatus(_ status: String) -> String? {
@@ -1200,6 +1272,11 @@ public struct DesignedNativeShellView: View {
                             RecordingControlAccessibilityID.artifactStatus(artifact.artifactType)
                         )
                     }
+                } else if !coordinator.currentSessionRecordingArtifacts.isEmpty {
+                    Divider()
+                    ForEach(coordinator.currentSessionRecordingArtifacts) { artifact in
+                        selectedSessionArtifactRow(artifact)
+                    }
                 }
             }
             .cardStyle()
@@ -1940,6 +2017,9 @@ public struct DesignedNativeShellView: View {
         if recordingArtifactWasNotRequested(artifact) {
             return "minus.circle"
         }
+        if artifact.captureStatus == "degraded" {
+            return "exclamationmark.circle"
+        }
         return artifactIsUsable(artifact) ? "checkmark.circle" : "exclamationmark.circle"
     }
 
@@ -1947,7 +2027,63 @@ public struct DesignedNativeShellView: View {
         if recordingArtifactWasNotRequested(artifact) {
             return .secondary
         }
+        if artifact.captureStatus == "degraded" {
+            return .orange
+        }
         return artifactIsUsable(artifact) ? .green : .orange
+    }
+
+    private func selectedSessionArtifactRow(
+        _ artifact: MeetingSessionArtifactDetail
+    ) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: selectedSessionArtifactStatusIcon(artifact))
+                .foregroundStyle(selectedSessionArtifactStatusColor(artifact))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(recordingArtifactDisplayName(artifact.artifactType))
+                    .font(.callout.weight(.medium))
+                Text(selectedSessionArtifactUserStatus(artifact))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(selectedSessionArtifactAccessibilityLabel(artifact))
+        .accessibilityIdentifier(
+            RecordingControlAccessibilityID.artifactStatus(artifact.artifactType)
+        )
+    }
+
+    private func selectedSessionArtifactStatusIcon(
+        _ artifact: MeetingSessionArtifactDetail
+    ) -> String {
+        if recordingArtifactWasNotRequested(
+            captureStatus: artifact.captureStatus,
+            degradationReason: artifact.degradationReason
+        ) {
+            return "minus.circle"
+        }
+        switch artifact.captureStatus {
+        case "available":
+            return "checkmark.circle"
+        case "degraded", "missing", "failed":
+            return "exclamationmark.circle"
+        default:
+            return "exclamationmark.circle"
+        }
+    }
+
+    private func selectedSessionArtifactStatusColor(
+        _ artifact: MeetingSessionArtifactDetail
+    ) -> Color {
+        if recordingArtifactWasNotRequested(
+            captureStatus: artifact.captureStatus,
+            degradationReason: artifact.degradationReason
+        ) {
+            return .secondary
+        }
+        return artifact.captureStatus == "available" ? .green : .orange
     }
 
     private func elapsedRecordingTime(at date: Date) -> String {

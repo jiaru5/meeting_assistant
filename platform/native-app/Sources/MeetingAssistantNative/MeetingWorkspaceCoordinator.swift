@@ -70,7 +70,7 @@ public struct MeetingRecordingDraft: Equatable, Sendable {
 }
 
 private enum SelectedMeetingLoadOutcome: Sendable {
-    case loaded(MeetingSessionSummary)
+    case loaded(MeetingSelectedSession)
     case missing
     case failed(String)
 }
@@ -197,6 +197,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
     @Published public private(set) var route: MeetingWorkspaceRoute
     @Published public private(set) var recentSessions: [MeetingSessionSummary]
     @Published public private(set) var currentSession: MeetingSessionSummary?
+    @Published private(set) var currentSessionRecordingArtifacts: [MeetingSessionArtifactDetail] = []
     @Published public private(set) var selectedProcessingAudioSourceID: String?
     @Published public var recordingDraft: MeetingRecordingDraft
     @Published public private(set) var activity: MeetingWorkspaceActivity = .idle
@@ -412,6 +413,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         }
         selectionRevision += 1
         currentSession = nil
+        currentSessionRecordingArtifacts = []
         selectedProcessingAudioSourceID = nil
         recordingDraft.title = ""
         invalidateTranscriptLoad()
@@ -437,7 +439,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         let workspaceURL = workspaceURL
         let outcome = await Task.detached(priority: .userInitiated) {
             do {
-                if let selected = try repository.loadSelectedSession(
+                if let selected = try repository.loadSelectedSessionDetail(
                     workspaceURL: workspaceURL,
                     sessionID: session.id
                 ) {
@@ -455,13 +457,17 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         }
 
         let selectedSession: MeetingSessionSummary
+        let selectedRecordingArtifacts: [MeetingSessionArtifactDetail]
         switch outcome {
         case .loaded(let selected):
-            selectedSession = selected
+            selectedSession = selected.summary
+            selectedRecordingArtifacts = selected.recordingArtifacts
         case .missing where injectedSessionIDs.contains(session.id):
             selectedSession = session
+            selectedRecordingArtifacts = []
         case .missing:
             currentSession = nil
+            currentSessionRecordingArtifacts = []
             selectedProcessingAudioSourceID = nil
             explicitProcessingAudioSourceIDsBySession.removeValue(forKey: session.id)
             transcriptLoadError = nil
@@ -473,6 +479,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
             return nil
         case .failed(let technicalError):
             currentSession = nil
+            currentSessionRecordingArtifacts = []
             selectedProcessingAudioSourceID = nil
             transcriptLoadError = nil
             transcriptTechnicalError = nil
@@ -485,6 +492,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
 
         noteProjectionMutation(for: selectedSession.id)
         currentSession = selectedSession
+        currentSessionRecordingArtifacts = selectedRecordingArtifacts
         synchronizeProcessingAudioSelection(for: selectedSession)
         recentSessions = replacingSession(selectedSession, in: recentSessions)
         workspaceError = nil
@@ -509,6 +517,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         noteProjectionMutation(for: sessionID)
         explicitProcessingAudioSourceIDsBySession.removeValue(forKey: sessionID)
         selectedProcessingAudioSourceID = nil
+        currentSessionRecordingArtifacts = []
         transcriptIsLoading = false
         currentSession = MeetingSessionSummary(
             id: sessionID,
@@ -580,6 +589,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         )
         noteProjectionMutation(for: sessionID)
         currentSession = saved
+        currentSessionRecordingArtifacts = []
         synchronizeProcessingAudioSelection(for: saved)
         seededSessions = mergedSessions([saved], seededSessions)
         recentSessions = mergedSessions([saved], recentSessions)
@@ -591,6 +601,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         if !hasActiveSession {
             activity = .idle
             currentSession = nil
+            currentSessionRecordingArtifacts = []
             selectedProcessingAudioSourceID = nil
             transcriptIsLoading = false
             route = .newRecording
@@ -694,6 +705,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
                 )
                     .filter { $0.id != sessionID }
                 currentSession = nil
+                currentSessionRecordingArtifacts = []
                 selectedProcessingAudioSourceID = nil
                 recordingStartedAt = nil
                 activity = .idle
@@ -726,6 +738,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
                     in: mergedSessions(pendingSnapshot.sessions, seededSessions)
                 )
                 currentSession = refreshed
+                currentSessionRecordingArtifacts = []
                 synchronizeProcessingAudioSelection(for: refreshed)
                 activity = .idle
                 route = .meetingDetail
@@ -758,6 +771,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
             let projectedSessions = mergedSessions(pendingSnapshot.sessions, seededSessions)
                 .filter { $0.id != sessionID }
             currentSession = nil
+            currentSessionRecordingArtifacts = []
             selectedProcessingAudioSourceID = nil
             explicitProcessingAudioSourceIDsBySession.removeValue(forKey: sessionID)
             recordingStartedAt = nil
@@ -789,6 +803,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
             seededSessions.removeAll { $0.id == sessionID }
             recentSessions.removeAll { $0.id == sessionID }
             currentSession = nil
+            currentSessionRecordingArtifacts = []
             selectedProcessingAudioSourceID = nil
             recordingStartedAt = nil
             workspaceIssues = []
@@ -899,6 +914,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
         seededSessions.removeAll { $0.id == sessionID }
         recentSessions.removeAll { $0.id == sessionID }
         currentSession = nil
+        currentSessionRecordingArtifacts = []
         selectedProcessingAudioSourceID = nil
         explicitProcessingAudioSourceIDsBySession.removeValue(forKey: sessionID)
         recordingStartedAt = nil
@@ -916,6 +932,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
     public func clearCurrentSession(returnToMeetings: Bool = true) {
         selectionRevision += 1
         currentSession = nil
+        currentSessionRecordingArtifacts = []
         selectedProcessingAudioSourceID = nil
         recordingStartedAt = nil
         invalidateTranscriptLoad()

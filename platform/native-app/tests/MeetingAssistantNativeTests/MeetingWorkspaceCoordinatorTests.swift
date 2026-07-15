@@ -230,9 +230,21 @@ struct MeetingWorkspaceCoordinatorTests {
             ),
         ])
         #expect(coordinator.currentSession == selected)
+        #expect(coordinator.currentSessionRecordingArtifacts == [
+            MeetingSessionArtifactDetail(
+                id: "artifact-selected-audio",
+                artifactType: "mixed_audio",
+                captureStatus: "available",
+                degradationReason: nil
+            ),
+        ])
         #expect(coordinator.selectedProcessingAudioSourceID == "artifact-selected-audio")
         #expect(checksumProbe.paths == [artifactURL.path])
         #expect(checksumProbe.mainThreadObservations == [false])
+
+        coordinator.beginNewRecording()
+
+        #expect(coordinator.currentSessionRecordingArtifacts.isEmpty)
     }
 
     @Test

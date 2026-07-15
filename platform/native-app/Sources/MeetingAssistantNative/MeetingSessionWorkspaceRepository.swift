@@ -27,6 +27,39 @@ public struct MeetingProcessableAudioSource: Identifiable, Equatable, Sendable {
     }
 }
 
+/// A selected meeting's recording-artifact projection. It deliberately omits
+/// paths, checksums, and command metadata so task UI can explain what was
+/// saved without promoting technical storage details into user-facing state.
+struct MeetingSessionArtifactDetail: Identifiable, Equatable, Sendable {
+    let id: String
+    let artifactType: String
+    let captureStatus: String
+    let degradationReason: String?
+    let verificationFailed: Bool
+
+    init(
+        id: String,
+        artifactType: String,
+        captureStatus: String,
+        degradationReason: String?,
+        verificationFailed: Bool = false
+    ) {
+        self.id = id
+        self.artifactType = artifactType
+        self.captureStatus = captureStatus
+        self.degradationReason = degradationReason
+        self.verificationFailed = verificationFailed
+    }
+}
+
+/// Read-only detail for a user-selected meeting. Recent-meeting loading keeps
+/// using `MeetingSessionSummary`; this richer projection is produced only
+/// after the selected session's managed artifacts have been strictly checked.
+struct MeetingSelectedSession: Equatable, Sendable {
+    let summary: MeetingSessionSummary
+    let recordingArtifacts: [MeetingSessionArtifactDetail]
+}
+
 public struct MeetingSessionSummary: Identifiable, Equatable, Sendable {
     public let id: String
     public let title: String?
@@ -152,6 +185,11 @@ private enum ArtifactContentValidation: Sendable {
     case selectedSession
 }
 
+private struct LoadedMeetingSession: Sendable {
+    let summary: MeetingSessionSummary
+    let recordingArtifacts: [MeetingSessionArtifactDetail]
+}
+
 public struct MeetingSessionWorkspaceRepository: Sendable {
     private let checksumCalculator: @Sendable (URL) -> String?
 
@@ -190,8 +228,8 @@ public struct MeetingSessionWorkspaceRepository: Sendable {
                 sessionsRoot: sessionsRoot,
                 contentValidation: .projection
             ) {
-            case .success(let summary) where summary.status != "deleted":
-                sessions.append(summary)
+            case .success(let session) where session.summary.status != "deleted":
+                sessions.append(session.summary)
             case .success:
                 break
             case .failure(let issue):
@@ -211,6 +249,19 @@ public struct MeetingSessionWorkspaceRepository: Sendable {
         workspaceURL: URL,
         sessionID: String
     ) throws -> MeetingSessionSummary? {
+        try loadSelectedSessionDetail(
+            workspaceURL: workspaceURL,
+            sessionID: sessionID
+        )?.summary
+    }
+
+    /// Loads one selected meeting and its user-safe recording artifact
+    /// statuses. It does not widen the recent-meeting list projection or
+    /// expose file paths/checksums to the task UI.
+    func loadSelectedSessionDetail(
+        workspaceURL: URL,
+        sessionID: String
+    ) throws -> MeetingSelectedSession? {
         guard Self.isValidSessionID(sessionID) else {
             throw issue(
                 .invalidSessionEntry,
@@ -234,8 +285,11 @@ public struct MeetingSessionWorkspaceRepository: Sendable {
             sessionsRoot: sessionsRoot,
             contentValidation: .selectedSession
         ) {
-        case .success(let summary) where summary.status != "deleted":
-            return summary
+        case .success(let session) where session.summary.status != "deleted":
+            return MeetingSelectedSession(
+                summary: session.summary,
+                recordingArtifacts: session.recordingArtifacts
+            )
         case .success:
             throw MeetingSessionWorkspaceRepositoryError.selectedSessionDeleted(sessionID)
         case .failure(let issue):
@@ -280,7 +334,7 @@ public struct MeetingSessionWorkspaceRepository: Sendable {
         entry: URL,
         sessionsRoot: URL,
         contentValidation: ArtifactContentValidation
-    ) -> Result<MeetingSessionSummary, MeetingSessionWorkspaceIssue> {
+    ) -> Result<LoadedMeetingSession, MeetingSessionWorkspaceIssue> {
         let sessionID = entry.lastPathComponent
         guard Self.isValidSessionID(sessionID) else {
             return .failure(issue(
@@ -393,7 +447,7 @@ public struct MeetingSessionWorkspaceRepository: Sendable {
             ))
         }
 
-        return .success(summary(
+        return .success(loadedSession(
             from: metadata,
             sessionRoot: sessionRoot,
             contentValidation: contentValidation
@@ -414,11 +468,11 @@ public struct MeetingSessionWorkspaceRepository: Sendable {
         )
     }
 
-    private func summary(
+    private func loadedSession(
         from metadata: WorkspaceSessionMetadata,
         sessionRoot: URL,
         contentValidation: ArtifactContentValidation
-    ) -> MeetingSessionSummary {
+    ) -> LoadedMeetingSession {
         let readableArtifacts = metadata.artifacts.filter(\.isReadable)
         let processableAudioTypes: Set<String> = [
             "mixed_audio",
@@ -506,7 +560,7 @@ public struct MeetingSessionWorkspaceRepository: Sendable {
             }
             return true
         }.count
-        return MeetingSessionSummary(
+        let summary = MeetingSessionSummary(
             id: metadata.id,
             title: metadata.title,
             status: metadata.status,
@@ -525,6 +579,45 @@ public struct MeetingSessionWorkspaceRepository: Sendable {
             hasRegisteredTranscript: metadata.artifacts.contains {
                 $0.artifactType == "transcript_text"
             }
+        )
+        let recordingArtifactTypes = [
+            "screen_video",
+            "system_audio",
+            "microphone_audio",
+            "mixed_audio",
+            "normalized_audio",
+        ]
+        let recordingArtifacts = metadata.artifacts
+            .filter { recordingArtifactTypes.contains($0.artifactType) }
+            .sorted { lhs, rhs in
+                let lhsIndex = recordingArtifactTypes.firstIndex(of: lhs.artifactType)
+                    ?? recordingArtifactTypes.count
+                let rhsIndex = recordingArtifactTypes.firstIndex(of: rhs.artifactType)
+                    ?? recordingArtifactTypes.count
+                if lhsIndex != rhsIndex {
+                    return lhsIndex < rhsIndex
+                }
+                return lhs.id < rhs.id
+            }
+            .map { artifact in
+                let wasStrictlyVerified = processingValidatedIDs.contains(artifact.id)
+                let needsVerification = artifact.isReadable
+                let couldNotBeVerified = contentValidation == .selectedSession
+                    && needsVerification
+                    && !wasStrictlyVerified
+                return MeetingSessionArtifactDetail(
+                    id: artifact.id,
+                    artifactType: artifact.artifactType,
+                    captureStatus: couldNotBeVerified ? "failed" : artifact.captureStatus,
+                    degradationReason: couldNotBeVerified
+                        ? "This saved file could not be verified, so it will not be used for transcript processing."
+                        : artifact.degradationReason,
+                    verificationFailed: couldNotBeVerified
+                )
+            }
+        return LoadedMeetingSession(
+            summary: summary,
+            recordingArtifacts: recordingArtifacts
         )
     }
 
@@ -727,6 +820,7 @@ private struct WorkspaceSessionArtifact: Decodable {
     let artifactType: String
     let path: String
     let captureStatus: String
+    let degradationReason: String?
     let checksum: String?
 
     var isReadable: Bool {
@@ -739,6 +833,7 @@ private struct WorkspaceSessionArtifact: Decodable {
         case artifactType = "artifact_type"
         case path
         case captureStatus = "capture_status"
+        case degradationReason = "degradation_reason"
         case checksum
     }
 }
