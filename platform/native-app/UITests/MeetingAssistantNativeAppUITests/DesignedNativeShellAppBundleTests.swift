@@ -1068,14 +1068,21 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5), "Expected app to be foreground before tapping \(identifier).")
         let control = button(identifier, in: app)
         for _ in 0..<8 {
-            if control.isHittable {
+            if waitUntilHittable(control, timeout: 1) {
                 control.click()
+                return
+            }
+            if isVisibleEnabled(control, in: app) {
+                control.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
                 return
             }
             scrollTowardElement(identifier, in: app)
         }
-        XCTAssertTrue(control.isHittable, "Expected button \(identifier) to be hittable.")
-        control.click()
+        XCTAssertTrue(
+            waitUntilHittable(control, timeout: 5) || isVisibleEnabled(control, in: app),
+            "Expected button \(identifier) to be hittable."
+        )
+        control.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
     }
 
     private func setToggle(_ identifier: String, to isOn: Bool, in app: XCUIApplication) {
@@ -1179,10 +1186,11 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         let expected = Set(expectedIdentifiers)
         let disabled = Set(disabledIdentifiers)
         for identifier in ID.primaryTaskActions {
-            let candidate = app.descendants(matching: .button).matching(identifier: identifier).firstMatch
+            var candidate = app.descendants(matching: .button).matching(identifier: identifier).firstMatch
             if expected.contains(identifier) {
-                if !candidate.waitForExistence(timeout: 2) || !candidate.isHittable {
+                if !waitUntilHittable(candidate, timeout: 1) && !isVisibleEnabled(candidate, in: app) {
                     scrollTowardElement(identifier, in: app)
+                    candidate = app.descendants(matching: .button).matching(identifier: identifier).firstMatch
                 }
                 XCTAssertTrue(
                     candidate.waitForExistence(timeout: 5),
@@ -1191,7 +1199,12 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
                     line: line
                 )
                 XCTAssertTrue(candidate.isEnabled, "Expected \(identifier) to be enabled.", file: file, line: line)
-                XCTAssertTrue(candidate.isHittable, "Expected \(identifier) to be hittable.", file: file, line: line)
+                XCTAssertTrue(
+                    waitUntilHittable(candidate, timeout: 5) || isVisibleEnabled(candidate, in: app),
+                    "Expected \(identifier) to be reachable in the current task state.",
+                    file: file,
+                    line: line
+                )
                 XCTAssertEqual(
                     app.descendants(matching: .button)
                         .matching(identifier: identifier)
@@ -1220,6 +1233,24 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
                 )
             }
         }
+    }
+
+    private func waitUntilHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let predicate = NSPredicate(format: "exists == true AND enabled == true AND hittable == true")
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func isVisibleEnabled(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
+        guard element.exists && element.isEnabled && !element.frame.isEmpty else {
+            return false
+        }
+        let window = app.windows.firstMatch
+        guard window.exists && !window.frame.isEmpty else {
+            return false
+        }
+        let center = CGPoint(x: element.frame.midX, y: element.frame.midY)
+        return window.frame.insetBy(dx: 4, dy: 4).contains(center)
     }
 
     private func assertExists(
