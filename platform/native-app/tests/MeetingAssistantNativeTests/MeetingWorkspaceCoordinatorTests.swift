@@ -958,7 +958,14 @@ struct MeetingWorkspaceCoordinatorTests {
             sessionID: "session-partial",
             title: "Fresh partial result",
             status: "recorded",
-            artifacts: []
+            artifacts: [[
+                "id": "artifact-partial-screen",
+                "session_id": "session-partial",
+                "artifact_type": "screen_video",
+                "path": "artifacts/screen.mov",
+                "capture_status": "missing",
+                "degradation_reason": "Screen capture was interrupted before a file was saved.",
+            ]]
         )
         let stale = summary(
             id: "session-partial",
@@ -986,6 +993,14 @@ struct MeetingWorkspaceCoordinatorTests {
         #expect(refreshed.hasTranscript == false)
         #expect(refreshed.hasProcessableAudio == false)
         #expect(coordinator.currentSession == refreshed)
+        #expect(coordinator.currentSessionRecordingArtifacts == [
+            MeetingSessionArtifactDetail(
+                id: "artifact-partial-screen",
+                artifactType: "screen_video",
+                captureStatus: "missing",
+                degradationReason: "Screen capture was interrupted before a file was saved."
+            ),
+        ])
         #expect(coordinator.recentSessions.first == refreshed)
         #expect(coordinator.route == .meetingDetail)
         #expect(coordinator.activity == .idle)

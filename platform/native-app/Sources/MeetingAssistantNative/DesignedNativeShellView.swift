@@ -1379,6 +1379,20 @@ public struct DesignedNativeShellView: View {
                 subtitle: "Existing meeting files were not changed.",
                 identifier: MeetingTaskAccessibilityID.detailHeading
             )
+            if !coordinator.currentSessionRecordingArtifacts.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Saved meeting files", systemImage: "folder")
+                        .font(.headline)
+                    Text("Review what was captured before retrying.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Divider()
+                    ForEach(coordinator.currentSessionRecordingArtifacts) { artifact in
+                        selectedSessionArtifactRow(artifact)
+                    }
+                }
+                .cardStyle()
+            }
             VStack(alignment: .leading, spacing: 12) {
                 Label("Meeting needs attention", systemImage: "exclamationmark.triangle.fill")
                     .font(.headline)

@@ -74,7 +74,7 @@
 
 ### 2026-07-15 PV-MA-014 已选中历史会话产物补记
 
-重开已保存的历史会话时，详情页现在从完成严格 checksum 校验的已选中会话读取仅内存的 recording-artifact detail projection，并逐项说明成功、降级、缺失或无法验证的安全原因；Recent 列表的 `MeetingSessionSummary` 字段、持久化 schema 与 API 均未扩展，路径、checksum 和命令元数据不会进入 UI。`MeetingSessionWorkspaceRepositoryTests`、`MeetingWorkspaceCoordinatorTests`、`DesignedNativeShellViewModelTests` 以及既有任务 app-bundle fallback-audio 测试共同回归该投影、清理和用户语言契约。该代码级证据不替代真实 `.app` task test body、截图人工审查或真人/VoiceOver 走查，`PV-MA-014` 继续保持 `partial`。
+重开已保存或中断处理的历史会话时，详情页现在从完成严格 checksum 校验的已选中会话读取仅内存的 recording-artifact detail projection，并逐项说明成功、降级、缺失或无法验证的安全原因；Recent 列表的 `MeetingSessionSummary` 字段、持久化 schema 与 API 均未扩展，路径、checksum 和命令元数据不会进入 UI。删除命令未确认成功但刷新显示会话仍存在时，同一安全投影也会从该次重载重新绑定，而不是退回未验证的泛化计数。`MeetingSessionWorkspaceRepositoryTests`、`MeetingWorkspaceCoordinatorTests`、`DesignedNativeShellViewModelTests` 以及既有任务 app-bundle fallback-audio/历史处理中断恢复测试共同回归该投影、清理和用户语言契约。该代码级证据不替代真实 `.app` task test body、截图人工审查或真人/VoiceOver 走查，`PV-MA-014` 继续保持 `partial`。
 
 ### 2026-07-13 MVP.1 跨行回归补充
 

@@ -77,7 +77,7 @@ private enum SelectedMeetingLoadOutcome: Sendable {
 
 private struct DeletionWorkspaceReload: Sendable {
     let snapshot: MeetingSessionWorkspaceSnapshot
-    let selectedMeeting: MeetingSessionSummary?
+    let selectedMeeting: MeetingSelectedSession?
     let selectedMeetingError: String?
 }
 
@@ -671,7 +671,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
                 do {
                     return DeletionWorkspaceReload(
                         snapshot: snapshot,
-                        selectedMeeting: try repository.loadSelectedSession(
+                        selectedMeeting: try repository.loadSelectedSessionDetail(
                             workspaceURL: workspaceURL,
                             sessionID: sessionID
                         ),
@@ -723,6 +723,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
             }
 
             if let refreshed = reload.selectedMeeting {
+                let refreshedSummary = refreshed.summary
                 let excludedSessionIDs: Set<String> = [sessionID]
                 let pendingSessionIDs = registeredTranscriptSessionIDs(
                     in: snapshot,
@@ -732,14 +733,14 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
                     in: snapshot,
                     excluding: excludedSessionIDs
                 )
-                seededSessions = mergedSessions([refreshed], seededSessions)
+                seededSessions = mergedSessions([refreshedSummary], seededSessions)
                 let projectedSessions = replacingSession(
-                    refreshed,
+                    refreshedSummary,
                     in: mergedSessions(pendingSnapshot.sessions, seededSessions)
                 )
-                currentSession = refreshed
-                currentSessionRecordingArtifacts = []
-                synchronizeProcessingAudioSelection(for: refreshed)
+                currentSession = refreshedSummary
+                currentSessionRecordingArtifacts = refreshed.recordingArtifacts
+                synchronizeProcessingAudioSelection(for: refreshedSummary)
                 activity = .idle
                 route = .meetingDetail
 
@@ -756,7 +757,7 @@ public final class MeetingWorkspaceCoordinator: ObservableObject {
                         projectedSessions: projectedSessions
                     )
                 )
-                return .sessionPresent(refreshed)
+                return .sessionPresent(refreshedSummary)
             }
 
             let excludedSessionIDs: Set<String> = [sessionID]
