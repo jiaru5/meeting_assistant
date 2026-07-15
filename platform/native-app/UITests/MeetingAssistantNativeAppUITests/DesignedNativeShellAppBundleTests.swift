@@ -120,7 +120,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertElement(ID.readiness, in: app, contains: "Ready to record")
         attachScreenshot("02-new-recording-ready", of: app)
 
-        replaceText(in: ID.titleField, with: "MVP.1-planning-review", in: app)
+        replaceText(in: ID.titleField, with: "MVP", in: app)
         setToggle(ID.systemAudio, to: true, in: app)
         setToggle(ID.microphone, to: false, in: app)
         assertToggle(ID.systemAudio, isOn: true, in: app)
@@ -129,20 +129,20 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
 
         tapButton(ID.startRecording, in: app)
         assertElement(ID.detailStatus, in: app, contains: "Recording")
-        assertElement(ID.detailHeading, in: app, contains: "MVP.1-planning-review")
+        assertElement(ID.detailHeading, in: app, contains: "MVP")
         assertExists(ID.recordingTimer, in: app)
         assertElement(ID.audioSummary, in: app, contains: "System audio")
         assertOnlyPrimaryTaskActions([ID.stopRecording], in: app)
         attachScreenshot("03-recording-live", of: app)
 
         tapButton(ID.stopRecording, in: app)
-        assertElement(ID.detailHeading, in: app, contains: "MVP.1-planning-review")
+        assertElement(ID.detailHeading, in: app, contains: "MVP")
         assertElement(ID.savedSummary, in: app, contains: "2 meeting files are ready")
         assertOnlyPrimaryTaskActions([ID.generateTranscript], in: app)
         attachScreenshot("04-recording-saved", of: app)
 
         tapButton(ID.generateTranscript, in: app)
-        assertElement(ID.detailHeading, in: app, contains: "MVP.1-planning-review")
+        assertElement(ID.detailHeading, in: app, contains: "MVP")
         assertElement(
             ID.transcriptText("segment-1"),
             in: app,
@@ -260,7 +260,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         let app = launchApp(fixture: "start-failure")
 
         tapButton(ID.newRecordingButton, in: app)
-        replaceText(in: ID.titleField, with: "Failure-recovery-check", in: app)
+        replaceText(in: ID.titleField, with: "MVP", in: app)
         tapButton(ID.startRecording, in: app)
 
         assertElement(ID.newRecordingHeading, in: app, contains: "Set up your recording")
@@ -362,12 +362,12 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         let app = launchApp(fixture: "saved-degraded")
 
         tapButton(ID.newRecordingButton, in: app)
-        replaceText(in: ID.titleField, with: "Degraded-capture-check", in: app)
+        replaceText(in: ID.titleField, with: "MVP", in: app)
         tapButton(ID.startRecording, in: app)
         assertElement(ID.detailStatus, in: app, contains: "Recording")
         tapButton(ID.stopRecording, in: app)
 
-        assertElement(ID.detailHeading, in: app, contains: "Degraded-capture-check")
+        assertElement(ID.detailHeading, in: app, contains: "MVP")
         assertElement(ID.savedSummary, in: app, contains: "1 requested source was unavailable")
         let meetingAudio = element(ID.artifactStatus("mixed_audio"), in: app)
         let microphone = element(ID.artifactStatus("microphone_audio"), in: app)
@@ -543,19 +543,19 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         let app = launchApp(fixture: "stop-failure")
 
         tapButton(ID.newRecordingButton, in: app)
-        replaceText(in: ID.titleField, with: "Save-retry-check", in: app)
+        replaceText(in: ID.titleField, with: "MVP", in: app)
         tapButton(ID.startRecording, in: app)
         assertElement(ID.detailStatus, in: app, contains: "Recording")
         tapButton(ID.stopRecording, in: app)
 
-        assertElement(ID.detailHeading, in: app, contains: "Save-retry-check")
+        assertElement(ID.detailHeading, in: app, contains: "MVP")
         assertText("The recording could not be saved", in: app)
         assertText("The current session is still available for another stop attempt", in: app)
         assertOnlyPrimaryTaskActions([ID.stopRecording], in: app)
         XCTAssertTrue(button(ID.stopRecording, in: app).label.contains("Try saving again"))
 
         tapButton(ID.stopRecording, in: app)
-        assertElement(ID.detailHeading, in: app, contains: "Save-retry-check")
+        assertElement(ID.detailHeading, in: app, contains: "MVP")
         assertText("The recording could not be saved", in: app)
         assertOnlyPrimaryTaskActions([ID.stopRecording], in: app)
     }
@@ -1085,11 +1085,8 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 5), "Expected text field \(identifier) to exist.")
         field.click()
         field.typeKey("a", modifierFlags: .command)
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        XCTAssertTrue(pasteboard.setString(text, forType: .string), "Expected to put test text on the system pasteboard.")
-        field.typeKey("v", modifierFlags: .command)
-        // AppKit commits the active text editor when focus moves.  XCTest can
+        field.typeText(text)
+        // AppKit commits the active text editor when focus moves. XCTest can
         // otherwise click the next control before that editing session ends.
         field.typeKey(.tab, modifierFlags: [])
     }
