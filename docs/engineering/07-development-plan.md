@@ -126,6 +126,8 @@ Phase 2 以后按“大阶段管理、纵切交付、契约验收”的方式推
 
 同批次继续关闭工具注入伪绿：真实 task evidence 只使用由固定 `/usr/bin/xcrun` 解析且 Apple-anchor verified 的 Python/Xcode 工具，以及固定 `/usr/bin/env`、`python3`、`codesign`、`git`、`sips`，并把工具调用 path、resolved path 与 SHA-256 纳入测试前 binding 和最终 report。任何 `MA_NATIVE_APP_*_TOOL`、`PATH` 中 Python/Git/hash 替身或 `PYTHONHOME` / `PYTHONPATH` / user-site / `sitecustomize` 注入均不能参与证据；wrapper 和三个 MVP.1 证据脚本的直接 executable 入口统一用 `/usr/bin/python3 -I -S`，Git 子进程还要清除外部 repo/worktree/index/object 环境重定向。显式 fixture 模式只用于单元测试且固定 `passed=false`。这仍是证据可靠性加固，不改变 `PV-MA-014` / `VS-MA-26`-`VS-MA-30` 的 partial 状态。
 
+2026-07-15 MVP.1 任务 UI 实跑补充：提交 `d22def2266a535d10963d3783deba8378a3192a3` 在 `MA_NATIVE_APP_UI_AUTOMATION_RETRY_ATTEMPTS=0` 下实际执行 `MA_NATIVE_APP_TASK_XCUITEST=1 ./platform/native-app/scripts/test-app-bundle.sh`，结果为精确 17/17 passed、0 failed、0 skipped、0 expected failures；retained xcresult 与八张关键状态截图已由冻结 verifier 绑定并完成结构/CRC/系统解码校验。这一证据解除 `VS-MA-26` 至 `VS-MA-30` 中“task XCUITest 仅 build-for-testing、test body 为 0”的自动化执行缺口，但不把截图结构校验当作人工视觉验收：report 仍标记 `screenshot_visual_review=pending`，且真实窗口 VoiceOver/键盘走查与 3–5 名代表性用户无指导研究尚未取得。因此五个纵切和 `PV-MA-014` 继续是 `partial evidence` / `partial`，不得声称体验验收或退出口径已完成。
+
 根据当前用户确认，短期执行目标先收敛为“本机可安装、可启动、核心功能可跑通”，且这些功能证据已经进入 `PV-MA-* covered`。当前 `release-preflight` 已在 local-direct 分发模式通过；Developer ID、公证、App Store、商业化分发、自动更新和 SLSA/Sigstore 继续保留为未来分发 gate。当前 `VS-MA-23` 的本机功能执行结果：
 
 1. `~/Applications/MeetingAssistantNativeLocal.app`、`local.meeting-assistant.native.localdirect` 和 stable-local 自签名 Code Signing identity 已建立，`install-local-app.sh` 与 `local-direct-smoke.sh` 已证明本机 app 能通过 LaunchServices 普通路径启动、显示主窗口并进入 ready 状态。
