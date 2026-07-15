@@ -457,6 +457,44 @@ else:
         self.assertEqual(1, redirected_git.returncode)
         self.assertTrue(self._report("git-environment-scrubbed")["fixture_checks_passed"])
 
+    def test_xcode_attachment_suffixes_are_normalized_without_accepting_arbitrary_names(self) -> None:
+        self._write_fixture()
+        manifest_path = self.xcresult / "attachments-manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for index, attachment in enumerate(manifest[0]["attachments"]):
+            attachment["suggestedHumanReadableName"] = (
+                f"{SCREENSHOTS[index]}_{index}_01234567-89AB-CDEF-0123-456789ABCDEF.png"
+            )
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        normalized = self._run(output_name="xcode-suffixed-names")
+
+        self.assertEqual(1, normalized.returncode, normalized.stderr)
+        normalized_report = self._report("xcode-suffixed-names")
+        self.assertTrue(normalized_report["fixture_checks_passed"])
+        self.assertEqual(
+            list(SCREENSHOTS),
+            [item["name"] for item in normalized_report["attachments"]["exported_screenshots"]],
+        )
+
+        self._write_fixture()
+        invalid_manifest_path = self.xcresult / "attachments-manifest.json"
+        invalid_manifest = json.loads(invalid_manifest_path.read_text(encoding="utf-8"))
+        invalid_manifest[0]["attachments"][0]["suggestedHumanReadableName"] = (
+            f"{SCREENSHOTS[0]}_0_not-a-uuid.png"
+        )
+        invalid_manifest_path.write_text(json.dumps(invalid_manifest), encoding="utf-8")
+
+        invalid = self._run(output_name="invalid-xcode-suffix")
+
+        self.assertEqual(1, invalid.returncode)
+        invalid_report = self._report("invalid-xcode-suffix")
+        self.assertFalse(invalid_report["fixture_checks_passed"])
+        self.assertTrue(
+            any(SCREENSHOTS[0] in finding for finding in invalid_report["findings"]),
+            invalid_report["findings"],
+        )
+
     def test_capture_cli_writes_private_no_clobber_pretest_binding(self) -> None:
         output = self.derived_data / "reports" / "capture-cli" / "binding.json"
         command = [

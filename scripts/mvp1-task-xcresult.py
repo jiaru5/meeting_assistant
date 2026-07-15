@@ -38,6 +38,9 @@ TEST_METHOD_PATTERN = re.compile(r"^\s*func\s+(test[A-Za-z0-9_]+)\s*\(", re.MULT
 CDHASH_PATTERN = re.compile(r"^CDHash=([0-9a-fA-F]+)$", re.MULTILINE)
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+XCODE_ATTACHMENT_SCREENSHOT_SUFFIX = re.compile(
+    r"_[0-9]+_[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\.png$"
+)
 FINGERPRINT_PATHS = (
     "platform/native-app/App",
     "platform/native-app/Sources",
@@ -825,6 +828,18 @@ def validate_tests(
     return sorted(test_cases, key=lambda case: case["method"])
 
 
+def required_screenshot_name(attachment_name: str) -> str | None:
+    if attachment_name in REQUIRED_SCREENSHOTS:
+        return attachment_name
+    for name in REQUIRED_SCREENSHOTS:
+        if not attachment_name.startswith(f"{name}_"):
+            continue
+        suffix = attachment_name[len(name) :]
+        if XCODE_ATTACHMENT_SCREENSHOT_SUFFIX.fullmatch(suffix):
+            return name
+    return None
+
+
 def export_and_validate_screenshots(
     *,
     tool: str,
@@ -873,9 +888,11 @@ def export_and_validate_screenshots(
         for attachment in test_entry.get("attachments", []):
             if not isinstance(attachment, dict):
                 continue
-            name = str(attachment.get("suggestedHumanReadableName", ""))
+            name = required_screenshot_name(
+                str(attachment.get("suggestedHumanReadableName", ""))
+            )
             exported_name = str(attachment.get("exportedFileName", ""))
-            if name in named and exported_name:
+            if name is not None and exported_name:
                 exported_path = (attachments_dir / exported_name).resolve()
                 if not path_within(exported_path, attachments_dir.resolve()):
                     findings.append(f"attachment export path escapes output directory: {exported_name}")
