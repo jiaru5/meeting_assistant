@@ -833,17 +833,11 @@ struct ProcessingStateViewModelTests {
             timeoutSeconds: 10
         )
         let runner = fixture.runner
-        let operation = Task.detached {
-            try await runner.generateTranscript(
-                GenerateTranscriptRequest(sessionID: "session-process")
-            )
-        }
-        #expect(fixture.recordedProcessAppearsWithin(timeoutSeconds: 5))
-        let clock = ContinuousClock()
-        let startedAt = clock.now
 
         do {
-            _ = try await operation.value
+            _ = try await runner.generateTranscript(
+                GenerateTranscriptRequest(sessionID: "session-process")
+            )
             #expect(Bool(false), "Expected the direct command's nonzero exit to fail.")
         } catch let error as ProcessingCommandBridgeError {
             #expect(
@@ -857,9 +851,11 @@ struct ProcessingStateViewModelTests {
             #expect(error.errorDescription?.contains("sk-processing-descendant-secret") == false)
         }
 
-        // The descendant sleeps for 10 seconds, so an 8-second ceiling still proves
-        // the inherited pipes are bounded while tolerating a fully parallel test run.
-        #expect(startedAt.duration(to: clock.now) < .seconds(8))
+        // Measure from the fixture's PID write rather than test scheduling. The
+        // descendant sleeps for 10 seconds, so an 8-second ceiling proves inherited
+        // pipes are bounded without conflating that behavior with parallel test load.
+        let processStartDate = try fixture.recordedProcessStartDate()
+        #expect(Date().timeIntervalSince(processStartDate) < 8)
         #expect(try fixture.recordedProcessStopsWithin(timeoutSeconds: 1))
     }
 
@@ -2065,6 +2061,18 @@ private final class ProcessingProcessRunnerFixture {
         return Darwin.kill(pid, 0) == 0
     }
 
+    func recordedProcessStartDate() throws -> Date {
+        let attributes = try FileManager.default.attributesOfItem(atPath: pidURL.path)
+        guard let date = attributes[.modificationDate] as? Date else {
+            throw NSError(
+                domain: "ProcessingProcessRunnerFixture",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "The background descendant did not record a start time."]
+            )
+        }
+        return date
+    }
+
     func recordedProcessStopsWithin(timeoutSeconds: TimeInterval) throws -> Bool {
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         while try recordedProcessIsRunning() {
@@ -2074,19 +2082,6 @@ private final class ProcessingProcessRunnerFixture {
             usleep(10_000)
         }
         return true
-    }
-
-    func recordedProcessAppearsWithin(timeoutSeconds: TimeInterval) -> Bool {
-        let deadline = DispatchTime.now() + timeoutSeconds
-        repeat {
-            if let rawPID = try? String(contentsOf: pidURL, encoding: .utf8)
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-               Int32(rawPID) != nil {
-                return true
-            }
-            usleep(10_000)
-        } while DispatchTime.now() < deadline
-        return false
     }
 
     private static func script(_ script: Script) -> String {
