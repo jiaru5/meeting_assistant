@@ -597,6 +597,12 @@
 
 2026-07-17 后续严格任务证据：在提交 `26d50b50f11ee46d4accdd96d15ef05fb9552044` 上，实际执行 `MA_NATIVE_APP_TASK_XCUITEST=1 MA_NATIVE_APP_REUSE_XCTESTRUN=auto MA_NATIVE_APP_UI_AUTOMATION_RETRY_ATTEMPTS=0 ./platform/native-app/scripts/test-app-bundle.sh`。冻结 verifier 报告确认测试前后均为同一提交与输入 fingerprint，17/17 Passed、0 failed、0 skipped、0 expected failures，并保留、校验 `00-meetings-recent` 至 `07-diagnostics` 八张可解码 PNG；工件位于 `platform/native-app/build/DerivedData/AppBundleUITests/reports/xcresult/task-workflow/20260717T041734Z-9987/attempt-1.xcresult` 及同目录 `attempt-1-evidence/mvp1-task-xcresult-report.json`。这关闭了本轮 current-HEAD 自动化任务证据缺口；截图视觉审查仍为 pending，且真实窗口 VoiceOver/键盘走查与 3–5 名真人体验记录仍未完成，因此 `PV-MA-014` 保持 `partial`。
 
+## 2026-07-17 MVP.1 固定 Transcript 操作栏的前台恢复测试
+
+| 证据批次 | 关联验证项 | 本轮自动化证据 | 状态影响与边界 |
+|---|---|---|---|
+| 本轮 `develop` task-UI test robustness（`spec-covered`，仅测试辅助逻辑） | `PV-MA-014`; 回归历史 `processing` 恢复、固定 Transcript Copy/Export 操作栏 | 一次严格 task run 中仅 `testHistoricalProcessingMeetingOffersSafeRecoveryInsteadOfSaved` 在 `Export` 已存在且 enabled 时因外部 Codex 窗口前置而得到非 hittable；自动录屏显示测试 App 在轮询期间被覆盖，紧邻的长 transcript 用例仍通过同一 Export 的 hittable 断言。因此测试辅助逻辑在检查固定工具栏 Copy/Export 前、以及每次 hittable 轮询发现 App 退到后台时重新激活目标 App；同时断言 toolbar 与 action frame 仍位于 App window 内，最终条件仍为 `foreground && exists && enabled && hittable`，未放宽产品交互断言，也未修改产品 SwiftUI。改动后的隔离 `testHistoricalProcessingMeetingOffersSafeRecoveryInsteadOfSaved` 通过（43.47 秒，xcresult：`/private/tmp/meeting-assistant-xcuitest-historical-toolbar-foreground.xcresult`）；`./platform/native-app/scripts/test.sh` 通过 hosted XCTest 13/13、Swift Testing 249/249，`./platform/native-app/scripts/architecture.sh` 通过。 | 这是消除 macOS 桌面前台串扰的测试可靠性修复，不新增或改变用户功能，也不把单例隔离运行、自动录屏或 locator 断言写成真人体验证据。`PV-MA-014` 仍为 `partial`：严格 17/17 task report、八图人工视觉审查、真实窗口 VoiceOver/键盘走查与 3–5 名真人体验记录各自仍按其既有关闭条件判断。 |
+
 ## 标准验证命令目标
 
 ```bash

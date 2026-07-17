@@ -76,6 +76,14 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
             exportTranscript,
         ]
 
+        // The transcript actions live in a fixed toolbar outside the route
+        // content ScrollView. Treating them like scrollable page actions makes
+        // a transient backgrounded app look like an off-screen control.
+        static let fixedTranscriptToolbarActions: Set<String> = [
+            copyTranscript,
+            exportTranscript,
+        ]
+
         static func artifactStatus(_ artifactType: String) -> String {
             "ma.recording.artifact.\(artifactType).status"
         }
@@ -1083,14 +1091,14 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5), "Expected app to be foreground before tapping \(identifier).")
         let control = button(identifier, in: app)
         for _ in 0..<8 {
-            if waitUntilHittable(control, timeout: 1) {
+            if waitUntilHittable(control, in: app, timeout: 1) {
                 control.click()
                 return
             }
             scrollTowardElement(identifier, in: app)
         }
         XCTAssertTrue(
-            waitUntilHittable(control, timeout: 5),
+            waitUntilHittable(control, in: app, timeout: 5),
             "Expected button \(identifier) to be hittable."
         )
         control.click()
@@ -1196,10 +1204,22 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
     ) {
         let expected = Set(expectedIdentifiers)
         let disabled = Set(disabledIdentifiers)
+        if !expected.isDisjoint(with: ID.fixedTranscriptToolbarActions) {
+            ensureForegroundForInteraction(app, file: file, line: line)
+        }
         for identifier in ID.primaryTaskActions {
             var candidate = app.descendants(matching: .button).matching(identifier: identifier).firstMatch
             if expected.contains(identifier) {
-                if !waitUntilHittable(candidate, timeout: 1) {
+                let isFixedTranscriptToolbarAction = ID.fixedTranscriptToolbarActions.contains(identifier)
+                if isFixedTranscriptToolbarAction {
+                    assertFixedTranscriptToolbarActionIsVisible(
+                        candidate,
+                        identifier: identifier,
+                        in: app,
+                        file: file,
+                        line: line
+                    )
+                } else if !waitUntilHittable(candidate, in: app, timeout: 1) {
                     scrollTowardElement(identifier, in: app)
                     candidate = app.descendants(matching: .button).matching(identifier: identifier).firstMatch
                 }
@@ -1210,8 +1230,17 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
                     line: line
                 )
                 XCTAssertTrue(candidate.isEnabled, "Expected \(identifier) to be enabled.", file: file, line: line)
+                if isFixedTranscriptToolbarAction {
+                    assertFixedTranscriptToolbarActionIsVisible(
+                        candidate,
+                        identifier: identifier,
+                        in: app,
+                        file: file,
+                        line: line
+                    )
+                }
                 XCTAssertTrue(
-                    waitUntilHittable(candidate, timeout: 5),
+                    waitUntilHittable(candidate, in: app, timeout: 5),
                     "Expected \(identifier) to be hittable.",
                     file: file,
                     line: line
@@ -1246,15 +1275,103 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         }
     }
 
-    private func waitUntilHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+    private func ensureForegroundForInteraction(
+        _ app: XCUIApplication,
+        file: StaticString,
+        line: UInt
+    ) {
+        app.activate()
+        XCTAssertTrue(
+            app.wait(for: .runningForeground, timeout: 5),
+            "Expected app to be foreground before checking a fixed transcript action.",
+            file: file,
+            line: line
+        )
+        let window = app.windows.firstMatch
+        XCTAssertTrue(
+            window.waitForExistence(timeout: 5),
+            "Expected app window before checking a fixed transcript action.",
+            file: file,
+            line: line
+        )
+        XCTAssertFalse(
+            window.frame.isEmpty,
+            "Expected app window to have a visible frame before checking a fixed transcript action.",
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertFixedTranscriptToolbarActionIsVisible(
+        _ action: XCUIElement,
+        identifier: String,
+        in app: XCUIApplication,
+        file: StaticString,
+        line: UInt
+    ) {
+        let window = app.windows.firstMatch
+        let toolbar = app.descendants(matching: .any)
+            .matching(identifier: ID.transcriptToolbar)
+            .firstMatch
+        XCTAssertTrue(
+            toolbar.waitForExistence(timeout: 5),
+            "Expected fixed transcript toolbar before checking \(identifier).",
+            file: file,
+            line: line
+        )
+        XCTAssertFalse(
+            toolbar.frame.isEmpty,
+            "Expected fixed transcript toolbar to have a visible frame before checking \(identifier).",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            window.frame.intersects(toolbar.frame),
+            "Expected fixed transcript toolbar to remain within the app window before checking \(identifier).",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            action.waitForExistence(timeout: 5),
+            "Expected fixed transcript action \(identifier) to exist.",
+            file: file,
+            line: line
+        )
+        XCTAssertFalse(
+            action.frame.isEmpty,
+            "Expected fixed transcript action \(identifier) to have a visible frame.",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            window.frame.intersects(action.frame),
+            "Expected fixed transcript action \(identifier) to remain within the app window.",
+            file: file,
+            line: line
+        )
+    }
+
+    private func waitUntilHittable(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if element.exists && element.isEnabled && element.isHittable {
+            if app.state != .runningForeground {
+                app.activate()
+                _ = app.wait(for: .runningForeground, timeout: 1)
+            }
+            if app.state == .runningForeground && element.exists && element.isEnabled && element.isHittable {
                 return true
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         } while Date() < deadline
-        return element.exists && element.isEnabled && element.isHittable
+        if app.state != .runningForeground {
+            app.activate()
+            _ = app.wait(for: .runningForeground, timeout: 1)
+        }
+        return app.state == .runningForeground && element.exists && element.isEnabled && element.isHittable
     }
 
     private func assertExists(
@@ -1280,6 +1397,9 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
     }
 
     private func scrollTowardElement(_ identifier: String, in app: XCUIApplication) {
+        guard !ID.fixedTranscriptToolbarActions.contains(identifier) else {
+            return
+        }
         let target = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
         let scrollViews = app.scrollViews.allElementsBoundByIndex
         let scrollView = scrollViews.first { scrollView in
