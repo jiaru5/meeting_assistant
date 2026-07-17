@@ -32,6 +32,13 @@
 | AC-MA-013 | 设计化原生 app shell | 预检、录制、保存、处理、回查、导出和删除的 command/helper/adapter contract 已存在，或自动化测试使用受控 Debug/XCTest fixture | 用户打开 Swift/SwiftUI app，并在同一 designed native shell 中完成预检、开始/停止录制、查看 artifacts、触发处理、回查 transcript、复制/导出和删除确认 | UI 不再只是裸调试控件；必须具备稳定导航、清晰信息层级、状态面板或状态标记、可见主操作和可访问 locator；生产目标的主操作触发现有允许的 command/helper/adapter 边界，不在 UI 本地伪造成功；Debug/XCTest fake 必须与 Release 默认行为隔离；真实 capture、真实 processing、真实 OS 集成和发布放行仍以各自 `PV-MA-*` covered 证据为准 | `PV-MA-013` |
 | AC-MA-014 | 任务式个人会议工作流 | Phase 1 MVP 的本地 command/helper/adapter 已通过；workspace 中可为空、存在 recorded、处理中断或 transcribed 会话 | 首次用户从 Meetings 新建会议并完成与当前捕获意图对应的预检、录制、停止保存、主动选择可用音频并生成 transcript 和回查；回访用户从最近会议重新打开一个会话继续处理、恢复中断处理或查看 transcript；用户可从 diagnostics 查看技术详情 | 应用只有一套主导航且一次呈现一个任务；每个阶段只有一个明确上下文主操作；New recording 使用用户输入标题和当前真实支持的录制/音轨配置，且 processing 依赖不阻断录制；Processing 只对已保存或确认中断且有可处理音频的会话开放，默认使用 `mixed_audio`，缺失时由用户选择安全可用音频；长 transcript 的 Copy/Export 保持在稳定操作区，segments 惰性呈现且文件读取、解码和 checksum 不阻塞主线程；用户无需 README、CLI、Finder、session id、原始 artifact type 或内部命令即可完成主路径；失败状态持续显示“发生了什么、数据是否安全、下一步动作”，技术 code/path 渐进披露；删除成功后清空当前会话并刷新最近会议；任务级 Swift Testing 与 app-bundle XCUITest 覆盖空首页、ready/blocked preflight、录制、保存、音频 fallback、处理、transcript、历史会话重开/中断恢复、失败恢复和删除 reset | `PV-MA-014` |
 
+## MVP.1 验证边界
+
+1. `AC-MA-014` 的当前必需证据是实际执行 test body 的任务级 Swift Testing 和 app-bundle XCUITest；local-direct 发布候选还必须通过既有本机功能与 release gate。
+2. 真人截图视觉审查、真实窗口 VoiceOver/键盘走查和 3–5 名代表性用户研究是可选的后续质量研究，不是当前 `AC-MA-014`、`PV-MA-014` 或 local-direct release 的阻断条件。
+3. 可选研究不得替代自动化任务证据，也不能因未执行而被表述为通过；如研究发现 P0/P1，仍按普通缺陷处理并以真实复测关闭。
+4. 这不放宽 `12-ui-ux-design.md` 中的可访问性、键盘、状态表达或任何功能与安全验收要求。
+
 ## 高风险验收维度
 
 1. macOS 权限：录屏、麦克风和文件访问缺失时必须 fail closed。

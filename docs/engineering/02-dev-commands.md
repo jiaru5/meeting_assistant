@@ -96,6 +96,10 @@
 
 在填写 MVP.1 真人证据前，可分别运行 `./scripts/mvp1-screenshot-visual-review.py guide <review.json>`、`./scripts/mvp1-accessibility-walkthrough.py guide <walkthrough.json>` 和 `./scripts/mvp1-experience-study.py guide <study.json>`。三个入口只读取并复核既有 JSON，输出任务卡、隐私边界和后续 `validate` 命令；它们不写入 observation、结果或 attestation，不能代替真人观察。对于 VoiceOver/键盘走查和真人体验研究两个 guide，只有当前提交或 app 绑定、固定结构与 blocker 状态均健康、且仍保持初始空白形态的模板应显示“待真人填写”；此时 `validate` 仍阻断是防止空白模板被误当为真人证据的预期保护。绑定、结构、finding 跟踪或 P0/P1 状态失效（以及已被部分改写但尚未完成的记录）都应显示需要修复的阻断状态。截图视觉审查的 guide 保持其既有的部分审查继续录入语义。
 
+## MVP.1 可选人工体验研究
+
+当前 local-direct MVP 的必要验证仍是任务级 Swift Testing、app-bundle XCUITest 和现有本机功能/release gate。截图真人视觉审查、真实窗口 VoiceOver/键盘走查与 3–5 名代表性用户研究是可选的后续质量研究，未填写的模板不阻断 `PV-MA-014` 或 local-direct release。上述 guide、validate 和 report 入口的 fail-closed 语义不变：一旦进行研究，空白记录不能变绿，发现的 P0/P1 必须按正常缺陷处理并经真实人工复测后才能宣称该研究通过。
+
 ## Meeting Assistant 组件命令事实归属
 
 `harness/project-manifest.json` 是当前组件、组件路径、命令 argv 和 full-stack E2E smoke 入口的唯一工程注册表。本分卷只定义命令类型、fail-closed 规则和 skeleton 行为边界，不复制可独立维护的组件命令清单。

@@ -544,3 +544,33 @@ ADR 记录决策背景、取舍和历史原因。当前可执行规则必须维�
 - 麦克风权限始终阻断录制：拒绝，因为用户已经明确关闭麦克风意图时不应被无关权限阻断。
 - 历史 `processing` 会话永久 fail closed：拒绝，因为它保护了文件却不给安全重试路径，与处理失败回到可重试状态的既有规则冲突。
 - 自动选择任意 fallback 音轨并开始处理：拒绝，因为输入选择是用户可见质量决策，且 processing 必须保持主动触发。
+
+## ADR-20260718-01: MVP.1 将人工体验研究移为后续质量项
+
+状态：Accepted
+
+背景：
+
+- 当前 local-direct app 已具备录制、处理、transcript 回查、复制、导出和删除的真实本机功能链路，MVP.1 的任务级 Swift Testing 与 app-bundle XCUITest 已覆盖首次、回访和恢复任务路径。
+- 八图真人视觉审查、真实窗口 VoiceOver/键盘走查和 3–5 名代表性用户研究能提供重要的主观体验信号，但不能由 agent、截图文件或自动化代替。
+- 用户确认当前继续聚焦本机可用的产品功能；Developer ID、公证、App Store、自动更新、团队功能和自动纪要维持低优先级，并决定把上述人工体验研究从当前 MVP 阻断条件移为可选后续工作。
+
+决策：
+
+- 当前 `PV-MA-014` 的必需关闭证据是任务级 Swift Testing、app-bundle XCUITest，以及 local-direct 发布候选既有的本机功能和 release gates。
+- 真人截图视觉审查、真实窗口 VoiceOver/键盘走查和 3–5 名代表性用户研究保留为可选质量研究，不阻断当前 local-direct MVP 或 release。
+- 现有人工证据工具继续保持 fail-closed：空白模板、agent/自动化冒充、未声明观察和未关闭的 P0/P1 不能被写成研究通过。
+- 该决策不降低任何既有产品行为要求，尤其是不降低可访问名称、键盘等价操作、状态播报、权限 fail-closed、录制/处理、数据保护、导出或删除边界。
+- 未来外部 beta、商业化或其他分发范围如需恢复人工研究为必需条件，必须先按 spec-change 更新主责分卷、验证矩阵和相应门禁。
+
+影响：
+
+- `01-product-scope.md`、`09-acceptance-criteria.md` 和 `12-ui-ux-design.md` 记录当前范围及不变的可访问性行为。
+- `docs/engineering/03-test-strategy.md`、`04-review-and-ci-gates.md`、`06-product-validation-matrix.md` 和 `07-development-plan.md` 把人工研究保留为严格但非阻断的后续质量项。
+- 真实人工研究一旦开展，其 finding 仍进入正常缺陷管理；不能因当前 release 不依赖该研究而忽略已确认的 P0/P1。
+
+备选方案：
+
+- 继续把三类人工研究作为当前 MVP release blocker：拒绝，因为它会把无法由当前自动化替代的观察工作与已经完成的 local-direct 功能闭环混为一谈，并与当前范围优先级不一致。
+- 删除人工证据工具或允许空白模板通过：拒绝，因为会丢失后续研究能力并制造“已观察”的错误声明。
+- 只对 Developer ID 分发保留人工研究：拒绝，因为 Developer ID 当前已在 MVP 外；未来是否把研究纳入任何扩展范围应在对应 spec-change 中单独决定。

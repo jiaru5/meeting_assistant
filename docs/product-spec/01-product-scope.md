@@ -49,6 +49,16 @@
 | CAP-MA-013 | 设计化原生 app shell | 用户在接近效果图目标的原生界面中完成预检、录制、保存、处理、回查、导出和删除，而不是依赖仅有功能的调试控件 | Swift/SwiftUI app | `04-user-journeys-and-ui.md`, `12-ui-ux-design.md` | `AC-MA-013` | `PV-MA-013` |
 | CAP-MA-014 | 任务式个人会议工作流 | 用户围绕“新建并录制一场会议、得到 transcript、回开历史会议”完成工作，不需要理解内部流水线、命令或文件布局 | Swift/SwiftUI app | `04-user-journeys-and-ui.md`, `12-ui-ux-design.md` | `AC-MA-014` | `PV-MA-014` |
 
+## MVP.1 验证范围
+
+当前 MVP.1 只面向 local-direct 的个人本地使用，功能验收和后续体验研究分开管理：
+
+1. `PV-MA-014` 的必需验证是任务级 Swift Testing 和 app-bundle XCUITest；声明本机安装候选时，现有 local-direct functional preflight 和 release gate 仍然必需。
+2. 八图真人视觉审查、真实窗口的 VoiceOver/键盘走查，以及 3–5 名代表性用户的任务记录是可选的后续质量研究，不阻断当前 `PV-MA-014` 或 local-direct release。
+3. `covered` 只表示当前所需任务流行为验证已闭环，不表示真人主观易用性或 VoiceOver 实机体验已经验证。
+4. 如开展上述研究，必须继续使用 fail-closed 工具和真实人工声明；发现的 P0/P1 按普通缺陷进入修复与复测，不能把未进行的研究写成已经通过。
+5. 本边界不降低键盘操作、accessible name、状态播报、权限/数据安全、录制、处理、导出或删除等现有产品行为。未来扩大到外部 beta、商业化或其他分发范围时，是否恢复必需研究须先按 spec-change 决定。
+
 ## 非目标
 
 | ID | 非目标 | 原因 | 重新纳入范围的条件 |

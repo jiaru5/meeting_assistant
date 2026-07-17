@@ -95,6 +95,10 @@ MVP.1 的目标不是给既有控制面换皮，而是让用户围绕会议任�
 3. 关键任务 fixture 至少覆盖空 workspace、ready、capture-ready/processing-blocked、麦克风意图开关、blocked、recording、saved/degraded、fallback 音频选择、processing、processing failed/retry、historical processing recovery、transcript available、长 transcript、history reopen 和 delete reset。
 4. 可选截图证据覆盖 Meetings empty/recent、New recording、Recording live、Saved、Processing、Transcript 和 Diagnostics；截图只能辅助层级审查，不能替代任务和状态断言。
 
+### MVP.1 人工体验研究（可选）
+
+任务级自动化仍须按工程策略生成并结构校验关键截图；当前 local-direct MVP 不要求完成这些截图的真人视觉审查，也不要求完成真实窗口 VoiceOver/键盘走查或 3–5 名真人任务研究，才可关闭 `PV-MA-014`。这些是后续质量研究，未执行时不得宣称已经观察到主观易用性或辅助技术体验。若开展研究，必须保留真实人工声明和 finding 记录；P0/P1 按正常缺陷修复、复测。下列可访问性产品行为本身仍是必需要求，不能因人工走查改为可选。
+
 ## 页面或本地工具状态要求
 
 每个主要入口至少定义：

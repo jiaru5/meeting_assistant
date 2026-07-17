@@ -184,6 +184,8 @@ release-preflight
 
 `release-preflight.sh` 只用于真正的发布候选。它必须 fail-closed：先由 `vs-stage-check.py release` 确认 `VS-MA-14` 到 `VS-MA-22` 均为 `已达退出口径`，再检查发布范围内所有 `PV-*` 均为 `covered`；默认 local-direct 分支还必须证明已安装本机 app 与当前 source Release app 匹配并通过 recording -> processing -> transcript actions functional preflight。任何未关闭 VS、任何非 `covered` PV、installed app/source app 不一致，或阶段收口证据替代发布证据时都不能变绿。
 
+当前 local-direct MVP 中，真人截图视觉审查、真实窗口 VoiceOver/键盘走查和 3–5 名代表性用户研究是可选质量研究，不是 `PV-MA-014` 或 release-preflight 的独立阻断项。该规则不表示研究已经进行；如研究中确认 P0/P1，仍按正常缺陷管理并在适用范围内阻断发布。
+
 发布前必须确认：
 
 1. `docs/product-spec/10-open-decisions.md` 没有 `open` 阻塞项。
