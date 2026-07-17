@@ -1602,6 +1602,15 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("kAXPressAction", (ROOT / "platform/native-app/scripts/local-app-ax.swift").read_text(encoding="utf-8"))
         self.assertIn("AXUIElementSetAttributeValue", (ROOT / "platform/native-app/scripts/local-app-ax.swift").read_text(encoding="utf-8"))
         self.assertIn("CGWindowListCopyWindowInfo", (ROOT / "platform/native-app/scripts/local-app-ax.swift").read_text(encoding="utf-8"))
+        for app_window_smoke in (
+            recording_smoke_script,
+            processing_smoke_script,
+            actions_smoke_script,
+        ):
+            self.assertIn("FRONTMOST_SCRIPT", app_window_smoke)
+            self.assertIn("system_events_frontmost_retry", app_window_smoke)
+            self.assertIn("System Events foreground recovery", app_window_smoke)
+            self.assertIn('"window_recovery_attempts"', app_window_smoke)
         self.assertIn("local-direct-ui-smoke", smoke_script)
         self.assertIn("MA_NATIVE_LOCAL_APP_SMOKE_STATE_REPORT", smoke_script)
         self.assertIn("local-direct-app-state-report.json", smoke_script)
@@ -1627,6 +1636,7 @@ class HarnessValidationTests(unittest.TestCase):
             smoke_script,
         )
         self.assertIn("checked_recording_setup_text", architecture)
+        self.assertIn("bring that exact PID front once and retry the unchanged helper", architecture_doc)
         self.assertNotIn("CGRequestScreenCaptureAccess", smoke_script)
         self.assertNotIn("AVCaptureDevice.requestAccess", smoke_script)
         self.assertNotIn("x-apple.systempreferences", smoke_script)
@@ -1636,8 +1646,14 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("AXPress", recording_smoke_script)
         self.assertIn("ma.recording.startButton", recording_smoke_script)
         self.assertIn("ma.recording.stopButton", recording_smoke_script)
+        self.assertIn("identifier=ma.newRecording.readiness", recording_smoke_script)
+        self.assertIn("identifier=ma.recording.startButton enabled=true", recording_smoke_script)
         self.assertIn("Recording in progress.", recording_smoke_script)
         self.assertIn("Recording saved.", recording_smoke_script)
+        self.assertIn("identifier=ma.recording.artifact.screen_video.status", recording_smoke_script)
+        self.assertIn("description=Screen recording, Ready.", recording_smoke_script)
+        self.assertIn("identifier=ma.recording.artifact.mixed_audio.status", recording_smoke_script)
+        self.assertIn("description=Meeting audio, Ready.", recording_smoke_script)
         self.assertIn("wait_for_marker(marker, min(timeout_seconds, 60))", recording_smoke_script)
         self.assertIn('"blocker_detail_summary"', recording_smoke_script)
         self.assertIn("Full UI tree is written to the report ui_tree path.", recording_smoke_script)
@@ -1663,7 +1679,8 @@ class HarnessValidationTests(unittest.TestCase):
         self.assertIn("AXIdentifier", processing_smoke_script)
         self.assertIn("AXPress", processing_smoke_script)
         self.assertIn("ma.processing.startButton", processing_smoke_script)
-        self.assertIn("Processing is ready to run.", processing_smoke_script)
+        self.assertIn("identifier=ma.processing.startButton enabled=true", processing_smoke_script)
+        self.assertIn("TRANSCRIPT READY", processing_smoke_script)
         self.assertIn("Processing complete.", processing_smoke_script)
         self.assertIn("Processing completed with transcript-only speaker labels.", processing_smoke_script)
         self.assertIn("ui_completion_marker_observed", processing_smoke_script)

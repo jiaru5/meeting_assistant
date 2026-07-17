@@ -125,6 +125,33 @@ struct ProcessingStateViewModelTests {
     }
 
     @Test
+    func explicitBoundSessionInheritsConfiguredRuntimeAndLanguage() async {
+        let client = ProcessingCommandFakeClient()
+        let viewModel = ProcessingStateViewModel(
+            commandClient: client,
+            readinessState: readyReadinessState(),
+            defaultSessionID: "session-local-runtime",
+            defaultLanguage: "zh",
+            defaultRuntime: .whisperCpp
+        )
+        bindRecordedSession(viewModel, sessionID: "session-local-runtime")
+
+        await viewModel.start(
+            sessionID: "session-local-runtime",
+            sourceArtifactID: "artifact-mixed-audio"
+        )
+
+        #expect((await client.transcriptRequestSnapshot()) == [
+            GenerateTranscriptRequest(
+                sessionID: "session-local-runtime",
+                sourceArtifactID: "artifact-mixed-audio",
+                language: "zh",
+                runtime: .whisperCpp
+            ),
+        ])
+    }
+
+    @Test
     func transcriptOnlyFallbackRequiresReasonAndShowsDegradedState() async {
         let client = ProcessingCommandFakeClient(
             transcriptScript: .success(transcriptID: "transcript-processing"),

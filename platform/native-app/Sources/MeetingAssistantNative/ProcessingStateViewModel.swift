@@ -263,8 +263,8 @@ public final class ProcessingStateViewModel: ObservableObject {
         let request = ProcessingRunRequest(
             sessionID: sessionID,
             sourceArtifactID: sourceArtifactID,
-            language: language,
-            runtime: runtime,
+            language: language ?? defaultLanguage,
+            runtime: runtime ?? defaultRuntime,
             allowTranscriptOnlyFallback: allowTranscriptOnlyFallback
         )
         await run(request, rememberRequest: true)

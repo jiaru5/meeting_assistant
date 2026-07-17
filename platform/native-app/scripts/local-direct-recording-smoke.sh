@@ -144,6 +144,7 @@ start_time = time.monotonic()
 last_snapshot = ""
 checked_markers: list[str] = []
 pressed_controls: list[str] = []
+window_recovery_attempts: list[str] = []
 audio_playback_completed: Optional[bool] = None
 blocker_type = "none"
 blocker_detail = ""
@@ -223,6 +224,22 @@ on run argv
 end run
 '''
 
+FRONTMOST_SCRIPT = r'''
+on run argv
+  set targetPid to item 1 of argv as integer
+  tell application "System Events"
+    set targetProcesses to processes whose unix id is targetPid
+    if (count of targetProcesses) = 0 then error "MeetingAssistantNative process was not visible to System Events"
+    tell item 1 of targetProcesses
+      set frontmost to true
+      delay 0.2
+      if (count of windows) = 0 then error "MeetingAssistantNative window was not visible"
+    end tell
+  end tell
+  return "fronted " & targetPid
+end run
+'''
+
 
 class SmokeFailure(Exception):
     def __init__(self, kind: str, detail: str) -> None:
@@ -255,23 +272,45 @@ def run_osascript(script: str, args: list[str], timeout: int) -> str:
 def run_ax_helper(command: str, args: list[str], timeout: int) -> str:
     if not AX_HELPER.is_file():
         raise SmokeFailure("accessibility_error", f"missing AX helper: {AX_HELPER}")
+
+    def invoke() -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                [str(AX_HELPER), command, str(timeout), str(app_pid), *args],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=timeout + 30,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise SmokeFailure("accessibility_timeout", f"AX helper timed out after {timeout}s") from exc
+
+    completed = invoke()
+    if completed.returncode == 0:
+        return completed.stdout
+
+    initial_error = (completed.stderr or completed.stdout or "AX helper failed").strip()
+    if "window was not visible" not in initial_error:
+        raise SmokeFailure("accessibility_error", initial_error)
+
     try:
-        completed = subprocess.run(
-            [str(AX_HELPER), command, str(timeout), str(app_pid), *args],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout + 30,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise SmokeFailure("accessibility_timeout", f"AX helper timed out after {timeout}s") from exc
-    if completed.returncode != 0:
+        run_osascript(FRONTMOST_SCRIPT, [str(app_pid)], timeout=min(timeout, 20))
+        window_recovery_attempts.append(f"system_events_frontmost_retry:{command}")
+    except SmokeFailure as exc:
         raise SmokeFailure(
             "accessibility_error",
-            (completed.stderr or completed.stdout or "AX helper failed").strip(),
-        )
-    return completed.stdout
+            f"{initial_error}; System Events foreground recovery failed: {exc.detail}",
+        ) from exc
+
+    completed = invoke()
+    if completed.returncode == 0:
+        return completed.stdout
+    retry_error = (completed.stderr or completed.stdout or "AX helper failed").strip()
+    raise SmokeFailure(
+        "accessibility_error",
+        f"{initial_error}; retry after System Events foreground recovery: {retry_error}",
+    )
 
 
 def snapshot(timeout: int = 30) -> str:
@@ -583,6 +622,7 @@ def write_report(passed: bool) -> None:
         "permission_failure_details": permission_failure_details(last_snapshot),
         "checked_markers": checked_markers,
         "pressed_controls": pressed_controls,
+        "window_recovery_attempts": window_recovery_attempts,
         "recording_duration_seconds": recording_seconds,
         "audio_grace_seconds": audio_grace_seconds,
         "audio_playback_requested": bool(audio_path),
@@ -617,14 +657,20 @@ playback: Optional[subprocess.Popen] = None
 try:
     press_with_retry("ma.meetings.newRecordingButton", min(timeout_seconds, 60))
     wait_for_marker("ma.newRecording.heading", min(timeout_seconds, 60))
-    wait_for_marker("Recording readiness is ready.", min(timeout_seconds, 60))
+    wait_for_marker("identifier=ma.newRecording.readiness", min(timeout_seconds, 60))
+    wait_for_marker("identifier=ma.recording.startButton enabled=true", min(timeout_seconds, 60))
     press("ma.recording.startButton")
     wait_for_marker("Recording in progress.", min(timeout_seconds, 60))
     playback = start_audio_playback()
     wait_for_recording_audio(playback)
     press("ma.recording.stopButton")
     wait_for_marker("Recording saved.", timeout_seconds)
-    for marker in ("screen_video: available", "mixed_audio: available"):
+    for marker in (
+        "identifier=ma.recording.artifact.screen_video.status",
+        "description=Screen recording, Ready.",
+        "identifier=ma.recording.artifact.mixed_audio.status",
+        "description=Meeting audio, Ready.",
+    ):
         wait_for_marker(marker, min(timeout_seconds, 60))
     write_report(True)
 except SmokeFailure as exc:

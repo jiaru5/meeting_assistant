@@ -457,8 +457,14 @@ grep -q "AXPress" scripts/local-direct-recording-smoke.sh
 grep -q "ma.recording.startButton" scripts/local-direct-recording-smoke.sh
 grep -q "ma.meetings.newRecordingButton" scripts/local-direct-recording-smoke.sh
 grep -q "ma.recording.stopButton" scripts/local-direct-recording-smoke.sh
+grep -q "identifier=ma.newRecording.readiness" scripts/local-direct-recording-smoke.sh
+grep -q "identifier=ma.recording.startButton enabled=true" scripts/local-direct-recording-smoke.sh
 grep -q "Recording in progress." scripts/local-direct-recording-smoke.sh
 grep -q "Recording saved." scripts/local-direct-recording-smoke.sh
+grep -q "identifier=ma.recording.artifact.screen_video.status" scripts/local-direct-recording-smoke.sh
+grep -q "description=Screen recording, Ready." scripts/local-direct-recording-smoke.sh
+grep -q "identifier=ma.recording.artifact.mixed_audio.status" scripts/local-direct-recording-smoke.sh
+grep -q "description=Meeting audio, Ready." scripts/local-direct-recording-smoke.sh
 grep -q 'wait_for_marker(marker, min(timeout_seconds, 60))' scripts/local-direct-recording-smoke.sh
 grep -q '"blocker_detail_summary"' scripts/local-direct-recording-smoke.sh
 grep -q "Full UI tree is written to the report ui_tree path." scripts/local-direct-recording-smoke.sh
@@ -479,7 +485,8 @@ grep -q "AXIdentifier" scripts/local-direct-processing-smoke.sh
 grep -q "AXPress" scripts/local-direct-processing-smoke.sh
 grep -q "ma.processing.startButton" scripts/local-direct-processing-smoke.sh
 grep -q "ma.meetings.row" scripts/local-direct-processing-smoke.sh
-grep -q "Processing is ready to run." scripts/local-direct-processing-smoke.sh
+grep -q "identifier=ma.processing.startButton enabled=true" scripts/local-direct-processing-smoke.sh
+grep -q "TRANSCRIPT READY" scripts/local-direct-processing-smoke.sh
 grep -q "Processing complete." scripts/local-direct-processing-smoke.sh
 grep -q "Processing completed with transcript-only speaker labels." scripts/local-direct-processing-smoke.sh
 grep -q "normalized_audio" scripts/local-direct-processing-smoke.sh
