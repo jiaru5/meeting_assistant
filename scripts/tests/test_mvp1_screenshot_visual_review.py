@@ -207,6 +207,163 @@ class MVP1ScreenshotVisualReviewTests(unittest.TestCase):
         self.assertFalse(validation["checks"]["manual_human_attestation_valid"])
         self.assertIn("must not self-identify", "\n".join(validation["errors"]))
 
+    def test_named_ai_roles_cannot_count_as_human_review(self) -> None:
+        for role in ("Codex", "ChatGPT", "Claude", "Gemini", "LLM", "language model", "language-model", "模型", "大模型"):
+            with self.subTest(role=role):
+                review = self.valid_review()
+                review["reviewer_attestation"]["attested_by_role"] = role
+
+                validation = self.validate(review)
+
+                self.assertFalse(validation["ready_for_review"])
+                self.assertFalse(validation["checks"]["manual_human_attestation_valid"])
+                self.assertIn("must not self-identify", "\n".join(validation["errors"]))
+
+    def test_normal_human_role_still_passes_manual_attestation_validation(self) -> None:
+        review = self.valid_review()
+        review["reviewer_attestation"]["attested_by_role"] = "human-product-reviewer"
+
+        validation = self.validate(review)
+
+        self.assertTrue(validation["ready_for_review"])
+        self.assertTrue(validation["checks"]["manual_human_attestation_valid"])
+
+    def test_guide_is_read_only_for_an_incomplete_bound_template(self) -> None:
+        review_path = self.base / "review.json"
+        review_path.write_text(json.dumps(self.template()), encoding="utf-8")
+        review_before = review_path.read_bytes()
+        task_report_before = self.task_report.read_bytes()
+        paths_before = sorted(path.relative_to(self.base) for path in self.base.rglob("*"))
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            result = self.module.main(["guide", str(review_path)])
+
+        guide = stdout.getvalue()
+        self.assertEqual(result, 0)
+        self.assertEqual(review_path.read_bytes(), review_before)
+        self.assertEqual(self.task_report.read_bytes(), task_report_before)
+        self.assertEqual(
+            sorted(path.relative_to(self.base) for path in self.base.rglob("*")),
+            paths_before,
+        )
+        self.assertIn("# MVP.1 截图人工视觉审查指南", guide)
+        self.assertIn("尚未完成", guide)
+        self.assertIn("mvp1-screenshot-visual-review.py validate", guide)
+        self.assertIn(str(review_path), guide)
+        for screenshot in self.template()["task_evidence"]["screenshots"]:
+            self.assertIn(screenshot["name"], guide)
+            self.assertIn(screenshot["path"], guide)
+            self.assertIn(screenshot["sha256"], guide)
+
+    def test_guide_fails_closed_for_an_invalid_current_subject_binding(self) -> None:
+        review_path = self.base / "invalid-review.json"
+        review = self.template()
+        review["subject_commit"] = "b" * 40
+        review_path.write_text(json.dumps(review), encoding="utf-8")
+        review_before = review_path.read_bytes()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            result = self.module.main(["guide", str(review_path)])
+
+        self.assertEqual(result, 2)
+        self.assertEqual(review_path.read_bytes(), review_before)
+        self.assertIn("requires a structurally valid document", stderr.getvalue())
+
+    def test_invalid_binding_guide_redacts_open_finding_private_text(self) -> None:
+        unsafe = "Contact person@example.com at +1 555 123 4567 for session-alpha123."
+        review_path = self.base / "invalid-private-review.json"
+        review = self.valid_review()
+        review["subject_commit"] = "b" * 40
+        review["findings"] = [
+            {
+                "finding_id": "privacy@example.com",
+                "severity": "P1",
+                "status": "open",
+                "summary": unsafe,
+                "screenshot_names": ["00-meetings-recent"],
+            }
+        ]
+        review_path.write_text(json.dumps(review), encoding="utf-8")
+        review_before = review_path.read_bytes()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            result = self.module.main(["guide", str(review_path)])
+
+        self.assertEqual(2, result)
+        self.assertEqual(review_before, review_path.read_bytes())
+        self.assertIn("requires a structurally valid document", stderr.getvalue())
+        for forbidden in (
+            "person@example.com",
+            "privacy@example.com",
+            "+1 555 123 4567",
+            "session-alpha123",
+        ):
+            self.assertNotIn(forbidden, stderr.getvalue())
+
+    def test_guide_allows_a_current_bound_partial_human_record(self) -> None:
+        review_path = self.base / "partial-review.json"
+        review = self.template()
+        review["reviewer_attestation"]["attested_by_role"] = "human-product-reviewer"
+        review["screenshots"][0]["result"] = "pass"
+        review["screenshots"][0]["observation"] = "A human recorded the first screenshot."
+        review_path.write_text(json.dumps(review), encoding="utf-8")
+        review_before = review_path.read_bytes()
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            result = self.module.main(["guide", str(review_path)])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(review_path.read_bytes(), review_before)
+        self.assertIn("当前记录：1/8；**尚未完成**", stdout.getvalue())
+
+    def test_report_redacts_unsafe_free_text_without_mutating_review(self) -> None:
+        unsafe = "Contact person@example.com at +1 555 123 4567 for session-alpha123."
+        review = self.valid_review()
+        review["screenshots"][0]["observation"] = unsafe
+        review["findings"] = [
+            {
+                "finding_id": "privacy@example.com",
+                "severity": "P1",
+                "status": "open",
+                "summary": unsafe,
+                "screenshot_names": ["00-meetings-recent"],
+                "resolution": unsafe,
+                "retest": {
+                    "human_retested": True,
+                    "result": "passed",
+                    "retested_at": "2026-07-15T16:30:00+08:00",
+                    "observation": unsafe,
+                },
+            }
+        ]
+        review_before = json.loads(json.dumps(review))
+
+        report = self.module.build_report(
+            review,
+            source="review.json",
+            expected_subject_commit=self.subject_commit,
+        )
+        report_json = json.dumps(report)
+        markdown = self.module.render_markdown(report)
+
+        self.assertEqual(review, review_before)
+        self.assertIn("must not contain an email address", "\n".join(report["errors"]))
+        for unsafe_fragment in (
+            "person@example.com",
+            "privacy@example.com",
+            "+1 555 123 4567",
+            "session-alpha123",
+        ):
+            self.assertNotIn(unsafe_fragment, report_json)
+            self.assertNotIn(unsafe_fragment, markdown)
+        self.assertIn("[REDACTED_EMAIL]", report_json)
+        self.assertIn("[REDACTED_PHONE]", report_json)
+        self.assertIn("[REDACTED_RAW_SESSION_ID]", report_json)
+
     def test_strict_validation_receives_the_same_task_report_bytes(self) -> None:
         original_report_bytes = self.task_report.read_bytes()
         validator_inputs: list[tuple[Path, bytes]] = []

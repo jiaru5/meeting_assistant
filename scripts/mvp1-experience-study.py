@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -28,6 +29,17 @@ FINDING_STATUSES = ("open", "closed")
 RETEST_RESULTS = ("passed", "failed")
 PARTICIPANT_ID_PATTERN = re.compile(r"^P[0-9]{2,3}$")
 COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+PHONE_PATTERN = re.compile(r"(?<!\w)(?:\+?[0-9][0-9 ()-]{7,}[0-9])(?!\w)")
+RAW_SESSION_ID_PATTERN = re.compile(
+    r"\b(?:session|sess)[-_][A-Za-z0-9][A-Za-z0-9._-]{5,}\b", re.IGNORECASE
+)
+NON_HUMAN_ATTESTOR_PATTERN = re.compile(
+    r"(?:\b(?:agent|ai|automation|automated|bot|robot|script|xctest|xcuitest|"
+    r"codex|chatgpt|claude|gemini|llm|language[ -]?model)\b|"
+    r"智能体|自动化|机器人|脚本|模型|大模型)",
+    re.IGNORECASE,
+)
 _CURRENT_COMMIT_UNSET = object()
 ATTESTATION_STATEMENT = (
     "I manually observed a real human participant perform these tasks; no agent, "
@@ -169,6 +181,42 @@ def _is_timezone_aware_iso8601(value: Any) -> bool:
     return parsed.tzinfo is not None
 
 
+def _validate_private_text(
+    value: Any,
+    *,
+    path: str,
+    errors: list[str],
+    label: str,
+) -> None:
+    if not _is_nonempty_string(value):
+        errors.append(f"{path} must be a non-empty {label}")
+        return
+    text = str(value)
+    for privacy_label, pattern in (
+        ("an email address", EMAIL_PATTERN),
+        ("a phone number", PHONE_PATTERN),
+        ("a raw session identifier", RAW_SESSION_ID_PATTERN),
+    ):
+        if pattern.search(text):
+            errors.append(f"{path} must not contain {privacy_label}")
+
+
+def _redact_private_text_for_report(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    if any(pattern.search(value) for pattern in (EMAIL_PATTERN, PHONE_PATTERN, RAW_SESSION_ID_PATTERN)):
+        return "[REDACTED: prohibited private data]"
+    return value
+
+
+def _redact_finding_for_report(finding: dict[str, Any]) -> dict[str, Any]:
+    redacted = dict(finding)
+    for field in ("finding_id", "summary", "resolution", "retest_observation"):
+        if field in redacted:
+            redacted[field] = _redact_private_text_for_report(redacted[field])
+    return redacted
+
+
 def _validate_evidence_policy(value: Any, errors: list[str]) -> None:
     path = "evidence_policy"
     if not isinstance(value, dict):
@@ -229,8 +277,17 @@ def _validate_task(
         errors.append(
             f"{path}.state_understanding must be one of {', '.join(STATE_UNDERSTANDING_VALUES)}"
         )
-    if "observation" in value and not isinstance(value["observation"], str):
-        errors.append(f"{path}.observation must be a string when present")
+    if "observation" in value:
+        observation = value["observation"]
+        if not isinstance(observation, str):
+            errors.append(f"{path}.observation must be a string when present")
+        elif observation.strip():
+            _validate_private_text(
+                observation,
+                path=f"{path}.observation",
+                errors=errors,
+                label="direct observation",
+            )
     return task_id
 
 
@@ -261,6 +318,12 @@ def _validate_attestation(
         valid = False
     if not _is_nonempty_string(value.get("attested_by_role")):
         errors.append(f"{path}.attested_by_role must be a non-empty role or pseudonym")
+        valid = False
+    elif NON_HUMAN_ATTESTOR_PATTERN.search(str(value["attested_by_role"])):
+        errors.append(
+            f"{path}.attested_by_role must not self-identify an agent, automation, "
+            "XCUITest, Codex, language model, or other non-human observer"
+        )
         valid = False
     if value.get("statement") != ATTESTATION_STATEMENT:
         errors.append(f"{path}.statement must match the manual human attestation statement")
@@ -380,7 +443,7 @@ def _validate_findings(
                 "task_id",
                 "participant_ids",
             },
-            optional={"resolution", "retested", "retest_result"},
+            optional={"resolution", "retested", "retest_result", "retest_observation"},
             path=path,
             errors=errors,
         )
@@ -399,8 +462,12 @@ def _validate_findings(
             errors.append(f"{path}.severity must be one of {', '.join(FINDING_SEVERITIES)}")
         if status not in FINDING_STATUSES:
             errors.append(f"{path}.status must be one of {', '.join(FINDING_STATUSES)}")
-        if not _is_nonempty_string(finding.get("summary")):
-            errors.append(f"{path}.summary must be a non-empty string")
+        _validate_private_text(
+            finding.get("summary"),
+            path=f"{path}.summary",
+            errors=errors,
+            label="private finding summary",
+        )
         if finding.get("task_id") not in (*REQUIRED_TASK_IDS, "cross_task"):
             errors.append(
                 f"{path}.task_id must be a required task id or 'cross_task'"
@@ -422,6 +489,20 @@ def _validate_findings(
 
         if "resolution" in finding and not isinstance(finding["resolution"], str):
             errors.append(f"{path}.resolution must be a string when present")
+        elif "resolution" in finding and finding["resolution"].strip():
+            _validate_private_text(
+                finding["resolution"],
+                path=f"{path}.resolution",
+                errors=errors,
+                label="private finding resolution",
+            )
+        if "retest_observation" in finding:
+            _validate_private_text(
+                finding["retest_observation"],
+                path=f"{path}.retest_observation",
+                errors=errors,
+                label="private human retest note",
+            )
         if "retested" in finding and not isinstance(finding["retested"], bool):
             errors.append(f"{path}.retested must be a boolean when present")
         if "retest_result" in finding and finding["retest_result"] not in RETEST_RESULTS:
@@ -442,6 +523,11 @@ def _validate_findings(
             if finding.get("retest_result") != "passed":
                 closure_errors.append(
                     f"{path}.retest_result must be 'passed' after a manual human retest before a "
+                    f"{severity} finding is closed"
+                )
+            if not _is_nonempty_string(finding.get("retest_observation")):
+                closure_errors.append(
+                    f"{path}.retest_observation must be a non-empty direct human retest note before a "
                     f"{severity} finding is closed"
                 )
         if severity in ("P0", "P1") and status == "open":
@@ -532,7 +618,10 @@ def validate_study(
     )
     for finding in open_p0_p1:
         blocker_errors.append(
-            f"open {finding['severity']} finding {finding['finding_id']}: {finding['summary']}"
+            "open "
+            f"{finding['severity']} finding "
+            f"{_redact_private_text_for_report(finding['finding_id'])}: "
+            f"{_redact_private_text_for_report(finding['summary'])}"
         )
 
     structure_valid = not schema_errors
@@ -651,7 +740,21 @@ def build_report(
     findings = study_object.get("findings", [])
     if not isinstance(findings, list):
         findings = []
-    recorded_findings = [finding for finding in findings if isinstance(finding, dict)]
+    recorded_findings = [
+        _redact_finding_for_report(finding) for finding in findings if isinstance(finding, dict)
+    ]
+    redacted_validation = dict(validation)
+    redacted_validation["errors"] = [
+        _redact_private_text_for_report(error) for error in validation["errors"]
+    ]
+    redacted_validation["open_p0_p1_findings"] = [
+        {
+            **finding,
+            "finding_id": _redact_private_text_for_report(finding.get("finding_id")),
+            "summary": _redact_private_text_for_report(finding.get("summary")),
+        }
+        for finding in validation["open_p0_p1_findings"]
+    ]
     finding_counts = {
         severity: {
             status: sum(
@@ -672,7 +775,7 @@ def build_report(
         "study_id": study_object.get("study_id"),
         "subject_commit": study_object.get("subject_commit"),
         "status": "ready_for_review" if validation["ready_for_review"] else "blocked",
-        **validation,
+        **redacted_validation,
         "task_metrics": _aggregate_metrics(study_object),
         "findings": recorded_findings,
         "finding_counts": finding_counts,
@@ -703,7 +806,11 @@ def render_text(report: dict[str, Any]) -> str:
             "Evidence boundary: agent, automation, screenshots, and XCUITest do not count "
             "as human participants; attestation is a manual declaration, not independent identity proof."
         ),
-        "Privacy boundary: free-text observations must exclude participant names and contact data.",
+        (
+            "Privacy boundary: free text must exclude names, contact data, real meeting content, "
+            "full transcripts, and raw session identifiers; the tool conservatively blocks email, "
+            "phone, and raw-session-id patterns only."
+        ),
     ]
     if report["errors"]:
         lines.append("Errors:")
@@ -777,8 +884,8 @@ def render_markdown(report: dict[str, Any]) -> str:
     if findings:
         lines.extend(
             [
-                "| ID | Severity | Status | Task | Summary | Resolution | Human retested | Retest result |",
-                "|---|---|---|---|---|---|---|---|",
+                "| ID | Severity | Status | Task | Summary | Resolution | Human retested | Retest result | Retest note |",
+                "|---|---|---|---|---|---|---|---|---|",
             ]
         )
         for finding in findings:
@@ -790,7 +897,8 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"{_markdown_escape(finding.get('summary', '-'))} | "
                 f"{_markdown_escape(finding.get('resolution', '-'))} | "
                 f"{_markdown_escape(finding.get('retested', '-'))} | "
-                f"{_markdown_escape(finding.get('retest_result', '-'))} |"
+                f"{_markdown_escape(finding.get('retest_result', '-'))} | "
+                f"{_markdown_escape(finding.get('retest_observation', '-'))} |"
             )
     else:
         lines.append("没有记录 finding。")
@@ -818,7 +926,11 @@ def render_markdown(report: dict[str, Any]) -> str:
                 "本报告只整理经人工声明的真人任务观察。Agent、自动化、截图和 XCUITest "
                 "不能计为真人参与者；工具只能校验声明和结构，不能独立证明参与者身份。"
             ),
-            "参与者只使用 P01 这类匿名编号；自由文本不得记录姓名或联系方式。",
+            (
+                "参与者只使用 P01 这类匿名编号；自由文本不得记录姓名、联系方式、"
+                "真实会议内容、完整 transcript 或 raw session id。工具只会保守阻断"
+                "邮箱、电话和 raw session id，其他内容仍依赖真人隐私声明。"
+            ),
             (
                 "当前未定义完成率、时长、求助、误点、犹豫或状态理解的产品通过阈值，"
                 "因此这些指标只汇总、不自动判定产品验收或发布就绪。"
@@ -826,6 +938,60 @@ def render_markdown(report: dict[str, Any]) -> str:
             "",
         ]
     )
+    return "\n".join(lines)
+
+
+def render_guide(report: dict[str, Any], *, source: str) -> str:
+    """Render instructions only; this must never create or attest evidence."""
+    status = (
+        "可进入人工评审"
+        if report["ready_for_review"]
+        else "阻断（请先修复绑定、结构或未填写的真人记录）"
+    )
+    validate_command = (
+        "./scripts/mvp1-experience-study.py validate "
+        f"{shlex.quote(source)} --format text"
+    )
+    lines = [
+        "# MVP.1 真人体验研究录入指南",
+        "",
+        f"- 记录文件：`{source}`",
+        f"- 当前校验状态：**{status}**",
+        (
+            "- 本命令只读取并说明现有 JSON；不会写入文件、不会自动填写任务，"
+            "也不会把任何 attestation 设为 confirmed。"
+        ),
+        (
+            "- 状态为阻断时，本指南仍可用于补齐记录，但该 JSON 不能被当作有效的当前真人证据。"
+            if not report["ready_for_review"]
+            else "- 当前 JSON 已通过结构校验；仍须由人工评审，不等于产品验收。"
+        ),
+        "",
+        "## 开始前",
+        "",
+        "1. 使用合成会议数据；不要使用真人姓名、联系方式、真实会议内容、完整 transcript 或 raw session id。",
+        "2. 一位真人参与者一次完成三个任务；研究者只在任务结束后记录观察，不在过程中提示下一步。",
+        "3. `attested_by_role` 只能填写真人观察者的角色或 pseudonym；agent、自动化、XCUITest 或语言模型不能计作观察者。",
+        "",
+        "## 每位参与者的固定任务",
+        "",
+        "1. `first_use`：从 Meetings 新建会议，按当前捕获意图完成预检、录制/停止保存，并主动触发 transcript 回查。",
+        "2. `return_visit`：从最近会议重开已保存、处理中断或已有 transcript 的会话，继续处理、恢复或查看成果。",
+        "3. `failure_recovery`：在真实可恢复的 blocked / failed 状态中，确认发生了什么、数据是否安全，并仅用应用给出的下一步动作恢复；没有发生可恢复异常时如实记录。",
+        "",
+        "## 每个任务应如实填写",
+        "",
+        "- outcome、duration_seconds、help_count、misclick_count、hesitation_count、state_understanding；",
+        "- 建议补一条脱敏的 direct observation；填写后工具会保守拒绝邮箱、电话和 raw session id，但无法自动识别姓名或真实会议正文。",
+        "- 若发现产品问题，增加 finding；open P0/P1 会阻断，closed P0/P1 需要 resolution、真人复测、passed 结果和脱敏的 retest_observation。",
+        "",
+        "## 签署与校验",
+        "",
+        "只有在研究者亲自观察到该真人完成所有记录后，才将 human_attestation.confirmed 设为 true。该声明不是独立身份认证。",
+        f"填写完成后运行：`{validate_command}`",
+        "`ready_for_review` 只表示证据包可进入人工评审，不等于产品验收或发布就绪。",
+        "",
+    ]
     return "\n".join(lines)
 
 
@@ -1195,6 +1361,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Render historical evidence without requiring its subject commit to match current HEAD.",
     )
+
+    guide_parser = subparsers.add_parser(
+        "guide", help="Read a study and print a no-write human-recording guide."
+    )
+    guide_parser.add_argument("study")
+    guide_commit_group = guide_parser.add_mutually_exclusive_group()
+    guide_commit_group.add_argument(
+        "--require-current-commit",
+        action="store_true",
+        help="Require the study subject to match current HEAD (the default).",
+    )
+    guide_commit_group.add_argument(
+        "--allow-historical-subject",
+        action="store_true",
+        help="Render guidance for historical evidence without treating it as current evidence.",
+    )
     return parser.parse_args(argv)
 
 
@@ -1228,6 +1410,26 @@ def main(argv: list[str]) -> int:
         print(
             "No human evidence has been recorded yet; complete tasks and manual attestations before validation."
         )
+        return 0
+
+    if args.command == "guide":
+        study_path = _resolve_path(args.study)
+        try:
+            study = load_study(study_path)
+        except StudyToolError as exc:
+            print(f"mvp1 experience study guide failed: {exc}", file=sys.stderr)
+            return 2
+        require_current_commit = not args.allow_historical_subject
+        expected_current_commit: str | None | object = _CURRENT_COMMIT_UNSET
+        if require_current_commit:
+            expected_current_commit = current_commit()
+        report = build_report(
+            study,
+            source=str(study_path),
+            require_current_commit=require_current_commit,
+            expected_current_commit=expected_current_commit,
+        )
+        print(render_guide(report, source=str(study_path)), end="")
         return 0
 
     study_path = _resolve_path(args.study)

@@ -295,6 +295,38 @@ class MVP1AccessibilityWalkthroughTests(unittest.TestCase):
         self.assertIn("synthetic_data_confirmed must be true", errors)
         self.assertIn("privacy_statement", errors)
 
+    def test_explicit_non_human_attestor_roles_cannot_count_as_observers(self) -> None:
+        explicit_non_human_roles = (
+            "agent",
+            "AI",
+            "automation",
+            "bot",
+            "script",
+            "XCTest",
+            "Codex",
+            "ChatGPT",
+            "Claude",
+            "Gemini",
+            "LLM",
+            "language model",
+            "language-model",
+            "智能体",
+            "自动化",
+            "模型",
+            "大模型",
+        )
+        for role in explicit_non_human_roles:
+            with self.subTest(role=role):
+                self.assertIsNotNone(self.module.NON_HUMAN_ATTESTOR_PATTERN.search(role))
+
+        walkthrough = self.valid_walkthrough()
+        walkthrough["observer_attestation"]["attested_by_role"] = "Codex"
+        validation = self.validate(walkthrough)
+
+        self.assertFalse(validation["ready_for_review"])
+        self.assertFalse(validation["checks"]["manual_observer_attestation_valid"])
+        self.assertIn("must not self-identify", "\n".join(validation["errors"]))
+
     def test_policy_tampering_cannot_turn_agent_or_automated_artifacts_into_manual_evidence(self) -> None:
         walkthrough = self.valid_walkthrough()
         walkthrough["evidence_policy"]["agent_counts_as_walkthrough"] = True
@@ -541,6 +573,61 @@ class MVP1AccessibilityWalkthroughTests(unittest.TestCase):
         self.assertIn("must not contain an email address", errors)
         self.assertIn("must not contain a raw session identifier", errors)
 
+    def test_blocked_reports_redact_prohibited_free_text(self) -> None:
+        unsafe_text = "Contact alex@example.com about session-customer-123456."
+        walkthrough = self.valid_walkthrough()
+        walkthrough["checks"][0]["observation"] = unsafe_text
+        walkthrough["findings"] = [
+            {
+                "finding_id": "A11Y-PRIVATE",
+                "severity": "P2",
+                "status": "open",
+                "summary": unsafe_text,
+                "check_ids": ["page_heading"],
+                "resolution": unsafe_text,
+                "retest": {
+                    "result": "pass",
+                    "retested_at": "2026-07-14T17:30:00+08:00",
+                    "observation": unsafe_text,
+                },
+            }
+        ]
+
+        report = self.report(walkthrough)
+        markdown = self.module.render_markdown(report)
+        serialized = json.dumps(report)
+
+        self.assertFalse(report["ready_for_review"])
+        self.assertIn("[REDACTED: prohibited private data]", markdown)
+        self.assertIn("[REDACTED: prohibited private data]", serialized)
+        for forbidden in ("alex@example.com", "session-customer-123456"):
+            self.assertNotIn(forbidden, markdown)
+            self.assertNotIn(forbidden, serialized)
+
+    def test_blocked_report_redacts_a_nonobject_retest_value(self) -> None:
+        unsafe_text = "Contact alex@example.com at +1 555 123 4567 about session-customer-123456."
+        walkthrough = self.valid_walkthrough()
+        walkthrough["findings"] = [
+            {
+                "finding_id": "A11Y-PRIVATE-RETEST",
+                "severity": "P2",
+                "status": "open",
+                "summary": "Safe summary.",
+                "check_ids": ["page_heading"],
+                "retest": unsafe_text,
+            }
+        ]
+
+        report = self.report(walkthrough)
+        serialized = json.dumps(report)
+        markdown = self.module.render_markdown(report)
+
+        self.assertFalse(report["ready_for_review"])
+        self.assertIn("[REDACTED: prohibited private data]", serialized)
+        for forbidden in ("alex@example.com", "+1 555 123 4567", "session-customer-123456"):
+            self.assertNotIn(forbidden, serialized)
+            self.assertNotIn(forbidden, markdown)
+
     def test_template_normalizes_cdhash_case_but_rejects_invalid_binding_values(self) -> None:
         template = self.module.build_template(
             subject_commit=self.subject_commit,
@@ -731,6 +818,52 @@ class MVP1AccessibilityWalkthroughTests(unittest.TestCase):
         self.assertEqual(0o600, stat.S_IMODE(output.stat().st_mode))
         self.assertFalse(written["observer_attestation"]["confirmed"])
         self.assertIn("No real-app walkthrough evidence has been recorded", stdout.getvalue())
+
+    def test_guide_reads_an_unfinished_template_without_writing_or_attesting(self) -> None:
+        walkthrough_path = self.base / "guide-walkthrough.json"
+        walkthrough = self.template()
+        walkthrough_path.write_text(json.dumps(walkthrough), encoding="utf-8")
+        original_bytes = walkthrough_path.read_bytes()
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            result = self.module.main(
+                [
+                    "guide",
+                    str(walkthrough_path),
+                    "--codesign-tool",
+                    str(self.fake_codesign),
+                ]
+            )
+
+        guide = stdout.getvalue()
+        self.assertEqual(0, result)
+        self.assertEqual(original_bytes, walkthrough_path.read_bytes())
+        self.assertIn("VoiceOver / 键盘实机走查录入指南", guide)
+        self.assertIn("`page_heading`", guide)
+        self.assertIn("`delete_prompt_focus_and_return_cancel`", guide)
+        self.assertIn("不会写入文件", guide)
+        self.assertIn("阻断", guide)
+        self.assertIn(f"validate {walkthrough_path} --format text", guide)
+        self.assertFalse(walkthrough["observer_attestation"]["confirmed"])
+
+    def test_guide_rejects_invalid_json_without_writing(self) -> None:
+        walkthrough_path = self.base / "invalid-guide.json"
+        walkthrough_path.write_text("{not-json", encoding="utf-8")
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            result = self.module.main(
+                [
+                    "guide",
+                    str(walkthrough_path),
+                    "--codesign-tool",
+                    str(self.fake_codesign),
+                ]
+            )
+
+        self.assertEqual(2, result)
+        self.assertIn("not valid JSON", stderr.getvalue())
 
     def test_validate_and_report_outputs_are_atomic_private_and_do_not_overwrite(self) -> None:
         walkthrough_path = self.base / "walkthrough.json"

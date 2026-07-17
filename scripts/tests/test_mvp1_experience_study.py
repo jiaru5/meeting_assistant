@@ -124,10 +124,17 @@ class MVP1ExperienceStudyTests(unittest.TestCase):
         self.assertIn("found 2", "\n".join(two_validation["errors"]))
         self.assertIn("found 6", "\n".join(six_validation["errors"]))
 
-    def test_all_three_tasks_and_observation_fields_are_required_structurally(self) -> None:
+    def test_all_three_tasks_are_required_and_observation_is_optional_but_typed_when_present(self) -> None:
+        observation_optional = self.valid_study()
+        for participant in observation_optional["participants"]:
+            for task in participant["tasks"]:
+                task.pop("observation", None)
+        self.assertTrue(self.module.validate_study(observation_optional)["checks"]["structure_valid"])
+
         study = self.valid_study()
         study["participants"][0]["tasks"] = study["participants"][0]["tasks"][:2]
         del study["participants"][1]["tasks"][0]["help_count"]
+        study["participants"][2]["tasks"][0]["observation"] = 1
 
         validation = self.module.validate_study(study)
         errors = "\n".join(validation["errors"])
@@ -135,6 +142,7 @@ class MVP1ExperienceStudyTests(unittest.TestCase):
         self.assertFalse(validation["checks"]["structure_valid"])
         self.assertIn("missing required task_id 'failure_recovery'", errors)
         self.assertIn("help_count is required", errors)
+        self.assertIn("observation must be a string when present", errors)
 
     def test_automation_or_xcuitest_cannot_be_declared_as_a_participant(self) -> None:
         study = self.valid_study()
@@ -164,6 +172,132 @@ class MVP1ExperienceStudyTests(unittest.TestCase):
         self.assertIn("only after a human observer attests", errors)
         self.assertIn("timezone-aware ISO-8601", errors)
         self.assertIn("manual human attestation statement", errors)
+
+    def test_explicit_non_human_attestor_roles_cannot_count_as_observers(self) -> None:
+        explicit_non_human_roles = (
+            "agent",
+            "AI",
+            "automation",
+            "bot",
+            "script",
+            "XCTest",
+            "Codex",
+            "ChatGPT",
+            "Claude",
+            "Gemini",
+            "LLM",
+            "language model",
+            "language-model",
+            "智能体",
+            "自动化",
+            "模型",
+            "大模型",
+        )
+        for role in explicit_non_human_roles:
+            with self.subTest(role=role):
+                self.assertIsNotNone(self.module.NON_HUMAN_ATTESTOR_PATTERN.search(role))
+
+        study = self.valid_study()
+        study["participants"][0]["human_attestation"]["attested_by_role"] = "ChatGPT"
+        validation = self.module.validate_study(study)
+
+        self.assertFalse(validation["ready_for_review"])
+        self.assertFalse(validation["checks"]["manual_human_attestation_valid"])
+        self.assertIn("must not self-identify", "\n".join(validation["errors"]))
+
+    def test_task_and_finding_free_text_are_private_and_scanned(self) -> None:
+        unsafe_text = "Contact alex@example.com about session-customer-123456."
+        cases = (
+            ("task observation", lambda study: study["participants"][0]["tasks"][0].__setitem__("observation", unsafe_text)),
+            (
+                "finding summary",
+                lambda study: study.__setitem__(
+                    "findings",
+                    [
+                        {
+                            "finding_id": "F-PRIVATE-SUMMARY",
+                            "severity": "P2",
+                            "status": "open",
+                            "summary": unsafe_text,
+                            "task_id": "first_use",
+                            "participant_ids": ["P01"],
+                        }
+                    ],
+                ),
+            ),
+            (
+                "finding resolution",
+                lambda study: study.__setitem__(
+                    "findings",
+                    [
+                        {
+                            "finding_id": "F-PRIVATE-RESOLUTION",
+                            "severity": "P2",
+                            "status": "open",
+                            "summary": "Safe finding summary.",
+                            "task_id": "first_use",
+                            "participant_ids": ["P01"],
+                            "resolution": unsafe_text,
+                        }
+                    ],
+                ),
+            ),
+            (
+                "finding retest note",
+                lambda study: study.__setitem__(
+                    "findings",
+                    [
+                        {
+                            "finding_id": "F-PRIVATE-RETEST",
+                            "severity": "P2",
+                            "status": "open",
+                            "summary": "Safe finding summary.",
+                            "task_id": "first_use",
+                            "participant_ids": ["P01"],
+                            "retest_observation": unsafe_text,
+                        }
+                    ],
+                ),
+            ),
+        )
+        for label, mutate in cases:
+            with self.subTest(label=label):
+                study = self.valid_study()
+                mutate(study)
+
+                validation = self.module.validate_study(study)
+                errors = "\n".join(validation["errors"])
+
+                self.assertFalse(validation["ready_for_review"])
+                self.assertIn("must not contain an email address", errors)
+                self.assertIn("must not contain a raw session identifier", errors)
+
+    def test_blocked_reports_redact_prohibited_free_text(self) -> None:
+        unsafe_text = "Contact alex@example.com about session-customer-123456."
+        study = self.valid_study()
+        study["findings"] = [
+            {
+                "finding_id": "F-PRIVATE",
+                "severity": "P2",
+                "status": "open",
+                "summary": unsafe_text,
+                "task_id": "first_use",
+                "participant_ids": ["P01"],
+                "resolution": unsafe_text,
+                "retest_observation": unsafe_text,
+            }
+        ]
+
+        report = self.module.build_report(study)
+        markdown = self.module.render_markdown(report)
+        serialized = json.dumps(report)
+
+        self.assertFalse(report["ready_for_review"])
+        self.assertIn("[REDACTED: prohibited private data]", markdown)
+        self.assertIn("[REDACTED: prohibited private data]", serialized)
+        for forbidden in ("alex@example.com", "session-customer-123456"):
+            self.assertNotIn(forbidden, markdown)
+            self.assertNotIn(forbidden, serialized)
 
     def test_participant_alias_is_anonymous_and_name_fields_are_rejected(self) -> None:
         study = self.valid_study()
@@ -247,6 +381,7 @@ class MVP1ExperienceStudyTests(unittest.TestCase):
                 "resolution": "Retested with the corrected build.",
                 "retested": True,
                 "retest_result": "passed",
+                "retest_observation": "A human observer directly repeated the corrected destructive flow.",
             }
         ]
 
@@ -281,6 +416,7 @@ class MVP1ExperienceStudyTests(unittest.TestCase):
         self.assertIn("resolution must be non-empty", errors)
         self.assertIn("manual human retest", errors)
         self.assertIn("retest_result must be 'passed'", errors)
+        self.assertIn("retest_observation must be a non-empty direct human retest note", errors)
 
     def test_closed_p2_remains_compatible_without_retest_fields(self) -> None:
         study = self.valid_study()
@@ -317,7 +453,7 @@ class MVP1ExperienceStudyTests(unittest.TestCase):
         self.assertIn("指标通过阈值：未定义、未应用", markdown)
         self.assertIn("不能计为真人参与者", markdown)
         self.assertIn("不能独立证明参与者身份", markdown)
-        self.assertIn("不得记录姓名或联系方式", markdown)
+        self.assertIn("不得记录姓名、联系方式", markdown)
         self.assertIn("不等于产品验收或发布就绪", markdown)
 
     def test_init_refuses_overwrite_and_never_marks_attestation_true(self) -> None:
@@ -767,6 +903,42 @@ class MVP1ExperienceStudyTests(unittest.TestCase):
             self.assertEqual(0, historical_result)
             self.assertTrue(historical_report["ready_for_review"])
             self.assertFalse(historical_report["checks"]["current_commit_required"])
+
+    def test_guide_reads_an_unfinished_template_without_writing_or_attesting(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            study_path = Path(directory) / "study.json"
+            template = self.module.build_template(3, subject_commit="a" * 40)
+            study_path.write_text(json.dumps(template), encoding="utf-8")
+            original_bytes = study_path.read_bytes()
+            stdout = io.StringIO()
+
+            with mock.patch.object(self.module, "current_commit", return_value="a" * 40):
+                with contextlib.redirect_stdout(stdout):
+                    result = self.module.main(["guide", str(study_path)])
+
+            guide = stdout.getvalue()
+            self.assertEqual(0, result)
+            self.assertEqual(original_bytes, study_path.read_bytes())
+            self.assertIn("真人体验研究录入指南", guide)
+            self.assertIn("`first_use`", guide)
+            self.assertIn("`return_visit`", guide)
+            self.assertIn("`failure_recovery`", guide)
+            self.assertIn("不会写入文件", guide)
+            self.assertIn("阻断", guide)
+            self.assertIn(f"validate {study_path} --format text", guide)
+            self.assertFalse(template["participants"][0]["human_attestation"]["confirmed"])
+
+    def test_guide_rejects_invalid_json_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            study_path = Path(directory) / "invalid.json"
+            study_path.write_text("{not-json", encoding="utf-8")
+            stderr = io.StringIO()
+
+            with contextlib.redirect_stderr(stderr):
+                result = self.module.main(["guide", str(study_path)])
+
+            self.assertEqual(2, result)
+            self.assertIn("not valid JSON", stderr.getvalue())
 
     def test_invalid_json_produces_machine_readable_blocked_report(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

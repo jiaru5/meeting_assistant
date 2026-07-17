@@ -75,10 +75,10 @@
 | `production-readiness-check.sh` | 阻断非 project、缺少 E2E、生产工件或发布策略的候选版本 |
 | `release-credential-check.py` | 检查当前机器是否具备产出签名/公证 release 物料所需的 Apple release 工具和 `Developer ID Application` codesigning identity，可写出机器可读 prereq report；该入口不构建、不签名、不公证，也不验证已产出的 release bundle |
 | `release-inputs-report.py` | 仅服务显式 `developer-id` 分发模式：从已经生成的签名/公证 Release zip、DSSE/SLSA provenance attestation 和 Sigstore bundle 物料化 `.harness/release-inputs/` 下的 bundle/provenance/signature reports；可用 `--verify-release-bundle` 在写 report 前对 archive 内 `.app` 跑 `codesign`、`stapler` 和 `spctl` 提前拦截错误物料 |
-| `mvp1-experience-study.py` | 初始化、校验和汇总 MVP.1 的补充真人体验研究记录；只接受 3–5 名匿名且由人工明确声明的真人参与者，覆盖首次、回访和故障恢复任务，并检查是否仍有 open P0/P1；agent、自动化、截图和 XCUITest 不得计为真人参与者，完成率、时长、求助、误点、犹豫和状态理解只汇总而不应用未经确认的产品阈值 |
-| `mvp1-accessibility-walkthrough.py` | 初始化、校验和汇总 MVP.1 的真实窗口 VoiceOver / 键盘人工走查；要求先提供同一当前 HEAD、同一真实 `.app` identity 的成功 task xcresult report，并复核其 retained xcresult、xctestrun、pre-test binding 和八张截图未变化，再把记录绑定到当前 macOS、严格 codesign、`.app` executable SHA-256；固定检查焦点、播报、快捷键、selected 非纯颜色、技术详情和删除安全语义，并要求合成数据/privacy 人工声明；locator、agent、自动化、截图和 XCUITest 均不能替代人工观察 |
+| `mvp1-experience-study.py` | 初始化、只读 `guide`、校验和汇总 MVP.1 的补充真人体验研究记录；只接受 3–5 名匿名且由人工明确声明的真人参与者，覆盖首次、回访和故障恢复任务，并检查是否仍有 open P0/P1；agent、自动化、截图和 XCUITest 不得计为真人参与者，完成率、时长、求助、误点、犹豫和状态理解只汇总而不应用未经确认的产品阈值；`guide` 只输出填写任务卡，绝不写入、确认或代替人工记录 |
+| `mvp1-accessibility-walkthrough.py` | 初始化、只读 `guide`、校验和汇总 MVP.1 的真实窗口 VoiceOver / 键盘人工走查；要求先提供同一当前 HEAD、同一真实 `.app` identity 的成功 task xcresult report，并复核其 retained xcresult、xctestrun、pre-test binding 和八张截图未变化，再把记录绑定到当前 macOS、严格 codesign、`.app` executable SHA-256；固定检查焦点、播报、快捷键、selected 非纯颜色、技术详情和删除安全语义，并要求合成数据/privacy 人工声明；locator、agent、自动化、截图和 XCUITest 均不能替代人工观察；`guide` 只输出检查清单，绝不写入、确认或代替人工观察 |
 | `mvp1-task-xcresult.py` | 由 task app-bundle wrapper 调用的离线证据 verifier；wrapper 先冻结与当前 HEAD 完全一致的只读 verifier，以一次读取、摘要校验和执行同一 bytes 的 loader 同时驱动测试前 capture 与最终 verify，并保存测试前 binding 摘要；capture 绑定实际 `.xctestrun`、target app、UI runner、test bundle、严格 codesign/CDHash 和 executable SHA-256，测试后按同一 binding bytes 再逐项比较，并同时核对当前 HEAD/fingerprint；要求当前源码精确 17 条任务用例全部 Passed、无 failed/skipped/expected failure，导出 8 张规定 PNG 并检查 chunk/CRC、非零尺寸、IEND 和系统完整解码，记录 screenshot SHA-256；在全部 `xcresulttool` summary/tests 读取及附件导出完成后连续两次采集 retained xcresult content manifest 且必须一致，才写入最终清单；导出成功仍把截图视觉审查标为 pending |
-| `mvp1-screenshot-visual-review.py` | 初始化、校验和汇总 MVP.1 八张任务截图的真人逐图视觉审查；严格绑定同一当前 HEAD 的成功 17/17 task xcresult report、report SHA-256 与八张 non-symlink PNG 的 SHA-256，要求真人 attestation、合成数据/privacy 声明、逐图 pass/fail observation、failed screenshot finding 关联，以及 P0/P1 的 resolution 和 passed 人工复测；agent、自动化、XCUITest 和截图文件本身均不能计为人工视觉审查 |
+| `mvp1-screenshot-visual-review.py` | 初始化、只读 `guide`、校验和汇总 MVP.1 八张任务截图的真人逐图视觉审查；严格绑定同一当前 HEAD 的成功 17/17 task xcresult report、report SHA-256 与八张 non-symlink PNG 的 SHA-256，要求真人 attestation、合成数据/privacy 声明、逐图 pass/fail observation、failed screenshot finding 关联，以及 P0/P1 的 resolution 和 passed 人工复测；agent、自动化、XCUITest 和截图文件本身均不能计为人工视觉审查；`guide` 只输出逐图任务卡，绝不写入、确认或代替人工视觉审查 |
 | `review-report.sh` | 根据当前 diff 生成交付审查摘要 |
 | `lint.sh` | 运行已接入前端、后端和脚本 lint |
 | `test.sh` | 运行已接入单元、集成和组件测试 |
@@ -91,6 +91,10 @@
 | `vs-stage-check.py` | 检查 `07-development-plan.md` 的 VS-MA 状态表；`release` 模式要求 `VS-MA-14` 到 `VS-MA-22` 均为 `已达退出口径` 后才允许继续 PV/release gates |
 
 在 `framework` 或 `adoption` 模式且尚未创建实际组件时，应用命令可以明确跳过。进入 `project` 模式后，任何未注册组件或缺少 lint、test、build、architecture、security、SBOM、E2E 命令的情况必须失败。
+
+## 真人观察只读指南
+
+在填写 MVP.1 真人证据前，可分别运行 `./scripts/mvp1-screenshot-visual-review.py guide <review.json>`、`./scripts/mvp1-accessibility-walkthrough.py guide <walkthrough.json>` 和 `./scripts/mvp1-experience-study.py guide <study.json>`。三个入口只读取并复核既有 JSON，输出任务卡、隐私边界和后续 `validate` 命令；它们不写入 observation、结果或 attestation，不能代替真人观察。
 
 ## Meeting Assistant 组件命令事实归属
 

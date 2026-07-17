@@ -15,6 +15,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -56,7 +57,9 @@ EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNO
 PHONE_PATTERN = re.compile(r"(?<!\w)(?:\+?[0-9][0-9 ()-]{7,}[0-9])(?!\w)")
 RAW_SESSION_ID_PATTERN = re.compile(r"\b(?:session|sess)[-_][A-Za-z0-9][A-Za-z0-9._-]{5,}\b", re.IGNORECASE)
 NON_HUMAN_ATTESTOR_PATTERN = re.compile(
-    r"(?:\b(?:agent|ai|automation|automated|bot|robot|script|xctest|xcuitest)\b|智能体|自动化|机器人|脚本)",
+    r"(?:\b(?:agent|ai|automation|automated|bot|robot|script|xctest|xcuitest|"
+    r"codex|chatgpt|claude|gemini|llm)\b|\blanguage[ -]?model\b|"
+    r"智能体|自动化|机器人|脚本|大模型|模型)",
     re.IGNORECASE,
 )
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -162,6 +165,25 @@ def _validate_private_text(value: Any, *, path: str, errors: list[str]) -> None:
     ):
         if pattern.search(text):
             errors.append(f"{path} must not contain {label}")
+
+
+def _redact_private_text(value: Any) -> Any:
+    """Redact unsafe free text only in derived report output.
+
+    Validation continues to receive the original evidence document and report
+    its errors.  This helper is intentionally used on report copies, never on
+    the input review object.
+    """
+    if not isinstance(value, str):
+        return value
+    redacted = value
+    for pattern, replacement in (
+        (EMAIL_PATTERN, "[REDACTED_EMAIL]"),
+        (PHONE_PATTERN, "[REDACTED_PHONE]"),
+        (RAW_SESSION_ID_PATTERN, "[REDACTED_RAW_SESSION_ID]"),
+    ):
+        redacted = pattern.sub(replacement, redacted)
+    return redacted
 
 
 def _expect_exact_keys(
@@ -880,6 +902,66 @@ def _finding_counts(value: Any) -> dict[str, dict[str, int]]:
     }
 
 
+def _redacted_screenshot_reviews(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    redacted: list[dict[str, Any]] = []
+    for screenshot in value:
+        if not isinstance(screenshot, dict):
+            continue
+        copy = dict(screenshot)
+        if "observation" in copy:
+            copy["observation"] = _redact_private_text(copy["observation"])
+        redacted.append(copy)
+    return redacted
+
+
+def _redacted_findings(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    redacted: list[dict[str, Any]] = []
+    for finding in value:
+        if not isinstance(finding, dict):
+            continue
+        copy = dict(finding)
+        for field in ("finding_id", "summary", "resolution"):
+            if field in copy:
+                copy[field] = _redact_private_text(copy[field])
+        if "retest" in copy:
+            retest = copy["retest"]
+            if isinstance(retest, dict):
+                retest_copy = dict(retest)
+                if "observation" in retest_copy:
+                    retest_copy["observation"] = _redact_private_text(
+                        retest_copy["observation"]
+                    )
+                copy["retest"] = retest_copy
+            else:
+                copy["retest"] = _redact_private_text(retest)
+        redacted.append(copy)
+    return redacted
+
+
+def _redacted_validation_for_report(validation: dict[str, Any]) -> dict[str, Any]:
+    redacted = dict(validation)
+    errors = validation.get("errors")
+    if isinstance(errors, list):
+        redacted["errors"] = [_redact_private_text(error) for error in errors]
+    findings = validation.get("open_p0_p1_findings")
+    if isinstance(findings, list):
+        redacted_findings: list[dict[str, Any]] = []
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            copy = dict(finding)
+            for field in ("finding_id", "summary"):
+                if field in copy:
+                    copy[field] = _redact_private_text(copy[field])
+            redacted_findings.append(copy)
+        redacted["open_p0_p1_findings"] = redacted_findings
+    return redacted
+
+
 def build_report(
     review: Any,
     *,
@@ -893,6 +975,7 @@ def build_report(
     document = review if isinstance(review, dict) else {}
     screenshots = document.get("screenshots")
     findings = document.get("findings")
+    report_validation = _redacted_validation_for_report(validation)
     return {
         "report_schema": REPORT_SCHEMA,
         "report_type": "mvp1-manual-screenshot-visual-review",
@@ -901,13 +984,9 @@ def build_report(
         "subject_commit": document.get("subject_commit"),
         "task_evidence": document.get("task_evidence") if isinstance(document.get("task_evidence"), dict) else {},
         "status": "ready_for_review" if validation["ready_for_review"] else "blocked",
-        **validation,
-        "screenshot_reviews": [item for item in screenshots if isinstance(item, dict)]
-        if isinstance(screenshots, list)
-        else [],
-        "findings": [item for item in findings if isinstance(item, dict)]
-        if isinstance(findings, list)
-        else [],
+        **report_validation,
+        "screenshot_reviews": _redacted_screenshot_reviews(screenshots),
+        "findings": _redacted_findings(findings),
         "finding_counts": _finding_counts(findings),
         "evidence_boundary": dict(EVIDENCE_BOUNDARY),
     }
@@ -938,6 +1017,110 @@ def render_text(report: dict[str, Any]) -> str:
 
 def _markdown_escape(value: Any) -> str:
     return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+SCREENSHOT_OBSERVATION_HINTS = {
+    "00-meetings-recent": "查看最近会议是否以用户可读的标题或时间、状态、摘要和 transcript 可用性呈现，并能看出如何重新打开该会议。",
+    "01-meetings-empty": "查看空状态是否把新建录制作为清晰的下一步，而不是要求用户知道 CLI、Finder 或内部会话标识。",
+    "02-new-recording-ready": "查看标题、录制目标和音轨意图是否可理解，并确认当前任务只有一个清晰的主操作。",
+    "03-recording-live": "查看录制指示、已录制时长、目标或音轨摘要是否可见，且 Stop 是否是唯一突出的当前操作。",
+    "04-recording-saved": "查看保存、降级或缺失产物是否被解释，并确认生成 transcript 是由用户主动选择的下一步。",
+    "05-processing": "查看进度、数据安全边界和可恢复路径是否明确；如果显示失败或阻断，观察是否同时说明发生了什么、数据是否安全和下一步动作。",
+    "06-transcript-ready": "查看 transcript 层级、匿名 speaker 提示以及 Copy/Export 操作是否容易定位，删除操作是否保持次级且明确的破坏性语义。",
+    "07-diagnostics": "查看技术详情是否在 diagnostics 上下文中渐进披露，并确认用户可读状态和下一步不会被原始路径、命令或 session 标识淹没。",
+}
+
+
+def render_guide(review: Any, *, source: Path) -> str:
+    """Render a read-only human observation guide for a bound review document.
+
+    A fresh or partial review intentionally fails the attestation and recording
+    portions of validation.  It remains guideable when its structure and
+    trusted task binding are valid; those checks prevent a stale or malformed
+    document from being used as a human-review guide.
+    """
+    validation = validate_visual_review(review)
+    checks = validation["checks"]
+    if not checks["structure_valid"] or not checks["subject_binding_valid"]:
+        errors = "\n".join(_redacted_validation_for_report(validation)["errors"])
+        raise VisualReviewToolError(
+            "visual review guide requires a structurally valid document with current trusted task evidence"
+            + (f": {errors}" if errors else "")
+        )
+    if not isinstance(review, dict):
+        raise VisualReviewToolError("visual review guide requires a JSON object")
+    task_evidence = review.get("task_evidence")
+    screenshots = task_evidence.get("screenshots") if isinstance(task_evidence, dict) else None
+    if not isinstance(screenshots, list) or len(screenshots) != len(REQUIRED_SCREENSHOTS):
+        raise VisualReviewToolError("visual review guide requires the fixed bound screenshot set")
+
+    by_name: dict[str, dict[str, str]] = {}
+    for screenshot in screenshots:
+        if not isinstance(screenshot, dict):
+            raise VisualReviewToolError("visual review guide requires screenshot objects")
+        name = screenshot.get("name")
+        path = screenshot.get("path")
+        sha256 = screenshot.get("sha256")
+        if (
+            not isinstance(name, str)
+            or not isinstance(path, str)
+            or not isinstance(sha256, str)
+            or name not in REQUIRED_SCREENSHOTS
+        ):
+            raise VisualReviewToolError("visual review guide requires valid bound screenshot metadata")
+        by_name[name] = {"path": path, "sha256": sha256}
+    if tuple(by_name) != REQUIRED_SCREENSHOTS:
+        raise VisualReviewToolError("visual review guide requires the fixed ordered screenshot names")
+
+    recorded_count = validation["recorded_screenshot_count"]
+    status = "已完成" if validation["ready_for_review"] else "尚未完成"
+    validate_command = (
+        "./scripts/mvp1-screenshot-visual-review.py validate "
+        f"{shlex.quote(str(source))} --format json"
+    )
+    lines = [
+        "# MVP.1 截图人工视觉审查指南",
+        "",
+        f"- 审查记录：`{_markdown_escape(source)}`",
+        f"- Subject commit：`{_markdown_escape(review.get('subject_commit', '-'))}`",
+        f"- 当前记录：{recorded_count}/{len(REQUIRED_SCREENSHOTS)}；**{status}**",
+        "- 本命令只读取并重新校验绑定；不会写入结果、确认、attestation 或任何文件。",
+        "",
+        "## 人工与隐私边界",
+        "",
+        "请由真人逐张自行打开下列图片并直接观察。Agent、自动化、截图文件和 XCUITest 都不能替代人工观察；本工具也不能独立证明观察者身份。",
+        "只使用合成会议数据；不要在 observation、finding、resolution 或 retest 中记录姓名、联系方式、真实会议内容、完整 transcript 或原始 session identifier。",
+        "不要把未观察的图片填为 `pass`，也不要在未完成逐图观察前把 attestation 填为 confirmed。",
+        "",
+        "## 逐图观察",
+        "",
+    ]
+    for index, name in enumerate(REQUIRED_SCREENSHOTS, start=1):
+        screenshot = by_name[name]
+        lines.extend(
+            [
+                f"### {index}. `{_markdown_escape(name)}`",
+                "",
+                f"- 图片路径：`{_markdown_escape(screenshot['path'])}`",
+                f"- SHA-256：`{_markdown_escape(screenshot['sha256'])}`",
+                f"- 人工观察提示：{SCREENSHOT_OBSERVATION_HINTS[name]}",
+                "- 记录时必须人工填写明确的 `pass` 或 `fail`，以及非空 observation。",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## 下一步",
+            "",
+            "完成真人逐图观察、finding 和 attestation 后，运行：",
+            "",
+            f"```zsh\n{validate_command}\n```",
+            "",
+            "`ready_for_review` 只表示人工截图审查记录完整，不等于产品验收或发布就绪。",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def render_markdown(report: dict[str, Any]) -> str:
@@ -1146,6 +1329,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     init_parser.add_argument("output")
     _add_template_binding_arguments(init_parser)
 
+    guide_parser = subparsers.add_parser(
+        "guide", help="Render a read-only human visual-observation guide."
+    )
+    guide_parser.add_argument("review")
+
     validate_parser = subparsers.add_parser("validate", help="Validate visual-review evidence.")
     validate_parser.add_argument("review")
     validate_parser.add_argument("--format", choices=("text", "json"), default="text")
@@ -1185,6 +1373,15 @@ def main(argv: list[str]) -> int:
         return 0
 
     review_path = _resolve_path(args.review, label="visual review")
+    if args.command == "guide":
+        try:
+            review = _load_review(review_path)
+            print(render_guide(review, source=review_path), end="")
+        except VisualReviewToolError as exc:
+            print(f"MVP.1 screenshot visual review guide failed: {exc}", file=sys.stderr)
+            return 2
+        return 0
+
     outputs: list[tuple[str, Path]] = []
     if args.json_output:
         outputs.append(("JSON", _resolve_path(args.json_output, label="JSON output")))

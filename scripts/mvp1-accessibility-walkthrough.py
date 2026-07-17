@@ -9,6 +9,7 @@ import os
 import platform
 import plistlib
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -32,6 +33,12 @@ MACOS_VERSION_PATTERN = re.compile(r"^[0-9]+(?:\.[0-9]+){1,2}$")
 EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 PHONE_PATTERN = re.compile(r"(?<!\w)(?:\+?[0-9][0-9 ()-]{7,}[0-9])(?!\w)")
 RAW_SESSION_ID_PATTERN = re.compile(r"\b(?:session|sess)[-_][A-Za-z0-9][A-Za-z0-9._-]{5,}\b", re.IGNORECASE)
+NON_HUMAN_ATTESTOR_PATTERN = re.compile(
+    r"(?:\b(?:agent|ai|automation|automated|bot|robot|script|xctest|xcuitest|"
+    r"codex|chatgpt|claude|gemini|llm|language[ -]?model)\b|"
+    r"智能体|自动化|机器人|脚本|模型|大模型)",
+    re.IGNORECASE,
+)
 MAX_FREE_TEXT_LENGTH = 1000
 TRUSTED_XCRUN = Path("/usr/bin/xcrun")
 TRUSTED_ENV = Path("/usr/bin/env")
@@ -176,6 +183,39 @@ def _validate_private_text(value: Any, *, path: str, errors: list[str]) -> None:
     ):
         if pattern.search(text):
             errors.append(f"{path} must not contain {label}")
+
+
+def _redact_private_text_for_report(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    if any(pattern.search(value) for pattern in (EMAIL_PATTERN, PHONE_PATTERN, RAW_SESSION_ID_PATTERN)):
+        return "[REDACTED: prohibited private data]"
+    return value
+
+
+def _redact_check_for_report(check: dict[str, Any]) -> dict[str, Any]:
+    redacted = dict(check)
+    if "observation" in redacted:
+        redacted["observation"] = _redact_private_text_for_report(redacted["observation"])
+    return redacted
+
+
+def _redact_finding_for_report(finding: dict[str, Any]) -> dict[str, Any]:
+    redacted = dict(finding)
+    for field in ("finding_id", "summary", "resolution"):
+        if field in redacted:
+            redacted[field] = _redact_private_text_for_report(redacted[field])
+    retest = redacted.get("retest")
+    if isinstance(retest, dict):
+        redacted_retest = dict(retest)
+        if "observation" in redacted_retest:
+            redacted_retest["observation"] = _redact_private_text_for_report(
+                redacted_retest["observation"]
+            )
+        redacted["retest"] = redacted_retest
+    elif "retest" in redacted:
+        redacted["retest"] = _redact_private_text_for_report(redacted["retest"])
+    return redacted
 
 
 def _normalize_app_path(value: str) -> str:
@@ -891,6 +931,11 @@ def _validate_attestation(value: Any, *, errors: list[str]) -> None:
         )
     if not _is_nonempty_string(value.get("attested_by_role")):
         errors.append("observer_attestation.attested_by_role must be a non-empty role or pseudonym")
+    elif NON_HUMAN_ATTESTOR_PATTERN.search(str(value["attested_by_role"])):
+        errors.append(
+            "observer_attestation.attested_by_role must not self-identify an agent, automation, "
+            "XCUITest, Codex, language model, or other non-human observer"
+        )
     if value.get("statement") != ATTESTATION_STATEMENT:
         errors.append("observer_attestation.statement must match the manual observer statement")
     if value.get("synthetic_data_confirmed") is not True:
@@ -1150,7 +1195,10 @@ def validate_walkthrough(
         )
     for finding in open_p0_p1:
         blocker_errors.append(
-            f"open {finding['severity']} finding {finding['finding_id']}: {finding['summary']}"
+            "open "
+            f"{finding['severity']} finding "
+            f"{_redact_private_text_for_report(finding['finding_id'])}: "
+            f"{_redact_private_text_for_report(finding['summary'])}"
         )
 
     structure_valid = not schema_errors
@@ -1230,6 +1278,18 @@ def build_report(
     document = walkthrough if isinstance(walkthrough, dict) else {}
     raw_checks = document.get("checks", [])
     raw_findings = document.get("findings", [])
+    redacted_validation = dict(validation)
+    redacted_validation["errors"] = [
+        _redact_private_text_for_report(error) for error in validation["errors"]
+    ]
+    redacted_validation["open_p0_p1_findings"] = [
+        {
+            **finding,
+            "finding_id": _redact_private_text_for_report(finding.get("finding_id")),
+            "summary": _redact_private_text_for_report(finding.get("summary")),
+        }
+        for finding in validation["open_p0_p1_findings"]
+    ]
     return {
         "report_schema": REPORT_SCHEMA,
         "report_type": "mvp1-manual-accessibility-walkthrough",
@@ -1247,11 +1307,17 @@ def build_report(
             else {}
         ),
         "status": "ready_for_review" if validation["ready_for_review"] else "blocked",
-        **validation,
-        "walkthrough_checks": [check for check in raw_checks if isinstance(check, dict)]
+        **redacted_validation,
+        "walkthrough_checks": [
+            _redact_check_for_report(check) for check in raw_checks if isinstance(check, dict)
+        ]
         if isinstance(raw_checks, list)
         else [],
-        "findings": [finding for finding in raw_findings if isinstance(finding, dict)]
+        "findings": [
+            _redact_finding_for_report(finding)
+            for finding in raw_findings
+            if isinstance(finding, dict)
+        ]
         if isinstance(raw_findings, list)
         else [],
         "finding_counts": _finding_counts(raw_findings),
@@ -1382,6 +1448,62 @@ def render_markdown(report: dict[str, Any]) -> str:
                 "走查应使用合成会议数据；自由文本 observation 和 finding 不得记录参与者姓名、"
                 "联系方式、真实会议内容、完整 transcript 或 raw session id。"
             ),
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_guide(report: dict[str, Any], *, source: str) -> str:
+    """Render instructions only; this must never create or attest evidence."""
+    status = (
+        "可进入人工评审"
+        if report["ready_for_review"]
+        else "阻断（请先修复绑定、结构或未填写的真人记录）"
+    )
+    validate_command = (
+        "./scripts/mvp1-accessibility-walkthrough.py validate "
+        f"{shlex.quote(source)} --format text"
+    )
+    subject = report.get("subject", {})
+    lines = [
+        "# MVP.1 VoiceOver / 键盘实机走查录入指南",
+        "",
+        f"- 记录文件：`{source}`",
+        f"- 绑定 app：`{subject.get('tested_app_path', '-')}`",
+        f"- 当前校验状态：**{status}**",
+        (
+            "- 本命令只读取并复核现有 JSON；不会写入文件、不会自动填写检查，"
+            "也不会把 observer_attestation 设为 confirmed。"
+        ),
+        (
+            "- 状态为阻断时，本指南仍可用于补齐记录，但该 JSON 不能被当作有效的当前真人证据。"
+            if not report["ready_for_review"]
+            else "- 当前 JSON 已通过结构校验；仍须由人工评审，不等于产品验收。"
+        ),
+        "",
+        "## 开始前",
+        "",
+        "1. 使用记录绑定的真实 `.app`、真实 macOS 窗口和同一 task evidence；不要改用同名旧 app。",
+        "2. 开启 VoiceOver，并只使用键盘完成每项检查；不要把 locator、自动化、截图或 XCUITest 当作观察结果。",
+        "3. 使用合成会议数据；不要记录姓名、联系方式、真实会议内容、完整 transcript 或 raw session id。",
+        "4. `attested_by_role` 只能填写真人观察者的角色或 pseudonym；agent、自动化、XCUITest 或语言模型不能计作观察者。",
+        "",
+        "## 固定检查清单",
+        "",
+    ]
+    for index, (check_id, requirement) in enumerate(CHECK_DEFINITIONS, start=1):
+        lines.append(f"{index}. `{check_id}`：{requirement}")
+    lines.extend(
+        [
+            "",
+            "## 录入与签署",
+            "",
+            "- 每项填写 `pass` 或 `fail`，并填写非空、脱敏的 direct observation。工具会保守拒绝邮箱、电话和 raw session id，但无法自动识别姓名或真实会议正文。",
+            "- 每个 fail 都要关联 finding；open P0/P1 会阻断。closed P0/P1 需要 resolution，以及真人直接复测的 passed 结果和 observation。",
+            "- 只有在真人观察者亲自完成全部固定检查后，才将 observer_attestation.confirmed 设为 true。该声明不是独立身份认证。",
+            f"填写完成后运行：`{validate_command}`",
+            "`ready_for_review` 只表示证据包可进入人工评审，不等于产品验收或发布就绪。",
             "",
         ]
     )
@@ -1551,6 +1673,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     report_parser.add_argument("--json-output")
     report_parser.add_argument("--markdown-output")
     report_parser.add_argument("--codesign-tool", default="/usr/bin/codesign", help=argparse.SUPPRESS)
+
+    guide_parser = subparsers.add_parser(
+        "guide", help="Read a walkthrough and print a no-write human-recording guide."
+    )
+    guide_parser.add_argument("walkthrough")
+    guide_parser.add_argument("--codesign-tool", default="/usr/bin/codesign", help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
@@ -1584,6 +1712,21 @@ def main(argv: list[str]) -> int:
         print(
             "No real-app walkthrough evidence has been recorded; a human observer must complete every check and attest it."
         )
+        return 0
+
+    if args.command == "guide":
+        walkthrough_path = _resolve_path(args.walkthrough)
+        try:
+            walkthrough = load_walkthrough(walkthrough_path)
+        except WalkthroughToolError as exc:
+            print(f"MVP.1 accessibility walkthrough guide failed: {exc}", file=sys.stderr)
+            return 2
+        report = build_report(
+            walkthrough,
+            source=str(walkthrough_path),
+            codesign_tool=args.codesign_tool,
+        )
+        print(render_guide(report, source=str(walkthrough_path)), end="")
         return 0
 
     report = _load_report(args.walkthrough, codesign_tool=args.codesign_tool)
