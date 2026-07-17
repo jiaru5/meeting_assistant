@@ -404,6 +404,7 @@ public struct DesignedNativeShellView: View {
                         .frame(maxWidth: 960, alignment: .topLeading)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
+                .id(contentScrollIdentity)
             }
             .background(Color(nsColor: .windowBackgroundColor))
         }
@@ -730,6 +731,10 @@ public struct DesignedNativeShellView: View {
         .padding(20)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Meeting Assistant navigation")
+    }
+
+    private var contentScrollIdentity: String {
+        coordinator.route.rawValue + ":" + (coordinator.currentSession?.id ?? "none")
     }
 
     private func navigationButton(

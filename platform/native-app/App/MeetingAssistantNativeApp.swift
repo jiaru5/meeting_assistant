@@ -370,6 +370,11 @@ private struct NativeControlPlaneRootView: View {
             loadedTranscriptSessionID = nil
         case .failed:
             workspaceCoordinator.recordingDidFail(hasActiveSession: recordingState.sessionID != nil)
+            if recordingState.errorCode == .permissionDenied {
+                Task {
+                    await permissionViewModel.refresh(workspaceURL: workspaceURL)
+                }
+            }
         case .idle, .ready:
             break
         }
@@ -1390,6 +1395,7 @@ private struct NativeAppWindowPlacement {
 
 private struct NativeControlPlaneFixtureConfiguration {
     let dependencyResponse: DependencyCheckResponse
+    let refreshedDependencyResponse: DependencyCheckResponse?
     let recordingScript: FakeRecordingCommandClient.Script
     let processingTranscriptScript: ProcessingCommandFakeClient.TranscriptScript
     let processingSpeakerLabelsScript: ProcessingCommandFakeClient.SpeakerLabelsScript
@@ -1409,6 +1415,7 @@ private struct NativeControlPlaneFixtureConfiguration {
 
     init(
         dependencyResponse: DependencyCheckResponse,
+        refreshedDependencyResponse: DependencyCheckResponse? = nil,
         recordingScript: FakeRecordingCommandClient.Script,
         processingTranscriptScript: ProcessingCommandFakeClient.TranscriptScript,
         processingSpeakerLabelsScript: ProcessingCommandFakeClient.SpeakerLabelsScript,
@@ -1425,6 +1432,7 @@ private struct NativeControlPlaneFixtureConfiguration {
         initialSession: MeetingSessionSummary? = nil
     ) {
         self.dependencyResponse = dependencyResponse
+        self.refreshedDependencyResponse = refreshedDependencyResponse
         self.recordingScript = recordingScript
         self.processingTranscriptScript = processingTranscriptScript
         self.processingSpeakerLabelsScript = processingSpeakerLabelsScript
@@ -1461,7 +1469,9 @@ private struct NativeControlPlaneFixtureConfiguration {
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> any DependencyCheckRunning {
         if Self.usesStaticDependencyFixture(environment) {
-            return StaticDependencyCheckRunner(response: dependencyResponse)
+            return StaticDependencyCheckRunner(
+                response: refreshedDependencyResponse ?? dependencyResponse
+            )
         }
         return ProcessingCLIDependencyCheckRunner(environment: environment)
     }
@@ -1683,6 +1693,7 @@ private struct NativeControlPlaneFixtureConfiguration {
         case "start-failure":
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .readyFixture,
+                refreshedDependencyResponse: .screenRecordingDeniedFixture,
                 recordingScript: .startFailure(
                     code: "permission_denied",
                     message: "Screen Recording permission is missing."
@@ -2683,6 +2694,25 @@ private extension DependencyCheckResponse {
                 required: true,
                 ok: false,
                 message: "Microphone permission is denied."
+            )
+        }
+    )
+
+    static let screenRecordingDeniedFixture = DependencyCheckResponse(
+        ok: false,
+        requestID: "local-app-screen-recording-denied",
+        code: "permission_denied",
+        message: "Screen Recording permission is denied.",
+        checks: readyFixture.checks.map { check in
+            guard check.id == "permission.screen_recording" else {
+                return check
+            }
+            return DependencyCheckItem(
+                id: check.id,
+                status: "denied",
+                required: check.required,
+                ok: false,
+                message: "Screen Recording permission is denied. Open System Settings to grant access."
             )
         }
     )

@@ -266,7 +266,7 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertOnlyPrimaryTaskActions([ID.copyTranscript, ID.exportTranscript], in: app)
     }
 
-    func testStartFailureRemainsVisibleAcrossNavigationAndOffersRecovery() {
+    func testStartPermissionFailureRefreshesReadinessAndKeepsRecoveryVisibleAcrossNavigation() {
         let app = launchApp(fixture: "start-failure")
 
         tapButton(ID.newRecordingButton, in: app)
@@ -275,27 +275,26 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
         assertElement(ID.newRecordingHeading, in: app, contains: "Set up your recording")
         assertText("Recording did not start", in: app)
         assertText("Screen Recording permission is missing.", in: app)
+        assertElement(ID.readiness, in: app, contains: "Setup needs attention")
         let recovery = button(ID.startRecording, in: app)
-        XCTAssertTrue(recovery.isEnabled, "Expected the failed start task to offer a retry.")
+        XCTAssertFalse(recovery.isEnabled, "Expected the retry to wait for fresh permission readiness.")
         XCTAssertTrue(recovery.label.contains("Try recording again"), "Expected the primary action to become an explicit retry.")
-        assertOnlyPrimaryTaskActions([ID.startRecording], in: app)
+        assertOnlyPrimaryTaskActions([ID.checkAgain], disabled: [ID.startRecording], in: app)
 
         tapButton(ID.diagnosticsNavigation, in: app)
         assertElement(ID.diagnosticsHeading, in: app, contains: "Keep Meeting Assistant ready")
+        assertElementIsVisible(ID.diagnosticsHeading, in: app)
         assertExists(ID.diagnosticsWorkspacePath, in: app)
+        assertExists(ID.openScreenRecordingSettings, in: app)
         assertOnlyPrimaryTaskActions([], in: app)
         attachScreenshot("07-diagnostics", of: app)
 
         tapButton(ID.newRecordingNavigation, in: app)
         assertElement(ID.newRecordingHeading, in: app, contains: "Set up your recording")
+        assertElementIsVisible(ID.newRecordingHeading, in: app)
         assertText("Recording did not start", in: app)
         assertText("Screen Recording permission is missing.", in: app)
-        assertOnlyPrimaryTaskActions([ID.startRecording], in: app)
-
-        tapButton(ID.startRecording, in: app)
-        assertText("Recording did not start", in: app)
-        assertText("Screen Recording permission is missing.", in: app)
-        XCTAssertTrue(button(ID.startRecording, in: app).isEnabled)
+        assertOnlyPrimaryTaskActions([ID.checkAgain], disabled: [ID.startRecording], in: app)
     }
 
     func testBlockedPreflightFailsClosedWithOneEnabledRecoveryAction() {
@@ -1163,6 +1162,29 @@ final class DesignedNativeShellAppBundleTests: XCTestCase {
             result,
             .completed,
             "Expected \(identifier) label or value to contain \(expectedText). Actual label: \(element.label), value: \(String(describing: element.value))",
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertElementIsVisible(
+        _ identifier: String,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let element = element(identifier, in: app)
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.exists, "Expected an app window.", file: file, line: line)
+        XCTAssertFalse(
+            element.frame.isEmpty,
+            "Expected " + identifier + " to have a visible frame.",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            window.frame.intersects(element.frame),
+            "Expected " + identifier + " to be visible in the app window.",
             file: file,
             line: line
         )
