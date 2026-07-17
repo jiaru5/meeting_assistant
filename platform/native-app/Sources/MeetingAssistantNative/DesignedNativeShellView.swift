@@ -386,7 +386,7 @@ public struct DesignedNativeShellView: View {
     public var body: some View {
         HStack(spacing: 0) {
             sidebar
-                .frame(width: 244)
+                .frame(width: 276)
                 .background(Color(nsColor: .controlBackgroundColor))
 
             Divider()
