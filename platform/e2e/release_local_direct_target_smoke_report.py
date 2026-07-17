@@ -214,7 +214,7 @@ def validate_same_chain_report(report: dict[str, Any], findings: list[str]) -> d
     if not isinstance(action_markers, list):
         findings.append(f"{label} must include actions_markers")
         action_markers = []
-    for marker in ("Copy complete.", "Export complete.", "Delete complete."):
+    for marker in ("Copy complete.", "Transcript exported.", "Delete complete."):
         if marker not in action_markers:
             findings.append(f"{label} missing action marker: {marker}")
     if report.get("export_exists") is not True:

@@ -81,7 +81,7 @@ class ReleaseLocalDirectTargetSmokeReportTests(unittest.TestCase):
                     "actions_markers": [
                         "Transcript actions are ready or action controls enabled.",
                         "Copy complete.",
-                        "Export complete.",
+                        "Transcript exported.",
                         "Delete complete.",
                     ],
                     "export_exists": True,

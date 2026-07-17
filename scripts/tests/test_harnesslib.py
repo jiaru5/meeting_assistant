@@ -743,7 +743,7 @@ class HarnessValidationTests(unittest.TestCase):
                         "expected_terms_found": ["HTTP", "LLM", "clean architecture"],
                         "actions_markers": [
                             "Copy complete.",
-                            "Export complete.",
+                            "Transcript exported.",
                             "Delete complete.",
                         ],
                     },

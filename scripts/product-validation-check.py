@@ -263,7 +263,7 @@ def validate_local_functional_report(root: Path, report_path: Path | None) -> li
     if not isinstance(action_markers, list):
         failures.append("local-functional report must include functional_checks.actions_markers")
         action_markers = []
-    for marker in ("Copy complete.", "Export complete.", "Delete complete."):
+    for marker in ("Copy complete.", "Transcript exported.", "Delete complete."):
         if marker not in action_markers:
             failures.append(f"local-functional report missing action marker: {marker}")
 

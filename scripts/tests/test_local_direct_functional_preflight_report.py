@@ -120,7 +120,7 @@ class LocalDirectFunctionalPreflightReportTests(unittest.TestCase):
                         "stage_passed": stage_passed,
                         "expected_terms_found": expected_terms_found
                         or ["HTTP", "LLM", "clean architecture"],
-                        "actions_markers": ["Copy complete.", "Export complete.", "Delete complete."],
+                        "actions_markers": ["Copy complete.", "Transcript exported.", "Delete complete."],
                         "failure_context": failure_context or [],
                     },
                     "failure_context": failure_context or [],
