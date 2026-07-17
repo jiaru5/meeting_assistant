@@ -137,10 +137,17 @@ class HarnessValidationTests(unittest.TestCase):
                 ".git",
                 ".harness",
                 "__pycache__",
+                "build",
                 "example-smart_team-harness_engineering",
             ),
         )
         return fixture
+
+    def test_copy_repo_fixture_excludes_ignored_build_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+
+            self.assertEqual(list(fixture.glob("platform/*/build")), [])
 
     def init_git_baseline(self, fixture: Path) -> None:
         subprocess.run(["git", "init", "-b", "main"], cwd=fixture, check=True, capture_output=True, text=True)

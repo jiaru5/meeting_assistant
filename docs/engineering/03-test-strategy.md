@@ -110,6 +110,7 @@ native-app 的默认组件 `test` gate 优先服务本地快速反馈：Swift Te
 4. E2E seed 只维护全栈路径所需的最小稳定 fixture。
 5. dev seed 可以更丰富，但不得成为产品事实源。
 6. 集成测试和 E2E 使用的数据库、中间件和外部依赖模拟服务必须由 Docker Compose、Testcontainers 或测试进程内 mock 提供。
+7. Harness 自测试如需复制仓库作为临时 fixture，必须排除 Git 已忽略的生成构建输出（包括 `platform/*/build/`），并只在 fixture 内重建该测试显式需要的受控产物；宿主机遗留的 Xcode、Docker 或其他构建输出不得影响自测成本或结果。
 
 ## 最低测试要求
 
