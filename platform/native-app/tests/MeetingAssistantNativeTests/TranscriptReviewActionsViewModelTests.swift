@@ -239,6 +239,10 @@ struct TranscriptReviewActionsViewModelTests {
         ])
         #expect(viewModel.state.statusText == "Export complete.")
         #expect(viewModel.state.successSummary == "Transcript exported.")
+        #expect(viewModel.state.technicalDetails == [
+            "Session ID: session-actions",
+            "Export path: /tmp/actions.md",
+        ])
     }
 
     @Test

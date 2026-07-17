@@ -332,21 +332,25 @@ def wait_for_pasteboard(transcript: str, timeout: int) -> str:
 
 
 def exported_path_from_snapshot(text: str) -> Optional[Path]:
-    marker = "value=Exported markdown transcript to "
-    for line in text.splitlines():
-        if marker not in line:
-            continue
-        raw_path = line.split(marker, 1)[1].strip()
-        if raw_path.endswith("."):
-            raw_path = raw_path[:-1]
-        if raw_path:
-            return Path(raw_path)
+    for marker in (
+        "value=Exported markdown transcript to ",
+        "value=Export path: ",
+    ):
+        for line in text.splitlines():
+            if marker not in line:
+                continue
+            raw_path = line.split(marker, 1)[1].strip()
+            if raw_path.endswith("."):
+                raw_path = raw_path[:-1]
+            if raw_path:
+                return Path(raw_path)
     return None
 
 
 def wait_for_export(transcript: str, timeout: int) -> str:
     global actual_export_path
     deadline = time.monotonic() + timeout
+    technical_details_revealed = False
     while time.monotonic() < deadline:
         text = snapshot(timeout=120)
         if "Export complete." not in text:
@@ -354,6 +358,10 @@ def wait_for_export(transcript: str, timeout: int) -> str:
             continue
         observed_export_path = exported_path_from_snapshot(text)
         if observed_export_path is None:
+            if not technical_details_revealed:
+                press_with_retry("ma.meetingDetail.technicalDetails", min(timeout, 30))
+                checked_markers.append("Technical details opened for export path.")
+                technical_details_revealed = True
             time.sleep(0.5)
             continue
         actual_export_path = observed_export_path

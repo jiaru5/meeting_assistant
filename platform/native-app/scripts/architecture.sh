@@ -515,7 +515,9 @@ grep -q "ma.transcriptAction.deleteConfirmButton" scripts/local-direct-actions-s
 grep -q "requested_export_path" scripts/local-direct-actions-smoke.sh
 grep -q "actual_export_path" scripts/local-direct-actions-smoke.sh
 grep -q "Exported markdown transcript to" scripts/local-direct-actions-smoke.sh
+grep -q "Export path: " scripts/local-direct-actions-smoke.sh
 grep -q "exported_path_from_snapshot" scripts/local-direct-actions-smoke.sh
+grep -q "ma.meetingDetail.technicalDetails" scripts/local-direct-actions-smoke.sh
 grep -q "Transcript actions are ready." scripts/local-direct-actions-smoke.sh
 grep -q "Copy complete." scripts/local-direct-actions-smoke.sh
 grep -q "Export complete." scripts/local-direct-actions-smoke.sh
