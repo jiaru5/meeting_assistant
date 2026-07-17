@@ -558,6 +558,39 @@ struct MeetingWorkspaceCoordinatorTests {
     }
 
     @Test
+    func retryingARecoveredWorkspaceClearsTheReadFailureAndPublishesItsMeetings() async throws {
+        let workspace = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ma-workspace-retry-\(UUID().uuidString)")
+        try Data("not a workspace directory".utf8).write(to: workspace)
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let coordinator = makeCoordinator(workspaceURL: workspace)
+
+        await coordinator.refreshSessions()
+
+        #expect(coordinator.workspaceError?.contains("could not read") == true)
+        #expect(coordinator.workspaceTechnicalError?.contains(workspace.path) == true)
+        #expect(coordinator.recentSessions.isEmpty)
+
+        try FileManager.default.removeItem(at: workspace)
+        let recoveredID = "session-recovered-workspace"
+        try writeDeletionWorkspaceSession(
+            workspace: workspace,
+            sessionID: recoveredID,
+            title: "Recovered workspace meeting",
+            status: "recorded",
+            artifacts: []
+        )
+
+        await coordinator.refreshSessions()
+
+        #expect(coordinator.workspaceError == nil)
+        #expect(coordinator.workspaceTechnicalError == nil)
+        #expect(coordinator.recentSessions.map(\.id) == [recoveredID])
+        #expect(coordinator.recentSessions.first?.title == "Recovered workspace meeting")
+        #expect(!coordinator.sessionsAreLoading)
+    }
+
+    @Test
     func stableProjectionWithoutRegisteredTranscriptsInvalidatesOlderValidation() async throws {
         let pendingSession = summary(
             id: "session-old-pending",

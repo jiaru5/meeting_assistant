@@ -81,6 +81,32 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         XCTAssertTrue(button("ma.recording.startButton", in: app).isEnabled)
     }
 
+    func testMeetingsWorkspaceRetryReloadsARecoveredWorkspaceFromLaunchedAppBundle() throws {
+        let fixture = try AppWorkspaceRecoveryFixture()
+        defer { fixture.cleanup() }
+        let app = launchApp(workspaceURL: fixture.workspaceURL)
+
+        assertElement("ma.meetings.heading", in: app, contains: "Meetings")
+        assertElement(
+            "ma.meetings.refresh",
+            in: app,
+            contains: "Try again"
+        )
+
+        try fixture.recover()
+        tapButton("ma.meetings.refresh", in: app)
+
+        assertElement(
+            "ma.meetings.row.\(fixture.sessionID)",
+            in: app,
+            contains: "Recovered workspace meeting"
+        )
+        XCTAssertFalse(
+            rawElement("ma.meetings.refresh", in: app).waitForExistence(timeout: 8),
+            "Expected a successful refresh to clear the workspace recovery action."
+        )
+    }
+
     func testControlledNativeRecordingClientWritesSessionArtifactsFromLaunchedAppBundle() throws {
         let recordingFixture = try AppControlledRecordingFixture()
         defer { recordingFixture.cleanup() }
@@ -1312,6 +1338,9 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         }
         if let fixture {
             app.launchEnvironment["MA_NATIVE_APP_SMOKE_FIXTURE"] = fixture
+        }
+        if let workspaceURL {
+            app.launchEnvironment["MEETING_ASSISTANT_WORKSPACE"] = workspaceURL.path
         }
         if let workspaceURL, let sessionID {
             app.launchEnvironment["MA_NATIVE_TRANSCRIPT_WORKSPACE"] = workspaceURL.path
@@ -2674,6 +2703,46 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         let digest = SHA256.hash(data: data)
         let hex = digest.map { String(format: "%02x", $0) }.joined()
         return "sha256:\(hex)"
+    }
+}
+
+private final class AppWorkspaceRecoveryFixture {
+    let rootURL: URL
+    let workspaceURL: URL
+    let sessionID = "session-app-workspace-retry"
+
+    init() throws {
+        rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ma-native-app-workspace-retry-\(UUID().uuidString)", isDirectory: true)
+        workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        try Data("not a workspace directory".utf8).write(to: workspaceURL)
+    }
+
+    func recover() throws {
+        try FileManager.default.removeItem(at: workspaceURL)
+        let sessionRoot = workspaceURL
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+        try FileManager.default.createDirectory(at: sessionRoot, withIntermediateDirectories: true)
+        let payload: [String: Any] = [
+            "id": sessionID,
+            "title": "Recovered workspace meeting",
+            "status": "recorded",
+            "started_at": "2026-07-17T00:00:00Z",
+            "ended_at": "2026-07-17T00:05:00Z",
+            "updated_at": "2026-07-17T00:05:00Z",
+            "artifacts": [],
+        ]
+        let data = try JSONSerialization.data(
+            withJSONObject: payload,
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        try data.write(to: sessionRoot.appendingPathComponent("session.json", isDirectory: false))
+    }
+
+    func cleanup() {
+        try? FileManager.default.removeItem(at: rootURL)
     }
 }
 

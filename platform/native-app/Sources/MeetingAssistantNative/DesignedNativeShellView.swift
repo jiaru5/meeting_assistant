@@ -47,6 +47,8 @@ public enum MeetingTaskAccessibilityID {
     public static let newRecordingButton = "ma.meetings.newRecordingButton"
     public static let recentMeetings = "ma.meetings.recent"
     public static let workspaceNotice = "ma.meetings.notice"
+    public static let refreshMeetings = "ma.meetings.refresh"
+    public static let workspaceDiagnostics = "ma.meetings.diagnostics"
     public static let newRecordingHeading = "ma.newRecording.heading"
     public static let titleField = "ma.newRecording.titleField"
     public static let target = "ma.newRecording.target.screen"
@@ -804,12 +806,7 @@ public struct DesignedNativeShellView: View {
             }
 
             if let workspaceError = coordinator.workspaceError {
-                recoveryCard(
-                    title: "Your meetings could not be loaded",
-                    message: "Nothing was changed. Open Diagnostics to check the local workspace, then try again. \(workspaceError)",
-                    actionTitle: "Open diagnostics",
-                    action: { coordinator.navigate(to: .diagnostics) }
-                )
+                workspaceRecoveryCard(workspaceError)
             }
 
             if coordinator.sessionsAreLoading, coordinator.recentSessions.isEmpty {
@@ -1878,6 +1875,37 @@ public struct DesignedNativeShellView: View {
                 Button(actionTitle, action: action)
                     .buttonStyle(.borderedProminent)
                     .focused($keyboardFocus, equals: .primaryAction)
+            }
+        }
+        .cardStyle()
+    }
+
+    private func workspaceRecoveryCard(_ workspaceError: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Your meetings could not be loaded", systemImage: "exclamationmark.triangle.fill")
+                .font(.headline)
+                .foregroundStyle(.orange)
+            Text(
+                "Nothing was changed. Try again after checking the local workspace, or open Diagnostics for details. \(workspaceError)"
+            )
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 10) {
+                Button("Try again") {
+                    Task {
+                        await coordinator.refreshSessions()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(coordinator.sessionsAreLoading)
+                .focused($keyboardFocus, equals: .primaryAction)
+                .accessibilityIdentifier(MeetingTaskAccessibilityID.refreshMeetings)
+
+                Button("Open diagnostics") {
+                    coordinator.navigate(to: .diagnostics)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier(MeetingTaskAccessibilityID.workspaceDiagnostics)
             }
         }
         .cardStyle()

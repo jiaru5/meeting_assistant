@@ -22,6 +22,8 @@ struct DesignedNativeShellViewModelTests {
         #expect(MeetingTaskAccessibilityID.navigation == "ma.shell.navigation")
         #expect(MeetingTaskAccessibilityID.meetingsHeading == "ma.meetings.heading")
         #expect(MeetingTaskAccessibilityID.newRecordingButton == "ma.meetings.newRecordingButton")
+        #expect(MeetingTaskAccessibilityID.refreshMeetings == "ma.meetings.refresh")
+        #expect(MeetingTaskAccessibilityID.workspaceDiagnostics == "ma.meetings.diagnostics")
         #expect(MeetingTaskAccessibilityID.newRecordingHeading == "ma.newRecording.heading")
         #expect(MeetingTaskAccessibilityID.titleField == "ma.newRecording.titleField")
         #expect(MeetingTaskAccessibilityID.detailHeading == "ma.meetingDetail.heading")
