@@ -353,7 +353,10 @@ def wait_for_export(transcript: str, timeout: int) -> str:
     technical_details_revealed = False
     while time.monotonic() < deadline:
         text = snapshot(timeout=120)
-        if "Export complete." not in text:
+        if (
+            "identifier=ma.transcriptAction.success" not in text
+            or "value=Transcript exported." not in text
+        ):
             time.sleep(0.5)
             continue
         observed_export_path = exported_path_from_snapshot(text)
@@ -368,7 +371,7 @@ def wait_for_export(transcript: str, timeout: int) -> str:
         if actual_export_path.is_file():
             content = actual_export_path.read_text(encoding="utf-8", errors="replace")
             validate_action_content(content, transcript, "exported markdown")
-            checked_markers.append("Export complete.")
+            checked_markers.append("Transcript exported.")
             return content
         time.sleep(0.5)
     raise SmokeFailure("export_missing", f"expected export file is missing after Save Panel export: {actual_export_path}")
