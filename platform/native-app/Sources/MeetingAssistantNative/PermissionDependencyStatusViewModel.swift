@@ -207,16 +207,22 @@ public struct PermissionDependencyStatusState: Equatable, Sendable {
         )
     }
 
+    public func hasUnconfirmedCapturePermissions(captureMicrophoneAudio: Bool) -> Bool {
+        let relevantPermissionIDs = Self.capturePermissionIDs(
+            captureMicrophoneAudio: captureMicrophoneAudio
+        )
+        return permissions.contains {
+            relevantPermissionIDs.contains($0.id) && $0.state == .notConfirmed
+        }
+    }
+
     public func summary(captureMicrophoneAudio: Bool) -> String {
         guard phase == .ready || phase == .blocked else {
             return summary
         }
-        let relevantPermissionIDs: Set<String> = captureMicrophoneAudio
-            ? [
-                NativePermissionRepairDestination.screenRecording.permissionID,
-                NativePermissionRepairDestination.microphone.permissionID,
-            ]
-            : [NativePermissionRepairDestination.screenRecording.permissionID]
+        let relevantPermissionIDs = Self.capturePermissionIDs(
+            captureMicrophoneAudio: captureMicrophoneAudio
+        )
         let relevantPermissions = permissions.filter {
             relevantPermissionIDs.contains($0.id)
         }
@@ -432,6 +438,16 @@ public struct PermissionDependencyStatusState: Equatable, Sendable {
             $0.id == NativePermissionRepairDestination.microphone.permissionID && $0.state == .denied
         }
         return !captureMicrophoneAudio || !microphoneDenied
+    }
+
+    private static func capturePermissionIDs(captureMicrophoneAudio: Bool) -> Set<String> {
+        if captureMicrophoneAudio {
+            return [
+                NativePermissionRepairDestination.screenRecording.permissionID,
+                NativePermissionRepairDestination.microphone.permissionID,
+            ]
+        }
+        return [NativePermissionRepairDestination.screenRecording.permissionID]
     }
 
     private static func processingChecksPass(

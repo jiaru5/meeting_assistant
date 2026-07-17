@@ -543,8 +543,15 @@ public struct DesignedNativeShellView: View {
     }
 
     private func handleReadinessAccessibilityChange(_ phase: PermissionDependencyPhase) {
-        if captureIsReady, phase != .checking {
+        if captureIsReady, !capturePermissionsNeedConfirmation, phase != .checking {
             postMeetingAccessibilityAnnouncement("Ready to record.", priority: .high)
+            return
+        }
+        if captureIsReady, capturePermissionsNeedConfirmation, phase != .checking {
+            postMeetingAccessibilityAnnouncement(
+                "Recording permission will be confirmed when you start. \(readinessMessage)",
+                priority: .high
+            )
             return
         }
         switch phase {
@@ -1901,6 +1908,9 @@ public struct DesignedNativeShellView: View {
     }
 
     private var readinessTitle: String {
+        if capturePermissionsNeedConfirmation && captureIsReady {
+            return "Confirm recording permission"
+        }
         if captureIsReady {
             return "Ready to record"
         }
@@ -1919,6 +1929,9 @@ public struct DesignedNativeShellView: View {
     }
 
     private var readinessMessage: String {
+        if capturePermissionsNeedConfirmation && captureIsReady {
+            return "Start recording will ask macOS to confirm access for your current screen and audio choices. You can start now; if access is missing, your settings stay unchanged and Meeting Assistant will show how to fix it."
+        }
         if captureIsReady {
             if permissionViewModel.state.canRunProcessing {
                 return "Your current screen and audio choices are ready."
@@ -1940,6 +1953,9 @@ public struct DesignedNativeShellView: View {
     }
 
     private var readinessIcon: String {
+        if capturePermissionsNeedConfirmation && captureIsReady {
+            return "exclamationmark.circle.fill"
+        }
         if captureIsReady {
             return "checkmark.circle.fill"
         }
@@ -1956,6 +1972,9 @@ public struct DesignedNativeShellView: View {
     }
 
     private var readinessColor: Color {
+        if capturePermissionsNeedConfirmation && captureIsReady {
+            return .orange
+        }
         if captureIsReady {
             return .green
         }
@@ -1971,6 +1990,12 @@ public struct DesignedNativeShellView: View {
 
     private var captureIsReady: Bool {
         permissionViewModel.state.canStartRecording(
+            captureMicrophoneAudio: coordinator.recordingDraft.captureMicrophoneAudio
+        )
+    }
+
+    private var capturePermissionsNeedConfirmation: Bool {
+        permissionViewModel.state.hasUnconfirmedCapturePermissions(
             captureMicrophoneAudio: coordinator.recordingDraft.captureMicrophoneAudio
         )
     }

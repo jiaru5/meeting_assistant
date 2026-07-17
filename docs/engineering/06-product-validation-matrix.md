@@ -583,6 +583,12 @@
 
 2026-07-14 同批次工具链信任边界追加：真实 task evidence 不再接受五类 `MA_NATIVE_APP_*_TOOL`、`PATH` 中的 Python/Git/hash 替身，或 `PYTHONHOME` / `PYTHONPATH` / user-site / `sitecustomize` 注入。wrapper 用固定 `/usr/bin/python3 -I -S` 执行锁、哈希、冻结与同 bytes loader，用固定 `/usr/bin/xcrun` 解析实际 Python runtime、Xcode `xcodebuild` / `xcresulttool`，连同固定 `/usr/bin/env`、`xcrun`、`codesign`、`git`、`sips` 全部要求 Apple-anchor verified，并把调用 path、resolved path 与 SHA-256 同时写入 pre-test binding 与最终 report；三个 MVP.1 证据脚本的直接 executable 入口也固定隔离 Python。Git 子进程使用最小环境清除 repo/worktree/index/object 重定向，VoiceOver/键盘入口会重新核对该 trusted toolchain。fixture 模式允许单元测试替身，但固定 `passed=false`。该加固只防止工具注入伪绿，不新增 17 条 test body、截图视觉审查或人工体验证据，`PV-MA-014` 继续保持 `partial`。
 
+## 2026-07-17 录制权限未确认状态与 ScreenCaptureKit bundle 声明复核
+
+| 证据批次 | 关联验证项 | 本轮自动化证据 | 状态影响与边界 |
+|---|---|---|---|
+| 本轮 `develop` permission-readiness clarification | `PV-MA-001`; `TDG-MA-004`; 回归 `VS-MA-30` 的任务文案/可访问性表面 | 既有 unknown-permission 语义不变：用户仍可 Start 以触发 macOS 授权，最终未获授权仍由 native command/capture 层 fail closed。`PermissionDependencyStatusState.hasUnconfirmedCapturePermissions` 仅把相关 Screen Recording（以及用户已请求麦克风时的 Microphone）unknown 状态从绿色 `Ready to record` 分离为橙色 `Confirm recording permission`，Start 保持 enabled；Swift Testing 覆盖 screen unknown 和 microphone intent-aware 判定，hosted native smoke source-contract 覆盖可见/VoiceOver 文案。`AppBundleLocatorSmokeTests.testUnconfirmedScreenRecordingPermissionKeepsStartEnabledWithoutClaimingReady` 在最终显式 `App/Info.plist` 配置下通过 1/1。此前自动生成 Info.plist 的 build setting 未进入实际 bundle，因此 app target 改为 Debug/Release 共用显式 `App/Info.plist`；`architecture.sh` 验证两个配置和非空 `NSMicrophoneUsageDescription` / `NSScreenCaptureUsageDescription`。干净 Debug build 实际读取到两个 key，`./platform/native-app/scripts/test.sh`、`./platform/native-app/scripts/architecture.sh`、`./scripts/project-manifest-check.sh current` 均通过。 | 证明 unknown 权限不会再视觉误报为已准备好，并且 ScreenCaptureKit 所需的 `NSScreenCaptureUsageDescription` 已进入实际 app bundle；不改变 command、权限判定、默认录制行为或已覆盖的 `PV-MA-001` 关闭口径。该自动化证据不替代 `PV-MA-014` 的截图人工视觉审查、真实 VoiceOver/键盘走查或 3–5 名真人研究；它们仍保持 `partial`，不得据此声称体验验收完成。 |
+
 ## 标准验证命令目标
 
 ```bash

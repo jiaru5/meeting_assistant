@@ -584,6 +584,7 @@ grep -R -q "isTranscriptActionClientTestHookAllowed" App/MeetingAssistantNativeA
 grep -R -q "#if DEBUG" App/MeetingAssistantNativeApp.swift
 grep -q "SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;" MeetingAssistantNative.xcodeproj/project.pbxproj
 python3 - <<'PY'
+import plistlib
 import re
 from pathlib import Path
 
@@ -624,14 +625,35 @@ app_settings = [
 if len(app_settings) != 2:
     raise SystemExit("native-app architecture check failed: expected Debug and Release app target configurations.")
 
-missing_microphone_usage = [
+invalid_info_plist_settings = [
     settings
     for settings in app_settings
-    if "INFOPLIST_KEY_NSMicrophoneUsageDescription" not in settings
+    if "GENERATE_INFOPLIST_FILE = NO;" not in settings
+    or "INFOPLIST_FILE = App/Info.plist;" not in settings
 ]
-if missing_microphone_usage:
+if invalid_info_plist_settings:
     raise SystemExit(
-        "native-app architecture check failed: app target must declare NSMicrophoneUsageDescription so macOS can prompt for microphone permission."
+        "native-app architecture check failed: Debug and Release app targets must use the explicit App/Info.plist."
+    )
+
+info_plist_path = Path("App/Info.plist")
+with info_plist_path.open("rb") as info_plist_file:
+    info_plist = plistlib.load(info_plist_file)
+
+required_usage_description_keys = {
+    "NSMicrophoneUsageDescription",
+    "NSScreenCaptureUsageDescription",
+}
+missing_usage_descriptions = sorted(
+    key
+    for key in required_usage_description_keys
+    if not isinstance(info_plist.get(key), str) or not info_plist[key].strip()
+)
+if missing_usage_descriptions:
+    missing_keys = ", ".join(missing_usage_descriptions)
+    raise SystemExit(
+        "native-app architecture check failed: App/Info.plist must declare non-empty macOS permission usage descriptions: "
+        + missing_keys
     )
 
 scheme = Path("MeetingAssistantNative.xcodeproj/xcshareddata/xcschemes/MeetingAssistantNative.xcscheme").read_text(encoding="utf-8")

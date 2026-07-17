@@ -249,10 +249,31 @@ struct PermissionDependencyStatusViewModelTests {
         #expect(state.canStartRecording == true)
         #expect(state.permissions.first?.state == .notConfirmed)
         #expect(state.hasUnconfirmedOrDeniedPermissions)
+        #expect(state.hasUnconfirmedCapturePermissions(captureMicrophoneAudio: false))
+        #expect(state.hasUnconfirmedCapturePermissions(captureMicrophoneAudio: true))
         #expect(
             state.summary ==
                 "Recording can be started to confirm macOS permissions; denied permissions still fail closed."
         )
+    }
+
+    @Test
+    func unconfirmedMicrophoneOnlyNeedsConfirmationWhenMicrophoneIntentIsEnabled() {
+        let state = PermissionDependencyStatusState.from(
+            dependencyResponse(
+                ok: true,
+                checks: passingCaptureDependencyChecks + [
+                    check("permission.screen_recording", status: "granted", required: false, ok: true),
+                    check("permission.microphone", status: "unknown", required: false, ok: true),
+                    check("media_tool.ffmpeg", status: "available", required: true, ok: true),
+                ]
+            )
+        )
+
+        #expect(state.canStartRecording(captureMicrophoneAudio: false))
+        #expect(state.canStartRecording(captureMicrophoneAudio: true))
+        #expect(!state.hasUnconfirmedCapturePermissions(captureMicrophoneAudio: false))
+        #expect(state.hasUnconfirmedCapturePermissions(captureMicrophoneAudio: true))
     }
 
     @Test
@@ -274,6 +295,8 @@ struct PermissionDependencyStatusViewModelTests {
         #expect(state.canRunProcessing == true)
         #expect(state.canStartRecording == true)
         #expect(state.hasUnconfirmedOrDeniedPermissions == false)
+        #expect(state.hasUnconfirmedCapturePermissions(captureMicrophoneAudio: false) == false)
+        #expect(state.hasUnconfirmedCapturePermissions(captureMicrophoneAudio: true) == false)
         #expect(state.summary == "Permissions and required dependencies are ready.")
     }
 

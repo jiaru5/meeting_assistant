@@ -1638,6 +1638,20 @@ private struct NativeControlPlaneFixtureConfiguration {
                 exportDestinationPath: "/tmp/ready-fixture-transcript.md",
                 workspaceDir: nil
             )
+        case "permission-unconfirmed":
+            return NativeControlPlaneFixtureConfiguration(
+                dependencyResponse: .unconfirmedScreenRecordingFixture,
+                recordingScript: .success,
+                processingTranscriptScript: .success(),
+                processingSpeakerLabelsScript: .success(),
+                processingClientMode: processingClientMode,
+                sessionID: "session-app-ui-permission-unconfirmed",
+                transcriptInput: .missingFixture,
+                exportScript: .success(content: "Unconfirmed permission fixture transcript content."),
+                deleteScript: .success(),
+                exportDestinationPath: "/tmp/unconfirmed-permission-fixture-transcript.md",
+                workspaceDir: nil
+            )
         case "capture-ready-processing-blocked":
             return NativeControlPlaneFixtureConfiguration(
                 dependencyResponse: .captureReadyProcessingBlockedFixture,
@@ -2616,6 +2630,23 @@ private extension DependencyCheckResponse {
                 message: "No automatic dependency download was attempted."
             ),
         ]
+    )
+
+    static let unconfirmedScreenRecordingFixture = DependencyCheckResponse(
+        ok: true,
+        requestID: "local-app-permission-unconfirmed",
+        checks: readyFixture.checks.map { check in
+            guard check.id == "permission.screen_recording" else {
+                return check
+            }
+            return DependencyCheckItem(
+                id: check.id,
+                status: "unknown",
+                required: check.required,
+                ok: true,
+                message: "Screen Recording permission will be confirmed when recording starts."
+            )
+        }
     )
 
     static let captureReadyProcessingBlockedFixture = DependencyCheckResponse(

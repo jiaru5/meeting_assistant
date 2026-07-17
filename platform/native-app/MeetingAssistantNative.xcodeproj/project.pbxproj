@@ -90,8 +90,9 @@
 			B00000000000000000000032 /* DesignedNativeShellViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignedNativeShellViewModel.swift; sourceTree = "<group>"; };
 			B00000000000000000000033 /* DesignedNativeShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignedNativeShellView.swift; sourceTree = "<group>"; };
 			B00000000000000000000034 /* DesignedNativeShellAppBundleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignedNativeShellAppBundleTests.swift; sourceTree = "<group>"; };
-			B00000000000000000000036 /* MeetingSessionWorkspaceRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingSessionWorkspaceRepository.swift; sourceTree = "<group>"; };
-			B00000000000000000000037 /* MeetingWorkspaceCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingWorkspaceCoordinator.swift; sourceTree = "<group>"; };
+		B00000000000000000000036 /* MeetingSessionWorkspaceRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingSessionWorkspaceRepository.swift; sourceTree = "<group>"; };
+		B00000000000000000000037 /* MeetingWorkspaceCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingWorkspaceCoordinator.swift; sourceTree = "<group>"; };
+		B00000000000000000000038 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -135,6 +136,7 @@
 			isa = PBXGroup;
 			children = (
 				B00000000000000000000001 /* MeetingAssistantNativeApp.swift */,
+				B00000000000000000000038 /* Info.plist */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -374,11 +376,8 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Meeting Assistant Native";
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Meeting Assistant Native records microphone audio only when local meeting recording requests microphone capture.";
-				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/Info.plist;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "local.meeting-assistant.native";
@@ -397,11 +396,8 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Meeting Assistant Native";
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Meeting Assistant Native records microphone audio only when local meeting recording requests microphone capture.";
-				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/Info.plist;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "local.meeting-assistant.native";

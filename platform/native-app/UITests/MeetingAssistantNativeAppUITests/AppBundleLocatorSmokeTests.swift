@@ -71,6 +71,16 @@ final class AppBundleLocatorSmokeTests: XCTestCase {
         assertElement("ma.recording.savedSummary", in: app, contains: "Saved 2 recording artifacts.")
     }
 
+    func testUnconfirmedScreenRecordingPermissionKeepsStartEnabledWithoutClaimingReady() {
+        let app = launchApp(fixture: "permission-unconfirmed")
+
+        ensureNewRecordingRoute(in: app)
+        assertElement("ma.newRecording.readiness", in: app, contains: "Confirm recording permission")
+        assertElement("ma.newRecording.readiness", in: app, contains: "Start recording will ask macOS")
+        assertElement("ma.newRecording.readiness", in: app, doesNotContain: "Ready to record")
+        XCTAssertTrue(button("ma.recording.startButton", in: app).isEnabled)
+    }
+
     func testControlledNativeRecordingClientWritesSessionArtifactsFromLaunchedAppBundle() throws {
         let recordingFixture = try AppControlledRecordingFixture()
         defer { recordingFixture.cleanup() }
