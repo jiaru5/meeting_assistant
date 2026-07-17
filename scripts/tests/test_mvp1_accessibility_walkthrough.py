@@ -843,9 +843,91 @@ class MVP1AccessibilityWalkthroughTests(unittest.TestCase):
         self.assertIn("`page_heading`", guide)
         self.assertIn("`delete_prompt_focus_and_return_cancel`", guide)
         self.assertIn("不会写入文件", guide)
-        self.assertIn("阻断", guide)
+        self.assertIn("待真人填写", guide)
+        self.assertIn("未完成的真人记录会让 `validate` 显示阻断", guide)
         self.assertIn(f"validate {walkthrough_path} --format text", guide)
         self.assertFalse(walkthrough["observer_attestation"]["confirmed"])
+
+    def test_current_commit_uses_trusted_git_and_clean_environment(self) -> None:
+        expected_commit = "a" * 40
+        completed = mock.Mock(returncode=0, stdout=expected_commit + "\n")
+        expected_environment = {
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "HOME": "/var/empty",
+            "LANG": "C",
+            "PATH": "/usr/bin:/bin",
+        }
+
+        with mock.patch.object(self.module.subprocess, "run", return_value=completed) as run:
+            self.assertEqual(expected_commit, self.module.current_commit())
+
+        self.assertEqual(str(self.module.TRUSTED_GIT), run.call_args.args[0][0])
+        self.assertEqual(expected_environment, self.module.clean_git_environment())
+        self.assertEqual(expected_environment, run.call_args.kwargs["env"])
+        self.assertEqual(5, run.call_args.kwargs["timeout"])
+
+    def test_current_commit_ignores_a_git_executable_in_the_caller_path(self) -> None:
+        fake_git = self.base / "git"
+        fake_commit = "b" * 40
+        fake_git.write_text(
+            f"#!/bin/sh\nprintf '%s\\n' '{fake_commit}'\n", encoding="utf-8"
+        )
+        fake_git.chmod(0o755)
+
+        with mock.patch.dict(os.environ, {"PATH": str(self.base)}, clear=False):
+            self.assertEqual(self.subject_commit, self.module.current_commit())
+
+    def test_current_commit_ignores_hostile_caller_git_overrides(self) -> None:
+        hostile_environment = {
+            "GIT_DIR": str(self.base / "not-a-repository"),
+            "GIT_WORK_TREE": str(self.base),
+            "GIT_INDEX_FILE": str(self.base / "hostile-index"),
+            "GIT_OBJECT_DIRECTORY": str(self.base / "hostile-objects"),
+            "GIT_CONFIG_GLOBAL": str(self.base / "hostile-gitconfig"),
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "core.hooksPath",
+            "GIT_CONFIG_VALUE_0": str(self.base),
+        }
+
+        with mock.patch.dict(os.environ, hostile_environment, clear=False):
+            self.assertEqual(self.subject_commit, self.module.current_commit())
+
+    def test_guide_marks_malformed_or_open_p1_records_as_blocked(self) -> None:
+        malformed = self.template()
+        malformed["checks"][0]["result"] = "invented"
+        open_p1 = self.template()
+        open_p1["findings"] = [
+            {
+                "finding_id": "A11Y-GUIDE-P1",
+                "severity": "P1",
+                "status": "open",
+                "summary": "Keyboard focus cannot reach the recovery action.",
+                "check_ids": ["route_and_session_focus"],
+            }
+        ]
+
+        for label, walkthrough in (("malformed", malformed), ("open-p1", open_p1)):
+            with self.subTest(label=label):
+                walkthrough_path = self.base / f"{label}-guide.json"
+                walkthrough_path.write_text(json.dumps(walkthrough), encoding="utf-8")
+                original_bytes = walkthrough_path.read_bytes()
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    result = self.module.main(
+                        [
+                            "guide",
+                            str(walkthrough_path),
+                            "--codesign-tool",
+                            str(self.fake_codesign),
+                        ]
+                    )
+
+                guide = stdout.getvalue()
+                self.assertEqual(0, result)
+                self.assertEqual(original_bytes, walkthrough_path.read_bytes())
+                self.assertIn("当前校验状态：**阻断", guide)
+                self.assertNotIn("待真人填写", guide)
+                self.assertIn("当前 JSON 不只是初始空白模板", guide)
 
     def test_guide_rejects_invalid_json_without_writing(self) -> None:
         walkthrough_path = self.base / "invalid-guide.json"

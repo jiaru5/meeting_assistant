@@ -41,6 +41,7 @@ NON_HUMAN_ATTESTOR_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _CURRENT_COMMIT_UNSET = object()
+TRUSTED_GIT = "/usr/bin/git"
 ATTESTATION_STATEMENT = (
     "I manually observed a real human participant perform these tasks; no agent, "
     "automation, screenshot, or XCUITest result is being counted as this participant."
@@ -73,15 +74,26 @@ def repo_root_from_script() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def clean_git_environment() -> dict[str, str]:
+    """Run Git without caller-controlled configuration or executable lookup."""
+    return {
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "HOME": "/var/empty",
+        "LANG": "C",
+        "PATH": "/usr/bin:/bin",
+    }
+
+
 def current_commit(root: Path | None = None) -> str | None:
     repository = root if root is not None else repo_root_from_script()
     try:
         completed = subprocess.run(
-            ["git", "-C", str(repository), "rev-parse", "HEAD"],
+            [TRUSTED_GIT, "-C", str(repository), "rev-parse", "HEAD"],
             text=True,
             capture_output=True,
             check=False,
             timeout=5,
+            env=clean_git_environment(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -941,13 +953,68 @@ def render_markdown(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def render_guide(report: dict[str, Any], *, source: str) -> str:
+def _is_pristine_unattested_template(study: Any, report: dict[str, Any]) -> bool:
+    """Recognize only the exact initial template, never a partly broken record.
+
+    ``validate`` deliberately treats blank task fields and attestations as
+    blocking.  The guide may label that one known-safe initial state as waiting
+    for a human, but it must not hide malformed JSON, findings, or a partly
+    entered record behind the same status.
+    """
+    checks = report.get("checks")
+    if not isinstance(study, dict) or not isinstance(checks, dict):
+        return False
+    if not all(
+        (
+            checks.get("participant_count_valid") is True,
+            checks.get("subject_commit_matches_current_commit") is True,
+            checks.get("no_open_p0_p1_findings") is True,
+            checks.get("closed_p0_p1_manual_retest_valid") is True,
+        )
+    ):
+        return False
+
+    participants = study.get("participants")
+    subject_commit = study.get("subject_commit")
+    study_id = study.get("study_id")
+    if (
+        not isinstance(participants, list)
+        or not isinstance(subject_commit, str)
+        or not isinstance(study_id, str)
+    ):
+        return False
+    try:
+        expected_template = build_template(
+            len(participants),
+            subject_commit=subject_commit,
+            study_id=study_id,
+        )
+    except StudyToolError:
+        return False
+    return study == expected_template
+
+
+def render_guide(
+    report: dict[str, Any],
+    *,
+    source: str,
+    pristine_unattested_template: bool = False,
+) -> str:
     """Render instructions only; this must never create or attest evidence."""
-    status = (
-        "可进入人工评审"
-        if report["ready_for_review"]
-        else "阻断（请先修复绑定、结构或未填写的真人记录）"
-    )
+    if report["ready_for_review"]:
+        status = "可进入人工评审"
+        validation_explanation = "- 当前 JSON 已通过结构校验；仍须由人工评审，不等于产品验收。"
+    elif pristine_unattested_template:
+        status = "待真人填写（当前提交绑定有效；未填写时校验显示阻断是预期保护）"
+        validation_explanation = (
+            "- 未完成的真人记录会让 `validate` 显示阻断；这是防止空白模板被误当成证据的预期保护。"
+        )
+    else:
+        status = "阻断（请先修复提交绑定、JSON 结构、finding 或未完成的记录）"
+        validation_explanation = (
+            "- 当前 JSON 不只是初始空白模板；请先修复绑定、结构、finding 或不完整记录，"
+            "再运行 `validate`。"
+        )
     validate_command = (
         "./scripts/mvp1-experience-study.py validate "
         f"{shlex.quote(source)} --format text"
@@ -961,11 +1028,7 @@ def render_guide(report: dict[str, Any], *, source: str) -> str:
             "- 本命令只读取并说明现有 JSON；不会写入文件、不会自动填写任务，"
             "也不会把任何 attestation 设为 confirmed。"
         ),
-        (
-            "- 状态为阻断时，本指南仍可用于补齐记录，但该 JSON 不能被当作有效的当前真人证据。"
-            if not report["ready_for_review"]
-            else "- 当前 JSON 已通过结构校验；仍须由人工评审，不等于产品验收。"
-        ),
+        validation_explanation,
         "",
         "## 开始前",
         "",
@@ -1429,7 +1492,14 @@ def main(argv: list[str]) -> int:
             require_current_commit=require_current_commit,
             expected_current_commit=expected_current_commit,
         )
-        print(render_guide(report, source=str(study_path)), end="")
+        print(
+            render_guide(
+                report,
+                source=str(study_path),
+                pristine_unattested_template=_is_pristine_unattested_template(study, report),
+            ),
+            end="",
+        )
         return 0
 
     study_path = _resolve_path(args.study)

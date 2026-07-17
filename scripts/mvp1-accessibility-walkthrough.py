@@ -133,16 +133,28 @@ def repo_root_from_script() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def clean_git_environment() -> dict[str, str]:
+    """Run Git without caller-controlled configuration or executable lookup."""
+    return {
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "HOME": "/var/empty",
+        "LANG": "C",
+        "PATH": "/usr/bin:/bin",
+    }
+
+
 def current_commit(root: Path | None = None) -> str | None:
     repository = root if root is not None else repo_root_from_script()
     try:
         completed = subprocess.run(
-            ["git", "-C", str(repository), "rev-parse", "HEAD"],
+            [str(TRUSTED_GIT), "-C", str(repository), "rev-parse", "HEAD"],
             text=True,
             capture_output=True,
             check=False,
+            timeout=5,
+            env=clean_git_environment(),
         )
-    except OSError:
+    except (OSError, subprocess.SubprocessError):
         return None
     if completed.returncode != 0:
         return None
@@ -1454,13 +1466,58 @@ def render_markdown(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def render_guide(report: dict[str, Any], *, source: str) -> str:
-    """Render instructions only; this must never create or attest evidence."""
-    status = (
-        "可进入人工评审"
-        if report["ready_for_review"]
-        else "阻断（请先修复绑定、结构或未填写的真人记录）"
+def _is_pristine_unattested_template(walkthrough: Any, report: dict[str, Any]) -> bool:
+    """Recognize only the exact initial walkthrough state as pending human work."""
+    checks = report.get("checks")
+    if not isinstance(walkthrough, dict) or not isinstance(checks, dict):
+        return False
+    if not all(
+        (
+            checks.get("structure_valid") is True,
+            checks.get("subject_binding_valid") is True,
+            checks.get("failed_checks_tracked") is True,
+            checks.get("closed_p0_p1_resolution_and_retest_valid") is True,
+            checks.get("no_open_p0_p1_findings") is True,
+        )
+    ):
+        return False
+    return (
+        walkthrough.get("observer_attestation")
+        == {
+            "confirmed": False,
+            "attested_at": None,
+            "attested_by_role": None,
+            "statement": ATTESTATION_STATEMENT,
+            "synthetic_data_confirmed": False,
+            "privacy_statement": PRIVACY_ATTESTATION_STATEMENT,
+        }
+        and walkthrough.get("checks")
+        == [check_template(check_id) for check_id in CHECK_IDS]
+        and walkthrough.get("findings") == []
     )
+
+
+def render_guide(
+    report: dict[str, Any],
+    *,
+    source: str,
+    pristine_unattested_template: bool = False,
+) -> str:
+    """Render instructions only; this must never create or attest evidence."""
+    if report["ready_for_review"]:
+        status = "可进入人工评审"
+        validation_explanation = "- 当前 JSON 已通过结构校验；仍须由人工评审，不等于产品验收。"
+    elif pristine_unattested_template:
+        status = "待真人填写（绑定有效；未填写时校验显示阻断是预期保护）"
+        validation_explanation = (
+            "- 未完成的真人记录会让 `validate` 显示阻断；这是防止空白模板被误当成证据的预期保护。"
+        )
+    else:
+        status = "阻断（请先修复绑定、JSON 结构、finding 或未完成的记录）"
+        validation_explanation = (
+            "- 当前 JSON 不只是初始空白模板；请先修复绑定、结构、finding 或不完整记录，"
+            "再运行 `validate`。"
+        )
     validate_command = (
         "./scripts/mvp1-accessibility-walkthrough.py validate "
         f"{shlex.quote(source)} --format text"
@@ -1476,11 +1533,7 @@ def render_guide(report: dict[str, Any], *, source: str) -> str:
             "- 本命令只读取并复核现有 JSON；不会写入文件、不会自动填写检查，"
             "也不会把 observer_attestation 设为 confirmed。"
         ),
-        (
-            "- 状态为阻断时，本指南仍可用于补齐记录，但该 JSON 不能被当作有效的当前真人证据。"
-            if not report["ready_for_review"]
-            else "- 当前 JSON 已通过结构校验；仍须由人工评审，不等于产品验收。"
-        ),
+        validation_explanation,
         "",
         "## 开始前",
         "",
@@ -1726,7 +1779,16 @@ def main(argv: list[str]) -> int:
             source=str(walkthrough_path),
             codesign_tool=args.codesign_tool,
         )
-        print(render_guide(report, source=str(walkthrough_path)), end="")
+        print(
+            render_guide(
+                report,
+                source=str(walkthrough_path),
+                pristine_unattested_template=_is_pristine_unattested_template(
+                    walkthrough, report
+                ),
+            ),
+            end="",
+        )
         return 0
 
     report = _load_report(args.walkthrough, codesign_tool=args.codesign_tool)

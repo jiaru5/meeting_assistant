@@ -842,6 +842,56 @@ class MVP1ExperienceStudyTests(unittest.TestCase):
         with mock.patch.object(self.module.subprocess, "run", side_effect=OSError("git unavailable")):
             self.assertIsNone(self.module.current_commit())
 
+    def test_current_commit_uses_trusted_git_and_clean_environment(self) -> None:
+        expected_commit = "a" * 40
+        completed = mock.Mock(returncode=0, stdout=expected_commit + "\n")
+        expected_environment = {
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "HOME": "/var/empty",
+            "LANG": "C",
+            "PATH": "/usr/bin:/bin",
+        }
+
+        with mock.patch.object(self.module.subprocess, "run", return_value=completed) as run:
+            self.assertEqual(expected_commit, self.module.current_commit())
+
+        self.assertEqual(self.module.TRUSTED_GIT, run.call_args.args[0][0])
+        self.assertEqual(expected_environment, self.module.clean_git_environment())
+        self.assertEqual(expected_environment, run.call_args.kwargs["env"])
+        self.assertEqual(5, run.call_args.kwargs["timeout"])
+
+    def test_current_commit_ignores_a_git_executable_in_the_caller_path(self) -> None:
+        expected_commit = self.module.current_commit()
+        self.assertIsNotNone(expected_commit)
+
+        with tempfile.TemporaryDirectory() as directory:
+            fake_git = Path(directory) / "git"
+            fake_commit = "b" * 40
+            fake_git.write_text(
+                f"#!/bin/sh\nprintf '%s\\n' '{fake_commit}'\n", encoding="utf-8"
+            )
+            fake_git.chmod(0o755)
+
+            with mock.patch.dict(os.environ, {"PATH": directory}, clear=False):
+                self.assertEqual(expected_commit, self.module.current_commit())
+
+    def test_current_commit_ignores_hostile_caller_git_overrides(self) -> None:
+        expected_commit = self.module.current_commit()
+        self.assertIsNotNone(expected_commit)
+        hostile_environment = {
+            "GIT_DIR": str(Path(tempfile.gettempdir()) / "not-a-repository"),
+            "GIT_WORK_TREE": tempfile.gettempdir(),
+            "GIT_INDEX_FILE": str(Path(tempfile.gettempdir()) / "hostile-index"),
+            "GIT_OBJECT_DIRECTORY": str(Path(tempfile.gettempdir()) / "hostile-objects"),
+            "GIT_CONFIG_GLOBAL": str(Path(tempfile.gettempdir()) / "hostile-gitconfig"),
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "core.hooksPath",
+            "GIT_CONFIG_VALUE_0": tempfile.gettempdir(),
+        }
+
+        with mock.patch.dict(os.environ, hostile_environment, clear=False):
+            self.assertEqual(expected_commit, self.module.current_commit())
+
     def test_cli_require_current_commit_writes_blocked_report_on_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
@@ -924,9 +974,42 @@ class MVP1ExperienceStudyTests(unittest.TestCase):
             self.assertIn("`return_visit`", guide)
             self.assertIn("`failure_recovery`", guide)
             self.assertIn("不会写入文件", guide)
-            self.assertIn("阻断", guide)
+            self.assertIn("待真人填写", guide)
+            self.assertIn("未完成的真人记录会让 `validate` 显示阻断", guide)
             self.assertIn(f"validate {study_path} --format text", guide)
             self.assertFalse(template["participants"][0]["human_attestation"]["confirmed"])
+
+    def test_guide_marks_malformed_or_open_p1_current_records_as_blocked(self) -> None:
+        malformed = self.module.build_template(3, subject_commit="a" * 40)
+        malformed["participants"][0]["tasks"][0]["outcome"] = "invented"
+        open_p1 = self.module.build_template(3, subject_commit="a" * 40)
+        open_p1["findings"] = [
+            {
+                "finding_id": "F-GUIDE-P1",
+                "severity": "P1",
+                "status": "open",
+                "summary": "Participant could not identify the recovery action.",
+                "task_id": "failure_recovery",
+                "participant_ids": ["P01"],
+            }
+        ]
+
+        for label, study in (("malformed", malformed), ("open-p1", open_p1)):
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                study_path = Path(directory) / "study.json"
+                study_path.write_text(json.dumps(study), encoding="utf-8")
+                original_bytes = study_path.read_bytes()
+                stdout = io.StringIO()
+                with mock.patch.object(self.module, "current_commit", return_value="a" * 40):
+                    with contextlib.redirect_stdout(stdout):
+                        result = self.module.main(["guide", str(study_path)])
+
+                guide = stdout.getvalue()
+                self.assertEqual(0, result)
+                self.assertEqual(original_bytes, study_path.read_bytes())
+                self.assertIn("当前校验状态：**阻断", guide)
+                self.assertNotIn("待真人填写", guide)
+                self.assertIn("当前 JSON 不只是初始空白模板", guide)
 
     def test_guide_rejects_invalid_json_without_writing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
