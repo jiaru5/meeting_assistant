@@ -298,7 +298,7 @@ class TranscriptProcessingTests(unittest.TestCase):
             workspace = Path(tmp)
             session_dir = create_audio_session(workspace, [("mixed_audio", "mixed_audio.m4a", b"m4a-bytes")])
 
-            with mock.patch.dict(os.environ, {"PATH": ""}, clear=False):
+            with mock.patch.dict(os.environ, {"PATH": "", "MEETING_ASSISTANT_FFMPEG_PATH": ""}, clear=False):
                 response = run_generate_transcript("session-1", workspace=workspace)
 
             transcript_exists = (session_dir / "artifacts" / "transcript.json").exists()

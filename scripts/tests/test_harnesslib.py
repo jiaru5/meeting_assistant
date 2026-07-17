@@ -149,6 +149,40 @@ class HarnessValidationTests(unittest.TestCase):
 
             self.assertEqual(list(fixture.glob("platform/*/build")), [])
 
+    def test_prod_config_check_ignores_generated_platform_build_output(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            generated_output = fixture / "platform/native-app/build/generated-config.txt"
+            generated_output.parent.mkdir(parents=True)
+            generated_output.write_text("DEV_CURRENT=true\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/prod-config-check.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+    def test_prod_config_check_still_rejects_non_generated_platform_output(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.copy_repo_fixture(directory)
+            source_file = fixture / "platform/native-app/generated-config.txt"
+            source_file.write_text("DEV_CURRENT=true\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [str(fixture / "scripts/prod-config-check.sh")],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("production config surface contains dev-only settings", result.stderr)
+
     def init_git_baseline(self, fixture: Path) -> None:
         subprocess.run(["git", "init", "-b", "main"], cwd=fixture, check=True, capture_output=True, text=True)
         subprocess.run(["git", "config", "user.name", "Harness Test"], cwd=fixture, check=True)

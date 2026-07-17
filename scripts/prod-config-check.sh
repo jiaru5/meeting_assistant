@@ -16,7 +16,7 @@ if grep -n -E 'PASSWORD=.+|SECRET=.+|TOKEN=.+' .env.prod.example; then
   fail ".env.prod.example must not contain concrete secret values"
 fi
 
-if grep -R -n -E 'SPRING_PROFILES_ACTIVE=.*dev|NODE_ENV=.*development|DEV_CURRENT|FIXED_NOW' \
+if grep -R --exclude-dir=build -n -E 'SPRING_PROFILES_ACTIVE=.*dev|NODE_ENV=.*development|DEV_CURRENT|FIXED_NOW' \
   .env.prod.example docker-compose*.yml platform 2>/dev/null; then
   fail "production config surface contains dev-only settings"
 fi

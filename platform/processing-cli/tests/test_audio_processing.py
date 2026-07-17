@@ -568,6 +568,7 @@ class AudioProcessingTests(unittest.TestCase):
                 os.environ,
                 {
                     "PATH": str(bin_dir),
+                    "MEETING_ASSISTANT_FFMPEG_PATH": "",
                     "MEETING_ASSISTANT_FAKE_FFMPEG_OUTPUT": str(output_fixture),
                     "MEETING_ASSISTANT_FAKE_FFMPEG_ARGS": str(args_path),
                 },
@@ -637,6 +638,7 @@ class AudioProcessingTests(unittest.TestCase):
                 os.environ,
                 {
                     "PATH": str(bin_dir),
+                    "MEETING_ASSISTANT_FFMPEG_PATH": "",
                     "MEETING_ASSISTANT_FAKE_FFMPEG_OUTPUT": str(output_fixture),
                 },
                 clear=False,

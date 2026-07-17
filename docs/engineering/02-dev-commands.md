@@ -62,7 +62,7 @@
 | `dev-up.sh` | 使用 Docker Compose 启动本地集成依赖和已接入的服务 |
 | `dev-down.sh` | 停止本地集成环境，默认不删除数据卷 |
 | `db-migration-check.sh` | 对每个已接入服务验证 migration 可从空库执行 |
-| `prod-config-check.sh` | 检查生产 env 示例、默认 secret、profile 和 dev-only 配置隔离 |
+| `prod-config-check.sh` | 检查生产 env 示例、默认 secret、profile 和 dev-only 配置隔离；扫描 `platform/` 时排除已生成的 `build/` 输出，仍检查未跟踪的源码/配置改动 |
 | `product-validation-check.py` | 按 `current-phase`、`local-functional` 或 `release` 检查验证矩阵状态；当前阶段允许有 documented `partial/planned`，`local-functional` 要求当前 HEAD 有通过的 `local-direct-functional-preflight` report、当前 local-direct source bundle report、installed app/source app unsigned executable hash 绑定且保留 `not_release_readiness=true`，release 要求全部 `PV-*` 为 `covered` |
 | `spec-sync-check.sh` | 检查产品表面改动是否同步事实源和验证矩阵 |
 | `agent-workflow-check.sh` | 检查本次 diff 是否同步了必要 spec、测试、验证矩阵和工程规范 |
